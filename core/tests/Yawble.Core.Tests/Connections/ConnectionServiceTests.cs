@@ -227,7 +227,7 @@ public class ConnectionServiceTests
         public bool Delete(string key) => Inner.Delete(key);
     }
 
-    /// <summary>M1: a connection whose secret cannot be read, or whose fields are corrupt, is skipped and logged without its value; the rest load.</summary>
+    /// <summary>A connection whose secret cannot be read, or whose fields are corrupt, is skipped and logged without its value; the rest load.</summary>
     [Fact]
     public void Construction_SkipsAConnectionThatFailsToLoad()
     {
@@ -262,7 +262,7 @@ public class ConnectionServiceTests
         finally { store.FailOn = "never"; svc.Remove(good.Id); svc.Remove(corrupt.Id); svc.Remove(bad.Id); }
     }
 
-    /// <summary>M2: the name and status of a connection (for apiList and Needs You) are read without touching the credential store.</summary>
+    /// <summary>The name and status of a connection (for apiList and Needs You) are read without touching the credential store.</summary>
     [Fact]
     public void Brief_AndNeedingReconnect_ReadNoSecret()
     {

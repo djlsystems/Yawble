@@ -49,34 +49,12 @@ public static class SignInStatus
 }
 
 /// <summary>
-/// The sign-in files each CLI needs, per OS, and the access each gets. The access is ONE setting per file
-/// (<see cref="ClaudeCredentialsAccess"/>, <see cref="GrokAuthAccess"/>): read-only.
-/// <para>
-/// Nothing else of the config folder is granted. The sandbox HOME stays the member's own; the CLI is pointed at the
-/// host file by its own variable, so no symlink and no copy is made:
-/// </para>
-/// <list type="bullet">
-/// <item>Claude Code (Linux, Windows): CLAUDE_SECURESTORAGE_CONFIG_DIR = the folder holding .credentials.json (default
-/// ~/.claude, or $CLAUDE_CONFIG_DIR). Claude Code reads its plaintext credential store from
-/// &lt;dir&gt;/.credentials.json and nothing else from that folder; CLAUDE_CONFIG_DIR stays the member's own
-/// (settings, sessions, ~/.claude.json state). A prompt runs with only that file visible, read-only.
-/// ~/.claude.json (oauthAccount) is not needed for the sign-in.</item>
-/// <item>Claude Code (macOS): the sign-in is in the login Keychain ("Claude Code-credentials", account = the user
-/// name). The sandbox has no Keychain access (seatbelt keychainAccess false) and is granted nothing of it: the gateway
-/// reads the item on the host with /usr/bin/security and keeps the token in memory (ClaudeGatewaySignIn, the only Claude
-/// sign-in mode on macOS). Detection checks only that the item exists (security find-generic-password without -w).</item>
-/// <item>Grok (all OS): GROK_AUTH_PATH = ~/.grok/auth.json (or $GROK_HOME/auth.json). GROK_HOME stays the member's
-/// own. grok keeps auth.json.lock beside it; it is not granted.</item>
-/// </list>
-/// <para>
-/// The grant is the FILE, not its folder. Under bwrap (how the sandbox binds on Linux), a folder grant with the
-/// other entries denied shows a denied file's NEW content once the host replaces it by rename, and any entry created
-/// during the run (Grok's mcp_credentials.json, transcripts); a file grant keeps showing the file as it was at launch
-/// when the host CLI renews it by rename, so a run that spans the host's renewal stops with "sign in again" (the CLIs
-/// renew about 5 minutes before expiry). The second is a reliability cost, the first a leak, so the file it is.
-/// Read-only: neither CLI refreshes inside the sandbox (no lock, no write), so a sandbox can never use up the person's
-/// rotating refresh token; the vendors' token endpoints stay blocked by the floor rules as well.
-/// </para>
+/// The sign-in files each CLI needs, per OS, and the access each gets: one setting per file
+/// (<see cref="ClaudeCredentialsAccess"/>, <see cref="GrokAuthAccess"/>), read-only. A host sign-in mode grants the
+/// FILE, never its folder, and points the CLI at it by the CLI's own variable (CLAUDE_SECURESTORAGE_CONFIG_DIR,
+/// GROK_AUTH_PATH), so the member's own config folder stays its HOME's. Claude Code on macOS keeps its sign-in in the
+/// login Keychain, which no sandbox is given: only the gateway-held mode exists there.
+/// docs/architecture.md ("Where a sign-in is") says which modes place a sign-in inside a sandbox, and why a file.
 /// </summary>
 public static class SignInCatalog
 {

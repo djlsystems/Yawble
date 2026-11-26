@@ -90,7 +90,7 @@ public class ConciergeSeamTests : IDisposable
         Assert.Equal(Actor.External, p.Via);
         Assert.Equal(Actor.LocalUser, p.User);
 
-        // Without an actor given, the tools still act as the Concierge for the local account (as before).
+        // Without an actor given, the tools act as the Concierge for the local account.
         await rig.Tools(ExternalTurn()).CallToolAsync("tell", new JsonObject { ["team"] = "alpha", ["instruction"] = "Add a licence" }, Ct);
         var second = (await rig.Bus.RecentTeamMessagesAsync("alpha", 10, Ct)).Where(m => m.Source == MessageTypes.PersonSource).MaxBy(m => m.Seq)!;
         Assert.Equal(Actor.Concierge, _db.OpenStore().ProvenanceOf(second.Seq)!.Via);

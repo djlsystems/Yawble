@@ -307,7 +307,7 @@ public class ChecklistStatesTests
     }
 
     [Fact]
-    public async Task I2_ATeamChoiceIsComparedWithTheTeamsOtherRules_NotOnlyTheDefault()
+    public async Task ATeamChoiceIsComparedWithTheTeamsOtherRules_NotOnlyTheDefault()
     {
         using var rig = await GhRig();
         var alpha = rig.AddTeam("Alpha");
@@ -321,7 +321,7 @@ public class ChecklistStatesTests
     }
 
     [Fact]
-    public async Task I3_GroupPrefixRulesAndSecondRulesForARow_AreOtherRules()
+    public async Task GroupPrefixRulesAndSecondRulesForARow_AreOtherRules()
     {
         using var rig = await GhRig();
         var alpha = rig.AddTeam("Alpha");

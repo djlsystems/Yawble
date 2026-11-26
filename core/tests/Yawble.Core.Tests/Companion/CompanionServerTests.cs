@@ -440,7 +440,7 @@ public class CompanionServerTests : IDisposable
         Assert.True(await pairing.IsClosedAsync(Ct));
     }
 
-    // ---------------------------------------------------------------- fix round 1
+    // ---------------------------------------------------------------- races, duplicate keys, deadlines and limits
 
     [Fact]
     public void ClosingASessionRacingItsOwnEnd_NeverThrows()
@@ -448,9 +448,13 @@ public class CompanionServerTests : IDisposable
         // The session's own loop releases it (disposing its token source) right after another thread claimed the close.
         var session = new CompanionServer.Session(new MemoryStream(), CancellationToken.None);
         session.AfterClaim = session.Release;
-        session.Close();
-        session.Close();
-        session.Release();
+        var thrown = Record.Exception(() =>
+        {
+            session.Close();
+            session.Close();
+            session.Release();
+        });
+        Assert.Null(thrown);
     }
 
     [Fact]

@@ -16,13 +16,14 @@ using ClosedOverFailText = Yawble.Core.Board.ClosedOverFail;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// The tester's checks of closing over a FAIL, end to end on a real BusEngine with fake runners: the Manager works only through the MCP bus
+/// Closing over a FAIL, end to end on a real BusEngine with fake runners (TesterFailDeclarationTests has the engine's
+/// rule on its own): the Manager works only through the MCP bus
 /// tools (tell with card, needs_decision with card/kind/reason, deliverable_complete, deliverable_show, deliverable_digest), the
 /// person answers through the window's bus.answer (optionIndex) on a real UiRpc, the Concierge's answer is bus.answer with
 /// text only as the Concierge actor, and the board is a real BoardService reading the bus. Strings are core/src's own
 /// (TesterVerdicts.Refusal, Board.ClosedOverFail).
 /// </summary>
-public class ClosedOverFailBusVerifyTests
+public class ClosedOverFailEndToEndTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -162,7 +163,7 @@ public class ClosedOverFailBusVerifyTests
         rig.Root = (await rig.Engine.PersonTellAsync("Alpha", "Manager", "ship the Save button", ct: Ct)).Seq;
     }
 
-    // ------------------------------------------------------------------ 1 and 2: FAIL refused, a later PASS allows
+    // ------------------------------------------------------------------ a FAIL is refused, a later PASS allows
 
     [Fact]
     public async Task AFail_IsRefusedNamingTheCardAndQuotingTheLine_AndALaterPassAllowsIt_TheBoardIsPlain()
@@ -206,7 +207,7 @@ public class ClosedOverFailBusVerifyTests
         Assert.Equal(("done", "**Alpha** finished: the Save button shipped"), ConciergeWatcher.Describe(rig.Completed(), "Alpha"));
     }
 
-    // ------------------------------------------------------------------ 3: accept-fail, the person picks the yes
+    // ------------------------------------------------------------------ accept-fail: the person picks the yes
 
     [Fact]
     public async Task AcceptFail_ThePersonsPickedYesAllowsIt_BoardDigestShowAndConciergeSayIt()
@@ -262,7 +263,7 @@ public class ClosedOverFailBusVerifyTests
         Assert.Equal(("done", $"**Alpha** finished, {ClosedOverFailText.ConciergeWords}: the Save button shipped"), ConciergeWatcher.Describe(rig.Completed(), "Alpha"));
     }
 
-    // ------------------------------------------------------------------ 4: won't-do
+    // ------------------------------------------------------------------ won't-do
 
     [Fact]
     public async Task WontDo_RefusedWithoutAYes_AfterANo_AfterATypedYes_AndAConciergeYes_AllowedAfterThePickedYes()
@@ -324,7 +325,7 @@ public class ClosedOverFailBusVerifyTests
         Assert.Contains(Reason, rig.Digest!);
     }
 
-    // ------------------------------------------------------------------ 5: no tester card, a developer's FAIL
+    // ------------------------------------------------------------------ no tester card, a developer's FAIL
 
     [Fact]
     public async Task NoTesterCard_ADevelopersFail_AndATesterFailWithoutACard_AreUnaffected()
@@ -368,7 +369,7 @@ public class ClosedOverFailBusVerifyTests
         Assert.Equal(0, rig.Refusals("tester_fail"));
     }
 
-    // ------------------------------------------------------------------ 6: a newer FAIL after a yes needs a new yes
+    // ------------------------------------------------------------------ a newer FAIL after a yes needs a new yes
 
     [Fact]
     public async Task ANewerFailAfterAYes_NeedsANewYes()
@@ -419,15 +420,4 @@ public class ClosedOverFailBusVerifyTests
         await rig.CardAfterProjection(rig.Verify);
         Assert.Single(rig.Board.Trail(rig.Verify), t => t.Text == ClosedOverFailText.AcceptedPrefix + Fail2);
     }
-
-    // ------------------------------------------------------------------ the verdict words, through a real hand-back
-
-    [Theory]
-    [InlineData("> FAILED: card verify", true)]
-    [InlineData("`fail` card verify", true)]
-    [InlineData("__Fail__ card verify", true)]
-    [InlineData("# PASS", false)]
-    [InlineData("Verified: one FAIL found", false)]
-    public void TheVerdictWords(string delivered, bool fail) =>
-        Assert.Equal(fail ? TesterVerdicts.Fail : delivered.Contains("PASS") ? TesterVerdicts.Pass : null, TesterVerdicts.Of(delivered));
 }

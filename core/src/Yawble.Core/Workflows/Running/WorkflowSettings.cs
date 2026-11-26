@@ -27,7 +27,7 @@ public static class WorkflowSettings
     /// integrations by their real names. A requires name that is one of <paramref name="integrations"/> needs no binding: the member uses
     /// it, and it must be turned on for <paramref name="teamId"/>. A binding of a real name to another integration is an override: the other
     /// must be an integration of the same kind, turned on for the team. A requires name that is not an integration (an alias) needs a
-    /// binding, as before.
+    /// binding.
     /// </summary>
     public static IReadOnlyList<string> Problems(JsonObject document, JsonObject settings, JsonObject bindings, long teamId, string team,
         IWorkflowIntegrationDirectory integrations)

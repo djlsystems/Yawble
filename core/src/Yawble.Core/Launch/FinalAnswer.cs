@@ -15,7 +15,7 @@ namespace Yawble.Core.Launch;
 /// <item>Grok (-p --output-format json): its one summary object, printed last, from a line "{" to a line "}", carrying
 ///   "num_turns" or "usage".</item>
 /// <item>Codex, Copilot and Antigravity print plain text headless: no reliable marker, so no detection (their runs end
-///   when the CLI exits, as before).</item>
+///   when the CLI exits).</item>
 /// </list>
 /// </summary>
 public sealed class FinalAnswer

@@ -7,7 +7,7 @@ namespace Yawble.Core.Tests.Policy;
 
 /// <summary>
 /// A macOS run's own short temp folder and the host loopback only with the team's Allow localhost
-/// (the request side). The compiler's output and the invariants that re-check it.
+/// (the request side). The compiler's output and the invariants that check it again.
 /// </summary>
 public class MacRunTempAndLocalhostTests
 {

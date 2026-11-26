@@ -1,6 +1,8 @@
 using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 using Yawble.Core.Bus;
+using Yawble.Core.Companion;
+using Yawble.Core.Concierge;
 using Yawble.Core.Gateway;
 using Yawble.Core.Integrations;
 using Yawble.Core.Ipc;
@@ -17,7 +19,8 @@ namespace Yawble.Core.Tests.Integrations;
 /// <summary>
 /// Host tool asks: request_tool names a tool from the app's fixed catalog; the person is asked once per
 /// (team, tool); Install runs exactly the catalog's winget command for the person at the window; the program is looked
-/// for again afterwards and the Manager is told to retry. Fakes only: a fake tool host records what would run; no test
+/// for again afterwards and the Manager is told to retry. Nothing outside the catalog is installable, one install runs
+/// at a time, and one package under two names is one tool. Fakes only: a fake tool host records what would run; no test
 /// runs winget, an installer or any other program.
 /// </summary>
 public sealed class ToolAskTests : IDisposable
@@ -551,57 +554,300 @@ public sealed class ToolAskTests : IDisposable
         /// <summary>When set, a run waits for it (an install that takes a while).</summary>
         public TaskCompletionSource? Gate { get; set; }
 
+        /// <summary>Set when the first run starts.</summary>
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public async Task<GitResult> RunAsync(string exe, IReadOnlyList<string> args, TimeSpan limit, CancellationToken ct)
         {
             Runs.Add((exe, args.ToList()));
+            Started.TrySetResult();
             if (Gate is { } gate) await gate.Task.WaitAsync(ct);
             if (InstallsOnRun is { } t) Installed.Add(t);
             return Result;
         }
     }
 
-    // ------------------------------------------------------------------ tester probes
+    // ------------------------------------------------------------------ only the catalog, one install at a time, one tool per package
 
-    private long ProbeNotNowAt(string tool)
+    private Task<string> Request(string tool) => Request(Priya, tool);
+
+    private async Task<long> Asked(string tool)
+    {
+        Assert.StartsWith("asked:", await Request(tool));
+        return _asks.Asks().Single(a => a.Tool == ToolCatalog.Find(tool)!.Name).Id;
+    }
+
+    private Task<JsonObject> Install(long id) => AsWindow(() => _asks.InstallAsync(id, Ct));
+
+    [Fact]
+    public async Task InstallingPython_RunsExactlyTheCatalogLine_WithScopeUser()
+    {
+        var id = await Asked("python");
+        _host.InstallsOnRun = "python-3";
+        Assert.True((await Install(id))["done"]!.GetValue<bool>());
+        var run = Assert.Single(_host.Runs);
+        Assert.Equal(FakeToolHost.Winget, run.Exe);
+        var wingetId = ToolCatalog.Find("python-3")!.WingetId;
+        Assert.Equal(
+            ["install", "--id", wingetId, "--exact", "--source", "winget", "--silent", "--accept-package-agreements",
+             "--accept-source-agreements", "--disable-interactivity", "--scope", "user"], run.Args);
+        Assert.Equal($"winget install --id {wingetId} --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity --scope user",
+            ToolCatalog.CommandLine(ToolCatalog.Find("python-3")!));
+        // The machine-wide entries never carry a scope.
+        foreach (var t in ToolCatalog.All.Where(t => t.Name != "python-3"))
+            Assert.DoesNotContain("--scope", ToolCatalog.WingetArgs(t));
+    }
+
+    [Theory]
+    [InlineData("python-3 --override /quiet")]
+    [InlineData("python-3; winget install Evil.Pkg")]
+    [InlineData("Python.Python.3.14")]
+    [InlineData("OpenJS.NodeJS.LTS")]
+    [InlineData("git")]
+    [InlineData("--id Microsoft.DotNet.SDK.10")]
+    public async Task ANameCarryingAnArgumentOrAPackageId_IsRefused_AndNothingIsAsked(string asked)
+    {
+        Assert.StartsWith("refused:", await Request(asked));
+        Assert.Empty(_asks.Asks(openOnly: false));
+    }
+
+    [Fact]
+    public async Task ARowWhoseToolIsNotInTheCatalog_CannotBeInstalled()
+    {
+        var id = await Asked("nodejs-lts");
+        // Only the database could hold such a row (request_tool refuses the name): Install still runs nothing.
+        Insert("UPDATE tool_asks SET tool = 'Evil.Package' WHERE id = $id RETURNING id;", ("$id", id));
+        var e = await Assert.ThrowsAsync<RpcException>(async () =>
+        {
+            using (Actor.Use(Actor.Window)) await _asks.DispatchAsync("tools.install", new JsonObject { ["id"] = id }, Ct);
+        });
+        Assert.Equal("bad_params", e.Code);
+        Assert.Empty(_host.Runs);
+        var item = (await _asks.DispatchAsync("tools.asks", null, Ct))!.AsArray().Single()!.AsObject();
+        Assert.False(item["canInstall"]!.GetValue<bool>());
+        Assert.Equal(["notNow"], item["choices"]!.AsArray().Select(n => n!.GetValue<string>()));
+    }
+
+    [Fact]
+    public async Task AnAskClosedByNotNowOrAnInstall_CannotBeInstalledAgain()
+    {
+        var dismissed = await Asked("python-3");
+        using (Actor.Use(Actor.Window)) await _asks.NotNowAsync(dismissed, null, Ct);
+        await Assert.ThrowsAsync<RpcException>(async () =>
+        {
+            using (Actor.Use(Actor.Window)) await _asks.DispatchAsync("tools.install", new JsonObject { ["id"] = dismissed }, Ct);
+        });
+        Assert.Empty(_host.Runs);
+
+        var node = await Asked("nodejs-lts");
+        _host.InstallsOnRun = "nodejs-lts";
+        await Install(node);
+        _host.Installed.Remove("nodejs-lts"); // even if the program went away again
+        await Assert.ThrowsAsync<ArgumentException>(() => Install(node));
+        Assert.Single(_host.Runs);
+        // And Not now on an ask that is no longer waiting is refused.
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+        {
+            using (Actor.Use(Actor.Window)) await _asks.NotNowAsync(node, null, Ct);
+        });
+    }
+
+    [Fact]
+    public async Task OneInstallAtATime_ASecondWaits_AndTheFirstFinishes()
+    {
+        var node = await Asked("nodejs-lts");
+        var python = await Asked("python-3");
+        _host.Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var first = Install(node);
+        await _host.Started.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        Assert.Equal("installing", _asks.Asks().Single(a => a.Id == node).State);
+        // The same ask again: already being installed. Another ask: another tool is being installed. Nothing more runs.
+        Assert.Contains("being installed already", (await Install(node))["message"]!.GetValue<string>());
+        Assert.Contains("Another tool is being installed", (await Install(python))["message"]!.GetValue<string>());
+        Assert.Single(_host.Runs);
+
+        _host.Installed.Add("nodejs-lts");
+        _host.Gate.SetResult();
+        Assert.True((await first)["done"]!.GetValue<bool>());
+        Assert.Equal("pending", Assert.Single(_asks.Asks()).State); // python still waits
+    }
+
+    [Fact]
+    public async Task NotNow_HoldsAcrossARestartOfTheApp()
+    {
+        var id = await Asked("nodejs-lts");
+        using (Actor.Use(Actor.Window)) await _asks.NotNowAsync(id, null, Ct);
+        var restarted = NewService();
+        Assert.StartsWith("refused: the person chose Not now", await restarted.RequestFromAgentAsync(Priya, "node", "again", 1, 2, Ct));
+        _clock.Advance(ToolAskService.NotNowQuiet);
+        Assert.StartsWith("asked:", await restarted.RequestFromAgentAsync(Priya, "node", "again", 1, 2, Ct));
+    }
+
+    [Fact]
+    public async Task AToolFoundWhenInstallIsClicked_ClosesTheAsk_RunsNothing_AndTellsTheManager()
+    {
+        var id = await Asked("dotnet-sdk-10");
+        _host.Installed.Add("dotnet-sdk-10"); // the person installed it some other way meanwhile
+        var r = await Install(id);
+        Assert.True(r["done"]!.GetValue<bool>());
+        Assert.Empty(_host.Runs);
+        Assert.Empty(_asks.Asks());
+        var told = Assert.Single(_told);
+        Assert.Equal(("Alpha", "Manager"), (told.Team, told.Member));
+        Assert.StartsWith(".NET SDK 10 is installed; retry what was blocked", told.Text);
+    }
+
+    [Fact]
+    public async Task ASuccessfulInstall_IsInTheApprovalsLogAndAllActivity()
+    {
+        var id = await Asked("nodejs-lts");
+        await Request("nodejs-lts"); // asked again
+        _host.InstallsOnRun = "nodejs-lts";
+        await Install(id);
+
+        var logs = new LogService(_db.Dir, _db.ConnectionString, _clock);
+        var rows = logs.Query(new LogQuery("approvals"))["rows"]!.AsArray().Select(r => r!.AsObject())
+            .Where(r => r["integration"]!.GetValue<string>() == "host tool").ToList();
+        Assert.Equal(["asked", "asked again", "install", "installed"], rows.Select(r => r["state"]!.GetValue<string>()).Order());
+        Assert.Contains(rows, r => r["state"]!.GetValue<string>() == "install" && r["args"]!.GetValue<string>().Contains("winget install --id OpenJS.NodeJS.LTS"));
+        var activity = logs.Query(new LogQuery(LogSources.Activity))["rows"]!.AsArray().Select(r => r!.AsObject())
+            .Where(r => r["source"]!.GetValue<string>() == "Approvals").Select(r => r["event"]!.GetValue<string>()).ToList();
+        foreach (var kind in new[] { "asked", "asked again", "install", "installed" })
+            Assert.Contains($"host tool nodejs-lts {kind}", activity);
+    }
+
+    [Fact]
+    public void TheConciergeAndTheCompanion_OfferNoWayToInstallATool()
+    {
+        var names = ConciergeTools.ToolNames.Concat(ConciergeActions.ToolNames).Concat(ConciergeReadTools.Names)
+            .Concat(CompanionTools.Read).Concat(CompanionTools.Act).Concat(CompanionTools.Destructive).Concat(CompanionTools.Own).ToList();
+        Assert.DoesNotContain(names, n => n.Contains("install", StringComparison.OrdinalIgnoreCase) || n.StartsWith("tools", StringComparison.Ordinal)
+                                          || n.Contains("request_tool", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TheSamePackageUnderTwoNames_IsOneTool_ForNotNowAndTheAsk()
+    {
+        Assert.Equal(ToolCatalog.Find("dotnet-sdk-10")!.WingetId, ToolCatalog.Find("dotnet")!.WingetId);
+        var id = await Asked("dotnet-sdk-10");
+        using (Actor.Use(Actor.Window)) await _asks.NotNowAsync(id, null, Ct);
+        Assert.StartsWith("refused:", await Request("dotnet"));
+        // and the hold is read from the stored row, so it holds across a restart under the other name too
+        Assert.StartsWith("refused:", await NewService().RequestFromAgentAsync(Priya, "dotnet-sdk-lts", "again", 1, 2, Ct));
+    }
+
+    [Fact]
+    public async Task AnOpenAskUnderOneName_IsTheAskForTheOtherName()
+    {
+        var id = await Asked("dotnet-sdk-10");
+        var again = await Request("dotnet");
+        Assert.DoesNotContain("refused", again);
+        var ask = Assert.Single(_asks.Asks()); // one Needs you item, not two
+        Assert.Equal(id, ask.Id);
+        Assert.Equal("dotnet-sdk-10", ask.Tool);
+        Assert.Equal(2, ask.Count);
+    }
+
+    [Fact]
+    public async Task AskingDotnetSdkLts_ThenDotnetSdk10_IsOnePendingAsk_WithCountTwo()
+    {
+        var id = await Asked("dotnet-sdk-lts");
+        var again = await Request("dotnet-sdk-10");
+        Assert.StartsWith("asked:", again);
+        Assert.Contains($"tool request {id}", again);
+        Assert.Contains("already waiting", again);
+        var ask = Assert.Single(_asks.Asks());
+        Assert.Equal((id, "dotnet-sdk-lts", 2, "pending"), (ask.Id, ask.Tool, ask.Count, ask.State));
+        Assert.Equal(1, _asks.PendingCount());
+    }
+
+    [Fact]
+    public async Task AFinishedInstall_ClosesTheAskFiledUnderTheOtherName_InEveryTeam_AndTellsEachManager()
+    {
+        // Beta asked under the other name; and Alpha has a second open row under the other name.
+        var id = await Asked("dotnet-sdk-lts");
+        Insert(
+            "INSERT INTO tool_asks (at, team_id, tool, member, reason, count, last_seen, deliverable, causation_seq) " +
+            "VALUES ('2026-11-13T11:00:00Z', $t, 'dotnet-sdk-10', 'Alpha/Priya', 'old ask', 1, '2026-11-13T11:00:00Z', 1, 2) RETURNING id;", ("$t", _alpha));
+        Assert.StartsWith("asked:", await Request(Wren, "dotnet-sdk-10"));
+        Assert.Equal(3, _asks.Asks().Count);
+
+        _host.InstallsOnRun = "dotnet-sdk-lts";
+        var r = await Install(id);
+        Assert.True(r["done"]!.GetValue<bool>());
+        Assert.Single(_host.Runs); // one install, not one per name
+        Assert.Empty(_asks.Asks());
+        Assert.Equal(0, _asks.PendingCount());
+        Assert.Equal(3, r["closed"]!.AsArray().Count);
+        Assert.Equal(["Alpha", "Beta"], _told.Select(t => t.Team).Order());
+        Assert.All(_told, t => Assert.Equal("Manager", t.Member));
+    }
+
+    [Fact]
+    public async Task NodeAndPython_StaySeparateTools_ForTheAsk_NotNow_AndTheInstall()
+    {
+        var node = await Asked("nodejs-lts");
+        var python = await Asked("python-3");
+        Assert.NotEqual(node, python);
+        Assert.All(_asks.Asks(), a => Assert.Equal(1, a.Count));
+        Assert.Equal(["nodejs-lts"], ToolCatalog.SamePackage(ToolCatalog.Find("node")!));
+        Assert.Equal(["python-3"], ToolCatalog.SamePackage(ToolCatalog.Find("python")!));
+
+        using (Actor.Use(Actor.Window)) await _asks.NotNowAsync(node, null, Ct);
+        Assert.StartsWith("refused:", await Request("npm"));
+        var again = await Request("pip"); // Not now on Node.js holds nothing for Python
+        Assert.StartsWith("asked:", again);
+        Assert.Equal(2, Assert.Single(_asks.Asks()).Count);
+
+        _host.InstallsOnRun = "python-3";
+        var r = await Install(python);
+        Assert.True(r["done"]!.GetValue<bool>());
+        Assert.Equal([python], r["closed"]!.AsArray().Select(n => n!.GetValue<long>()));
+    }
+
+    // ------------------------------------------------------------------ pruning the approvals log
+
+    private long NotNowAt(string tool)
     {
         var id = _asks.Asks().Single(a => a.Tool == tool).Id;
         AsWindow(() => _asks.NotNowAsync(id, null, Ct)).GetAwaiter().GetResult();
         return id;
     }
 
-    private long ProbePruneAll() => new LogService(_db.Dir, _db.ConnectionString, _clock).Prune("approvals", "9999-12-31");
+    private long PruneAll() => new LogService(_db.Dir, _db.ConnectionString, _clock).Prune("approvals", "9999-12-31");
 
-    private long ProbeCount(string sql) => Insert(sql);
+    private long Count(string sql) => Insert(sql);
 
     [Fact]
-    public async Task Probe_ANotNowForDotnetSdkLts_HoldsDotnetSdk10_ThroughPruningAll_UntilIts24HoursEnd()
+    public async Task ANotNowForDotnetSdkLts_HoldsDotnetSdk10_ThroughPruningAll_UntilIts24HoursEnd()
     {
         // A Not now on dotnet-sdk-10 25 hours ago (its hold is over), then a Not now on dotnet-sdk-lts (the same package).
         await Request(Priya, "dotnet-sdk-10");
-        ProbeNotNowAt("dotnet-sdk-10");
+        NotNowAt("dotnet-sdk-10");
         _clock.Advance(TimeSpan.FromHours(25));
         Assert.DoesNotContain("refused", await Request(Priya, "dotnet-sdk-lts"));
-        ProbeNotNowAt("dotnet-sdk-lts");
+        NotNowAt("dotnet-sdk-lts");
 
         // Pruning all an hour later: the old dotnet-sdk-10 Not now goes, the dotnet-sdk-lts one stays; dotnet-sdk-10 is still refused.
         _clock.Advance(TimeSpan.FromHours(1));
-        Assert.True(ProbePruneAll() > 0);
-        Assert.Equal(0, ProbeCount("SELECT count(*) FROM tool_asks WHERE tool = 'dotnet-sdk-10';"));
-        Assert.Equal(1, ProbeCount("SELECT count(*) FROM tool_asks WHERE tool = 'dotnet-sdk-lts' AND state = 'dismissed';"));
+        Assert.True(PruneAll() > 0);
+        Assert.Equal(0, Count("SELECT count(*) FROM tool_asks WHERE tool = 'dotnet-sdk-10';"));
+        Assert.Equal(1, Count("SELECT count(*) FROM tool_asks WHERE tool = 'dotnet-sdk-lts' AND state = 'dismissed';"));
         Assert.StartsWith("refused: the person chose Not now", await Request(Priya, "dotnet-sdk-10"));
         Assert.StartsWith("refused: the person chose Not now", await Request(Bo, "dotnet"));
 
         // 23h59 after the Not now: pruning all keeps it, still refused.
         _clock.Advance(TimeSpan.FromHours(22) + TimeSpan.FromMinutes(59));
-        ProbePruneAll();
-        Assert.Equal(1, ProbeCount("SELECT count(*) FROM tool_asks WHERE tool = 'dotnet-sdk-lts' AND state = 'dismissed';"));
+        PruneAll();
+        Assert.Equal(1, Count("SELECT count(*) FROM tool_asks WHERE tool = 'dotnet-sdk-lts' AND state = 'dismissed';"));
         Assert.StartsWith("refused", await Request(Priya, "dotnet-sdk-10"));
 
         // 24h01 after: the hold is over and pruning all removes the Not now with its events; a new ask is raised.
         _clock.Advance(TimeSpan.FromMinutes(2));
-        ProbePruneAll();
-        Assert.Equal(0, ProbeCount("SELECT count(*) FROM tool_asks;"));
-        Assert.Equal(0, ProbeCount("SELECT count(*) FROM tool_ask_events;"));
+        PruneAll();
+        Assert.Equal(0, Count("SELECT count(*) FROM tool_asks;"));
+        Assert.Equal(0, Count("SELECT count(*) FROM tool_ask_events;"));
         Assert.DoesNotContain("refused", await Request(Priya, "dotnet-sdk-10"));
         Assert.Equal("pending", Assert.Single(_asks.Asks()).State);
         // Another team was never held.
@@ -609,7 +855,7 @@ public sealed class ToolAskTests : IDisposable
     }
 
     [Fact]
-    public async Task Probe_TheInterruptedRow_ReadsInTheApprovalsLog_AndSurvivesPruningAll()
+    public async Task TheInterruptedRow_ReadsInTheApprovalsLog_AndSurvivesPruningAll()
     {
         await Request(Priya, "nodejs-lts");
         var id = _asks.Asks().Single().Id;
@@ -623,15 +869,13 @@ public sealed class ToolAskTests : IDisposable
         var logs = new LogService(_db.Dir, _db.ConnectionString, _clock);
         var rows = logs.Query(new LogQuery("approvals"))["rows"]!.AsArray().Select(r => r!.AsObject())
             .Where(r => r["integration"]!.GetValue<string>() == "host tool").ToList();
-        File.WriteAllText(Path.Combine(Path.GetTempPath(), "yawble-host-tool-approvals-rows.json"),
-            new JsonArray(rows.Select(r => (JsonNode)r.DeepClone()).ToArray()).ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
         var interrupted = Assert.Single(rows, r => r["args"]!.GetValue<string>().Contains(ToolAskService.InterruptedDetail));
         Assert.Equal("failed", interrupted["state"]!.GetValue<string>());
         Assert.Single(rows, r => r["state"]!.GetValue<string>() == "install");
         Assert.Equal("pending", _asks.Asks().Single().State);
 
         // The ask waits again, so pruning all keeps it and its interrupted row.
-        ProbePruneAll();
+        PruneAll();
         Assert.Contains(_asks.Events(id), e => e.Detail == ToolAskService.InterruptedDetail);
         _host.Gate.TrySetResult();
         await install;

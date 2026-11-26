@@ -11,7 +11,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Link;
 
 /// <summary>
-/// Wren's finding F5: org.summary, as the core sends it over the Cloud Link, carries teams[].deliverableExpiryDays
+/// org.summary, as the core sends it over the Cloud Link, carries teams[].deliverableExpiryDays
 /// (the team's setting, default 3) and deliverables[].expiresAt (the same instant as the bus.deliverables item's expiresAt; null
 /// while the deliverable is worked and once it ended). Built from the real app source over a real bus with a fake clock, and
 /// read as JSON, the way yawble-cloud's OrgWire reads it.
@@ -126,7 +126,7 @@ public class OrgSummaryExpiryTests
         Assert.Equal(ToSecond(At(item["expiresAt"])), At(idle["expiresAt"]));
         Assert.Equal(ToSecond(last.AddDays(3)), At(idle["expiresAt"]));
 
-        // Expired: ended, so no expiresAt; endedAt and expiredAt as before.
+        // Expired: ended, so no expiresAt; endedAt and expiredAt are set.
         rig.Clock.Now = last.AddDays(3).AddMinutes(1);
         Assert.Equal(1, await rig.Engine.SweepExpiryAsync(rig.Clock.Now, Ct));
         var expired = await rig.SummaryDeliverable(root.Seq);

@@ -113,15 +113,12 @@ public static partial class SandboxRequestCompiler
     public const string DotnetShimFolder = "dotnet-shim";
 
     /// <summary>
-    /// macOS: the Mach services a run may look up beyond the sandbox's defaults, each found needed on the Mac mini by
-    /// adding one at a time to the run's profile. com.apple.SecurityServer and com.apple.trustd.agent build TLS
-    /// certificate chains: without them every .NET HTTPS call failed "bad certificate format" (NuGet's restore) while
-    /// Apple's curl, with its own certificate file, got through. com.apple.system.opendirectoryd.libinfo resolves the
-    /// user's groups: without it .NET overflowed reading a file another user owns (the SDK's apphost: "CreateAppHost ...
-    /// OverflowException at IsMemberOfGroup"). The person chose to allow SecurityServer (2026-11-21): it serves only
-    /// keychains whose files the caller can read, and ~/Library/Keychains is always denied (RunLayout.ImplicitDenied,
-    /// required by the invariants): from a run "Claude Code-credentials" is not found and the login keychain lists no
-    /// entry. keychainAccess stays false and securityd's data-protection service (com.apple.securityd.xpc) stays closed.
+    /// macOS: the Mach services a run may look up beyond the sandbox's defaults. com.apple.SecurityServer and
+    /// com.apple.trustd.agent build TLS certificate chains: without them every .NET HTTPS call fails "bad certificate
+    /// format". com.apple.system.opendirectoryd.libinfo resolves the user's groups: without it .NET overflows reading a
+    /// file another user owns (the SDK's apphost). SecurityServer serves only keychains whose files the caller can read,
+    /// and ~/Library/Keychains is always denied (RunLayout.ImplicitDenied), so no login-keychain item reaches a run;
+    /// keychainAccess stays false and securityd's data-protection service (com.apple.securityd.xpc) stays closed.
     /// </summary>
     public static IReadOnlyList<string> MacMachLookups { get; } =
         ["com.apple.SecurityServer", "com.apple.trustd.agent", "com.apple.system.opendirectoryd.libinfo"];
@@ -339,19 +336,18 @@ public static partial class SandboxRequestCompiler
         env["DOTNET_GENERATE_ASPNET_CERTIFICATE"] = "false";
         env["NUGET_PACKAGES"] = J(".nuget", "packages");
         // Node's built-in fetch (undici) ignores HTTPS_PROXY unless told to, and connects directly, which the sandbox
-        // refuses (EACCES): npm itself uses the proxy, but install scripts that fetch (Electron's download) failed.
+        // refuses (EACCES): npm itself uses the proxy, but install scripts that fetch (Electron's download) do not.
         env["NODE_USE_ENV_PROXY"] = "1";
+        // macOS: .NET opens dual-mode IPv6 sockets and reaches the gateway at 127.0.0.1 as ::ffff:127.0.0.1, which the
+        // sandbox profile's loopback rule does not match (NuGet's restore: "NU1301 ... Permission denied"). This gives
+        // every .NET program in the run plain IPv4 sockets.
+        if (l.Os == TargetOs.MacOS) env["DOTNET_SYSTEM_NET_DISABLEIPV6"] = "1";
         // Windows ProcessContainer: a named pipe with an ordinary name cannot be opened again, not even by the process
-        // that made it (only \\.\pipe\LOCAL\ names work; microsoft/mxc#1706). MSBuild's worker nodes and its build
+        // that made it (only \\.\pipe\LOCAL\ names work; microsoft/mxc#1706). MSBuild's worker nodes, its build
         // server and the compiler server talk over such pipes, so a parallel build fails ("Build FAILED", 0 errors) and
         // leaves idle workers that keep the agent's shell open. The dotnet wrapper first on PATH (DotnetShimFolder) builds
         // with -m:1; these keep MSBuild from starting anything else that would wait on a pipe. macOS the same: MSBuild's
         // and the compiler server's sockets are made in /tmp, which the sandbox refuses ("Permission denied" at bind).
-        // macOS: .NET opens dual-mode IPv6 sockets and reaches the gateway at 127.0.0.1 as ::ffff:127.0.0.1, which the
-        // sandbox profile's loopback rule does not match: NuGet's restore failed "NU1301 ... Permission denied
-        // (127.0.0.1:<port>)" while curl got through. Plain IPv4 sockets for every .NET program in the run (yawble-bridge
-        // connects that way itself).
-        if (l.Os == TargetOs.MacOS) env["DOTNET_SYSTEM_NET_DISABLEIPV6"] = "1";
         if (l.Os is TargetOs.Windows or TargetOs.MacOS)
         {
             env["MSBUILDDISABLENODEREUSE"] = "1";

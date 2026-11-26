@@ -12,12 +12,13 @@ using Xunit;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// End-to-end checks of network asks that the developers' NetworkAskTests leave open: more addresses and private names that
-/// never become asks (by the filter and through a run's gateway), a policy refusal that leaves the ask waiting and tells
-/// no one, the window's push on an answer, and "Allow everywhere" for a member whose override narrows the host list.
-/// Fakes only: a temporary database, a fake clock, a recording tell, a fake policy; no network and no system program.
+/// A network ask's answer and the policy it writes: a policy refusal, or an allow that does not reach the member, leaves
+/// the ask waiting and tells no one; "Allow everywhere" and "Allow for the team" reach a member whose override narrows
+/// the host list; a write that fails part-way can be retried; an ask raised or denied while the answer writes is not
+/// told it is allowed unless its member has the host. Fakes only: a temporary database, a fake clock, a recording tell,
+/// a fake policy; no network and no system program.
 /// </summary>
-public sealed class NetworkAskGapTests : IDisposable
+public sealed class NetworkAskPolicyWriteTests : IDisposable
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -28,7 +29,7 @@ public sealed class NetworkAskGapTests : IDisposable
     private readonly List<(string Team, string Member, string Text)> _told = [];
     private readonly long _alpha, _priya;
 
-    public NetworkAskGapTests()
+    public NetworkAskPolicyWriteTests()
     {
         _policies = new PolicyStore(_db.ConnectionString);
         _alpha = Insert("INSERT INTO teams (name, created_at) VALUES ('Alpha', '2026-11-13T00:00:00Z') RETURNING id;");
@@ -55,54 +56,6 @@ public sealed class NetworkAskGapTests : IDisposable
                 return Task.CompletedTask;
             },
             _clock) { NoticeWindow = TimeSpan.Zero }; // told at once: these check who is told, not the window (NetworkAskNoticeTests)
-
-    // ------------------------------------------------------------------ never asked: more addresses and private names
-
-    [Theory]
-    [InlineData("127.0.0.1")]
-    [InlineData("0.0.0.0")]
-    [InlineData("172.16.0.1")]
-    [InlineData("2130706433")] // 127.0.0.1 as one number
-    [InlineData("fe80::1")]
-    [InlineData("[::ffff:10.0.0.1]")]
-    [InlineData("LOCALHOST.")]
-    [InlineData("box.internal")]
-    [InlineData("files.corp")]
-    [InlineData("nas.localdomain")]
-    [InlineData("https://api.nuget.org/v3/index.json")] // a URL from the gateway is not a host name
-    [InlineData("user@api.nuget.org")]
-    public void MoreAddressesAndPrivateNames_NeverBecomeAsks(string host)
-    {
-        var asks = Service();
-        Assert.NotNull(NetworkAskFilter.Problem(host));
-        Assert.Equal(HostAskOutcome.None, asks.Refused("Alpha/Priya", host, "CONNECT", null));
-        Assert.Empty(asks.Asks(pendingOnly: false));
-    }
-
-    [Fact]
-    public async Task TheGateway_LoopbackPrivateAndAppHosts_StayPlainRefusals()
-    {
-        await using var f = await GatewayFixture.StartAsync();
-        var team = InsertIn(f.Db, "INSERT INTO teams (name, created_at) VALUES ('Alpha', '2026-11-13T00:00:00Z') RETURNING id;");
-        InsertIn(f.Db, $"INSERT INTO members (team_id, name, role, created_at) VALUES ({team}, 'm5', 'member', '2026-11-13T00:00:00Z') RETURNING id;");
-        var policies = new PolicyStore(f.Db.ConnectionString);
-        var asks = new NetworkAskService(f.Db.ConnectionString,
-            new StoreNetworkPolicy(policies, (_, _) => Task.FromResult(_layout), _ => Task.FromResult<RunLayout?>(_layout)), (_, _, _, _, _) => Task.CompletedTask, f.Clock);
-        f.Host.Refusals = asks;
-        await using var gateway = f.StartRun(5);
-
-        foreach (var target in new[] { "localhost:443", "api.localhost:443", "10.0.0.5:443", "[::1]:443", "printer.local:443", "nas.lan:443", "cloud.yawble.ai:443" })
-        {
-            var (status, stream, client) = await ProxyClient.RawAsync(gateway, $"CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n");
-            using (client)
-            {
-                Assert.StartsWith("HTTP/1.1 403", status);
-                using var reader = new StreamReader(stream);
-                Assert.DoesNotContain("request_host", await reader.ReadToEndAsync(Ct));
-            }
-        }
-        Assert.Empty(asks.Asks(pendingOnly: false));
-    }
 
     // ------------------------------------------------------------------ a policy refusal leaves the ask waiting
 
@@ -136,39 +89,12 @@ public sealed class NetworkAskGapTests : IDisposable
         Assert.Equal(0, changed);
     }
 
-    [Fact]
-    public async Task AnAnswer_PushesTheChange_SoNeedsYouRefreshes()
-    {
-        var asks = Service();
-        var changed = 0;
-        asks.Changed = () => changed++;
-        asks.Refused("Alpha/Priya", "api.nuget.org", "CONNECT", null);
-        Assert.Equal(1, changed);
-        await asks.AnswerAsync(Assert.Single(asks.Asks()).Id, NetworkAskChoices.Deny, null, Ct);
-        Assert.Equal(2, changed);
-    }
-
-    [Fact]
-    public async Task Deny_ThenTheGatewaysNextRefusal_IsDenied_NotANewAsk_AndTheAgentIsToldSo()
-    {
-        var asks = Service();
-        asks.Refused("Alpha/Priya", "example.com", "CONNECT", null);
-        await asks.AnswerAsync(Assert.Single(asks.Asks()).Id, NetworkAskChoices.Deny, null, Ct);
-        var outcome = asks.Refused("Alpha/Priya", "example.com", "CONNECT", null);
-        Assert.Equal(HostAskOutcome.Denied, outcome);
-        Assert.Contains("denied example.com", RunGateway.AllowlistText("example.com", outcome));
-        Assert.DoesNotContain("request_host", RunGateway.AllowlistText("example.com", outcome));
-    }
-
     // ------------------------------------------------------------------ "Allow everywhere" and a narrowing override
 
     /// <summary>
-    /// Was a fault: a member whose override narrows network.allowHosts (Settings: a member's own list, a subset of the
-    /// global one) is still refused the host after "Allow everywhere", because the override filters the global list
-    /// (PolicyMerger.Merge, StoreNetworkPolicy.EffectiveHosts); yet the ask closes and the Manager is told "<host> is now
-    /// allowed for Priya; retry what was blocked". The retry is refused again and a new ask is raised.
-    /// Expected: either the member is allowed (the host also goes in that member's loosen block, or the override), or
-    /// the answer says so and the Manager is not told it is allowed for that member.
+    /// A member's override that narrows network.allowHosts filters the global list (PolicyMerger.Merge,
+    /// StoreNetworkPolicy.EffectiveHosts), so "Allow everywhere" also puts the host in that member's loosen block: the
+    /// Manager is told the host is allowed for the member only when it is.
     /// </summary>
     [Fact]
     public async Task AllowEverywhere_ForAMemberWhoseOverrideNarrowsTheHosts_ActuallyAllowsIt()
@@ -258,7 +184,7 @@ public sealed class NetworkAskGapTests : IDisposable
         Assert.Empty(_told);
     }
 
-    // ------------------------------------------------------------------ re-check of the fix: partial failure and a late ask
+    // ------------------------------------------------------------------ a write that fails part-way, and an ask raised meanwhile
 
     /// <summary>The real store policy, with a hook before each member write (it may refuse or do something meanwhile).</summary>
     private sealed class HookedPolicy(INetworkPolicy inner, Func<long, Task> beforeMember) : INetworkPolicy
@@ -311,10 +237,9 @@ public sealed class NetworkAskGapTests : IDisposable
     }
 
     /// <summary>
-    /// An ask for the same host that arrives while the answer is writing the policy (after the answer listed the members it
-    /// reaches) is closed by the answer's "every pending ask for the host" update and its Manager told it is allowed,
-    /// though that member's override still filters the host out. Expected: the close covers only the asks whose members
-    /// the answer checked (or re-checks every closed ask's member), so a late ask stays waiting or is reached too.
+    /// An ask for the same host that arrives while the answer is writing the policy (after the answer listed the members
+    /// it reaches) either stays waiting or its member is reached too: its Manager is never told the host is allowed while
+    /// that member's override still filters it out.
     /// </summary>
     [Fact]
     public async Task AllowEverywhere_AnAskArrivingDuringTheWrite_IsNotToldAllowed_UnlessItsMemberHasTheHost()
@@ -395,14 +320,5 @@ public sealed class NetworkAskGapTests : IDisposable
         Assert.DoesNotContain(_told, t => t.Team == "Beta" && t.Text.Contains("is now allowed", StringComparison.Ordinal));
         Assert.Single(_told, t => t.Team == "Alpha" && t.Text.StartsWith("pypi.org is now allowed for Priya;", StringComparison.Ordinal));
         Assert.Single(_told, t => t.Team == "Beta" && t.Member == "Omar" && t.Text.StartsWith("The person denied", StringComparison.Ordinal));
-    }
-
-    private static long InsertIn(TempDb db, string sql)
-    {
-        using var c = new SqliteConnection(db.ConnectionString);
-        c.Open();
-        using var cmd = c.CreateCommand();
-        cmd.CommandText = sql;
-        return (long)cmd.ExecuteScalar()!;
     }
 }

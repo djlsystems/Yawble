@@ -139,10 +139,10 @@ public sealed class WorkflowLibrary : IWorkflowSchemaLookup
     {
         using var c = Open();
         using var cmd = Cmd(c, $"""
-            SELECT s.id, s.workflow_key, v.name, v.description, v.version, v.ok, v.document, v.check_result, v.created_at
-            FROM workflow_versions v JOIN workflows s ON s.id = v.workflow_id
-            WHERE v.workflow_id = $s AND v.version = {(version is null ? "s.latest_version" : "$v")};
-            """, ("$s", workflowId), ("$v", (object?)version ?? DBNull.Value));
+            SELECT wf.id, wf.workflow_key, v.name, v.description, v.version, v.ok, v.document, v.check_result, v.created_at
+            FROM workflow_versions v JOIN workflows wf ON wf.id = v.workflow_id
+            WHERE v.workflow_id = $w AND v.version = {(version is null ? "wf.latest_version" : "$v")};
+            """, ("$w", workflowId), ("$v", (object?)version ?? DBNull.Value));
         using var r = cmd.ExecuteReader();
         if (!r.Read()) throw new WorkflowLibraryException("not_found", version is null ? $"there is no workflow {workflowId}" : $"workflow {workflowId} has no version {version}");
         return new WorkflowVersionRow(r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetInt32(4), r.GetInt64(5) != 0,
@@ -153,14 +153,14 @@ public sealed class WorkflowLibrary : IWorkflowSchemaLookup
     public int? RunnableVersion(long workflowId)
     {
         using var c = Open();
-        return Scalar(c, "SELECT runnable_version FROM workflows WHERE id = $s;", ("$s", workflowId)) is long v ? (int)v : null;
+        return Scalar(c, "SELECT runnable_version FROM workflows WHERE id = $w;", ("$w", workflowId)) is long v ? (int)v : null;
     }
 
     public IReadOnlyList<WorkflowVersionInfo> Versions(long workflowId)
     {
         using var c = Open();
-        if (Scalar(c, "SELECT id FROM workflows WHERE id = $s;", ("$s", workflowId)) is null) throw new WorkflowLibraryException("not_found", $"there is no workflow {workflowId}");
-        using var cmd = Cmd(c, "SELECT version, ok, created_at FROM workflow_versions WHERE workflow_id = $s ORDER BY version DESC;", ("$s", workflowId));
+        if (Scalar(c, "SELECT id FROM workflows WHERE id = $w;", ("$w", workflowId)) is null) throw new WorkflowLibraryException("not_found", $"there is no workflow {workflowId}");
+        using var cmd = Cmd(c, "SELECT version, ok, created_at FROM workflow_versions WHERE workflow_id = $w ORDER BY version DESC;", ("$w", workflowId));
         using var r = cmd.ExecuteReader();
         var list = new List<WorkflowVersionInfo>();
         while (r.Read()) list.Add(new WorkflowVersionInfo(r.GetInt32(0), r.GetInt64(1) != 0, r.GetString(2)));
@@ -191,9 +191,9 @@ public sealed class WorkflowLibrary : IWorkflowSchemaLookup
         if (existing is { } e)
         {
             id = e;
-            version = (int)(long)Scalar(c, "SELECT latest_version FROM workflows WHERE id = $s;", ("$s", id), tx)! + 1;
-            Exec(c, tx, $"UPDATE workflows SET name = $n, description = $d, latest_version = $v, updated_at = $t{(ok ? ", runnable_version = $v" : "")} WHERE id = $s;",
-                ("$n", name), ("$d", description), ("$v", version), ("$t", now), ("$s", id));
+            version = (int)(long)Scalar(c, "SELECT latest_version FROM workflows WHERE id = $w;", ("$w", id), tx)! + 1;
+            Exec(c, tx, $"UPDATE workflows SET name = $n, description = $d, latest_version = $v, updated_at = $t{(ok ? ", runnable_version = $v" : "")} WHERE id = $w;",
+                ("$n", name), ("$d", description), ("$v", version), ("$t", now), ("$w", id));
         }
         else
         {
@@ -205,8 +205,8 @@ public sealed class WorkflowLibrary : IWorkflowSchemaLookup
         }
         Exec(c, tx, """
             INSERT INTO workflow_versions (workflow_id, version, name, description, document, ok, check_result, created_at)
-            VALUES ($s, $v, $n, $d, $doc, $ok, $chk, $t);
-            """, ("$s", id), ("$v", version), ("$n", name), ("$d", description), ("$doc", json.ToJsonString()), ("$ok", ok ? 1 : 0),
+            VALUES ($w, $v, $n, $d, $doc, $ok, $chk, $t);
+            """, ("$w", id), ("$v", version), ("$n", name), ("$d", description), ("$doc", json.ToJsonString()), ("$ok", ok ? 1 : 0),
             ("$chk", check.ToJsonString()), ("$t", now));
         tx.Commit();
         return new WorkflowSaveResult(id, key, version, ok, !ok, check);
@@ -220,12 +220,12 @@ public sealed class WorkflowLibrary : IWorkflowSchemaLookup
     {
         using var c = Open();
         using var tx = c.BeginTransaction();
-        var key = Scalar(c, "SELECT workflow_key FROM workflows WHERE id = $s;", ("$s", workflowId), tx) as string
+        var key = Scalar(c, "SELECT workflow_key FROM workflows WHERE id = $w;", ("$w", workflowId), tx) as string
             ?? throw new WorkflowLibraryException("not_found", $"there is no workflow {workflowId}");
         var users = new List<string>();
         using (var cmd = Cmd(c, """
-            SELECT t.name, m.name FROM members m JOIN teams t ON t.id = m.team_id WHERE m.workflow_id = $s ORDER BY t.name, m.name;
-            """, ("$s", workflowId)))
+            SELECT t.name, m.name FROM members m JOIN teams t ON t.id = m.team_id WHERE m.workflow_id = $w ORDER BY t.name, m.name;
+            """, ("$w", workflowId)))
         {
             cmd.Transaction = tx;
             using var r = cmd.ExecuteReader();
@@ -233,7 +233,7 @@ public sealed class WorkflowLibrary : IWorkflowSchemaLookup
         }
         if (users.Count > 0)
             throw new WorkflowLibraryException("in_use", $"the workflow {key} is used by {string.Join(", ", users)}: remove or change those members first");
-        Exec(c, tx, "DELETE FROM workflows WHERE id = $s;", ("$s", workflowId));
+        Exec(c, tx, "DELETE FROM workflows WHERE id = $w;", ("$w", workflowId));
         tx.Commit();
     }
 
@@ -392,8 +392,8 @@ public sealed class WorkflowLibrary : IWorkflowSchemaLookup
         var list = new List<SchemaUse>();
         using var c = Open();
         using var cmd = Cmd(c, """
-            SELECT s.id, v.name, v.version, v.document, v.check_result FROM workflow_versions v JOIN workflows s ON s.id = v.workflow_id
-            WHERE v.version = s.latest_version ORDER BY v.name COLLATE NOCASE, s.id;
+            SELECT wf.id, v.name, v.version, v.document, v.check_result FROM workflow_versions v JOIN workflows wf ON wf.id = v.workflow_id
+            WHERE v.version = wf.latest_version ORDER BY v.name COLLATE NOCASE, wf.id;
             """);
         using var r = cmd.ExecuteReader();
         while (r.Read())
@@ -527,10 +527,10 @@ public sealed class WorkflowLibrary : IWorkflowSchemaLookup
         var list = new List<SchemaBreak>();
         using var c = Open();
         using var cmd = Cmd(c, """
-            SELECT s.id, s.workflow_key, v.version, v.check_result FROM workflow_versions v JOIN workflows s ON s.id = v.workflow_id
-            WHERE v.version = s.latest_version OR v.version = s.runnable_version
-               OR v.version IN (SELECT m.workflow_version FROM members m WHERE m.kind = 'workflow' AND m.workflow_id = s.id)
-            ORDER BY s.workflow_key, v.version;
+            SELECT wf.id, wf.workflow_key, v.version, v.check_result FROM workflow_versions v JOIN workflows wf ON wf.id = v.workflow_id
+            WHERE v.version = wf.latest_version OR v.version = wf.runnable_version
+               OR v.version IN (SELECT m.workflow_version FROM members m WHERE m.kind = 'workflow' AND m.workflow_id = wf.id)
+            ORDER BY wf.workflow_key, v.version;
             """);
         using var r = cmd.ExecuteReader();
         while (r.Read())

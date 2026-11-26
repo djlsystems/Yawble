@@ -74,16 +74,20 @@ public sealed class ApiWorkflowActionsEngineTests : IAsyncLifetime
     private IntegrationService _svc = null!;
     private WorkflowActionKinds _kinds = null!;
     private long _alpha;
+    private HttpStatusCode _status = HttpStatusCode.Created;
+    private string _response = """{"sid":"SM1","status":"queued"}""";
+    private string? _url;
 
     public async ValueTask InitializeAsync()
     {
         _http.Add(Host + "/openapi.json", Spec);
         _http.Add(Messages, req =>
         {
+            _url = req.RequestUri!.AbsoluteUri;
             _sent.Add((req.Content?.Headers.ContentType?.MediaType, req.Content?.ReadAsStringAsync().Result, req.Headers.Authorization?.ToString()));
-            return new HttpResponseMessage(HttpStatusCode.Created)
+            return new HttpResponseMessage(_status)
             {
-                Content = new StringContent("""{"sid":"SM1","status":"queued"}""", Encoding.UTF8, "application/json"),
+                Content = new StringContent(_response, Encoding.UTF8, "application/json"),
             };
         });
         _engine = new BusEngine(_db.OpenStore(), new ScriptedRunner(), new BusOptions { SafetyPoll = TimeSpan.FromMilliseconds(100), IdleOffer = false });
@@ -186,6 +190,7 @@ public sealed class ApiWorkflowActionsEngineTests : IAsyncLifetime
         Assert.Equal(201, (long?)r.Outputs!["status"]);
         Assert.Equal("SM1", (string?)r.Outputs["sid"]);
         var sent = Assert.Single(_sent);
+        Assert.Equal(Messages, _url);
         Assert.Equal("application/x-www-form-urlencoded", sent.ContentType);
         Assert.Equal("To=%2B15550000001&From=%2B15550000002&Body=Hello+from+a+workflow", sent.Body);
         Assert.Equal("Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(AccountId + ":" + Token)), sent.Auth);
@@ -227,5 +232,38 @@ public sealed class ApiWorkflowActionsEngineTests : IAsyncLifetime
         Assert.Equal(WorkflowRunStatus.Failed, r.Status);
         Assert.Contains("refused: sms is not turned on for Beta", r.Reason);
         Assert.Empty(_sent);
+    }
+
+    [Fact]
+    public async Task AnActionTurnedOff_FailsTheStep_WithoutSending()
+    {
+        await Rpc("integrations.saveChecklist", new JsonObject
+        {
+            ["name"] = "sms", ["kind"] = "api", ["teamId"] = _alpha,
+            ["choices"] = new JsonArray(new JsonObject { ["path"] = "CreateMessage", ["state"] = "off" }),
+        });
+
+        var r = await Run(WorkflowSamples.Workflow(SendSteps, variables: SendVariables, requires: Requires));
+
+        Assert.Equal(WorkflowRunStatus.Failed, r.Status);
+        Assert.Equal("a", r.FailedStepId);
+        Assert.Empty(_sent);
+    }
+
+    [Fact]
+    public async Task ABadRequestAnswer_FailsTheStep_WithTheStatusAndTheBodyWithoutTheCredential()
+    {
+        _status = HttpStatusCode.BadRequest;
+        _response = "{\"message\":\"bad destination\",\"echo\":\"" + Token + "\"}";
+
+        var r = await Run(WorkflowSamples.Workflow(SendSteps, variables: SendVariables, requires: Requires));
+
+        Assert.Equal(WorkflowRunStatus.Failed, r.Status);
+        Assert.Equal("a", r.FailedStepId);
+        Assert.Contains("400", r.Reason);
+        Assert.Contains("bad destination", r.Reason);
+        Assert.DoesNotContain(Token, r.Reason);
+        Assert.Contains("[redacted]", r.Reason);
+        Assert.Single(_sent);
     }
 }

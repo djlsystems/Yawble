@@ -99,7 +99,7 @@ public sealed class RunContext
     public Task<Message> NeedsDecisionAsync(string question, CancellationToken ct = default) =>
         _engine.ReportAsync(this, MessageTypes.NeedsDecision, new { question }, ct, statusLine: "needs decision: " + question);
 
-    /// <summary>A decision with a summary, 2-4 options and details (DecisionAsk); a question-only ask is stored as before.</summary>
+    /// <summary>A decision with a summary, 2-4 options and details (DecisionAsk); a question-only ask is stored as its question alone.</summary>
     public Task<Message> NeedsDecisionAsync(DecisionAsk ask, CancellationToken ct = default) =>
         ask.Close is not null ? _engine.AskCloseOverFailAsync(this, ask, ct) // tied to a tester's FAIL
         : ask is { Summary: null, Options: null, Details: null }

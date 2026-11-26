@@ -635,6 +635,7 @@ public class CompanionServiceTests : IDisposable
         var expired = rig.Service.Status(cc, r.RequestId!)!;
         Assert.Equal(ActionState.Expired, expired.State);
         Assert.Equal("expired: not decided within 7 days", expired.Result);
+        Assert.Contains("expired: not decided within 7 days", (await rig.Service.CallAsync(cc, "request_status", new JsonObject { ["id"] = r.RequestId }, Ct)).Text);
         Assert.Equal(ActionState.Expired, (await rig.Approve(r.RequestId!)).State);
         Assert.DoesNotContain(rig.Methods, m => m == "teams.delete");
     }
@@ -982,7 +983,7 @@ public class CompanionServiceTests : IDisposable
         Assert.Equal("companion.changed", CompanionService.ChangedEvent);
     }
 
-    // ---------------------------------------------------------------- fix round 1
+    // ---------------------------------------------------------------- failures, audit and pinned plans
 
     [Fact]
     public async Task ExecutorFailuresFinishTheRequest_AndItIsNeverLeftRunning()
@@ -1223,7 +1224,7 @@ public class CompanionServiceTests : IDisposable
         Assert.Empty(rig.Service.ListForWindow()["actions"]!.AsArray());
     }
 
-    // ---------------------------------------------------------------- fix round 2
+    // ---------------------------------------------------------------- unpinned tips, masked texts, undone pairings
 
     [Fact]
     public async Task APushOrSyncWhoseTipCannotBePinnedSaysSo()
@@ -1298,7 +1299,7 @@ public class CompanionServiceTests : IDisposable
         Assert.Contains("not collected", row.Outcome);
     }
 
-    // ---------------------------------------------------------------- final fix round
+    // ---------------------------------------------------------------- runs after approval, re-paired names, late approvals
 
     [Fact]
     public async Task AnApprovalAnswersRunningAtOnce_TheRunFinishesByItselfAndIsAnnounced()
@@ -1656,6 +1657,8 @@ public class CompanionServiceTests : IDisposable
         Assert.Equal(Iso(asked), actions[0]!["asked"]!.GetValue<string>());
         Assert.Equal(Iso(asked + CompanionService.ActionCap), actions[0]!["expires"]!.GetValue<string>());
         Assert.Equal(Iso(later), actions[1]!["asked"]!.GetValue<string>());
+        Assert.All(actions, a => Assert.Equal("pending", a!["state"]!.GetValue<string>()));
+        Assert.DoesNotMatch(@"\b[0-9a-f]{16}\b", listed.ToJsonString()); // no key and no hash of one
         Assert.Equal(2, rig.Service.PendingCount); // a day old: still waiting on the person
 
         // Requests are in memory: after a restart the client is told so.

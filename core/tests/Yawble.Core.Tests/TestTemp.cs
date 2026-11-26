@@ -7,19 +7,10 @@ namespace Yawble.Core.Tests;
 /// process before any test runs, by pointing the temp variables (TMP and TEMP on Windows, TMPDIR elsewhere) at it, so
 /// <see cref="Path.GetTempPath"/>, <see cref="Directory.CreateTempSubdirectory(string?)"/> and every child process
 /// (git above all) use it without each test knowing.
-///
-/// Why: inside an agent's sandbox the temp folder is deep (the member's home, then AppData\Local\Packages\sandbox.{guid}\AC\Temp,
-/// close to 190 characters), and a test repository's object paths below it pass Windows' 260-character limit, so
-/// git fails with "Filename too long". The root is:
-/// <list type="bullet">
-/// <item>the folder in <see cref="Variable"/> when it is set (a person or a CI run can choose any short folder);</item>
-/// <item>otherwise, when the process's temp folder is deep (longer than <see cref="DeepTemp"/> characters), a short
-///   folder in the user's home (in a sandbox, the member's own home, which the sandbox can write);</item>
-/// <item>otherwise the process's temp folder, unchanged (on a person's computer nothing moves).</item>
-/// </list>
-/// Git's <c>core.longpaths=true</c> is also given (by GIT_CONFIG_COUNT) to every git the tests start that inherits the
-/// environment, as a second guard for a repository that is still deep; the product's own git drops inherited GIT_*
-/// variables, so it is not changed by this.
+/// The root is the folder in <see cref="Variable"/> when it is set; otherwise, when the process's temp folder is longer
+/// than <see cref="DeepTemp"/> characters (inside an agent's sandbox it is close to 190, and a test repository below
+/// it passes Windows' 260-character path limit), a short folder in the user's home; otherwise the process's temp folder.
+/// Every git the tests start that inherits the environment also gets <c>core.longpaths=true</c>.
 /// </summary>
 internal static class TestTemp
 {

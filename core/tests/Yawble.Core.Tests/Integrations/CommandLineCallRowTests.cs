@@ -15,7 +15,7 @@ namespace Yawble.Core.Tests.Integrations;
 /// names, and of the content options and phone numbers only their length or last 4 digits, while the program itself gets every word.
 /// An allowed call and an asked-then-approved one both go through the row writer. The fake program only echoes its arguments.
 /// </summary>
-public class CommandLineCallRowVerifyTests
+public class CommandLineCallRowTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

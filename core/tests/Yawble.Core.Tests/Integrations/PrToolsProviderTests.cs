@@ -144,6 +144,13 @@ public class PrToolsProviderTests
         }
     }
 
+    private static readonly string[] Clis = ["gh", "glab", "az"];
+
+    private static void RanNothing(string said)
+    {
+        foreach (var cli in Clis) Assert.DoesNotContain(cli + " ran", said);
+    }
+
     [Fact]
     public async Task GitLabOrigin_WithOnlyGlab_OffersBoth_StatusRunsGlab_OpenAsksForGlabMrCreate()
     {
@@ -179,10 +186,25 @@ public class PrToolsProviderTests
 
         foreach (var said in new[] { await rig.PrOpen(), await rig.PrStatus() })
         {
-            Assert.DoesNotContain("gh ran", said);
+            RanNothing(said);
             Assert.Contains("made from here with glab, which is not enabled for your team", said);
         }
+        Assert.Contains("glab auth login", await rig.PrOpen());
         Assert.Empty(rig.Pending);
+        // nothing asked and nothing run: gh's audit has no pr create
+        Assert.DoesNotContain(rig.Integrations.Asks(rig.Alpha, pendingOnly: false), a => a.Integration == "gh");
+    }
+
+    /// <summary>An unknown host is detected as no provider; once the person sets GitLab for the repository, glab runs.</summary>
+    [Theory]
+    [InlineData("https://gitlab.example.com:8443/acme/platform/app.git")]
+    [InlineData("ssh://git@gitlab.example.com:2222/acme/platform/app.git")]
+    public async Task SelfHostedGitLabWithPortAndNestedGroups_SetToGitLab_WithOnlyGlab_RunsGlab(string origin)
+    {
+        await using var rig = await Rig.Make(origin, "glab");
+        rig.Repos.SetHostSetting(rig.Alpha, null, RepoProviderKind.GitLab, null);
+        Assert.Contains("pr_status", await rig.Tools());
+        Assert.Contains("glab ran mr list --source-branch team/alpha", await rig.PrStatus());
     }
 
     [Fact]
@@ -196,10 +218,14 @@ public class PrToolsProviderTests
         Assert.Equal("glab", Assert.Single(rig.Pending).Integration);
     }
 
-    [Fact]
-    public async Task AzureDevOpsOrigin_WithOnlyAz_OffersBoth_AndRunsAzRepos()
+    [Theory]
+    [InlineData("https://dev.azure.com/acme/proj/_git/app")]
+    [InlineData("https://acme.visualstudio.com/Proj/_git/app")]
+    [InlineData("git@ssh.dev.azure.com:v3/acme/Proj/app")]
+    [InlineData("acme@vs-ssh.visualstudio.com:v3/acme/Proj/app")]
+    public async Task AzureDevOpsOrigin_WithOnlyAz_OffersBoth_AndRunsAzRepos(string origin)
     {
-        await using var rig = await Rig.Make("https://dev.azure.com/acme/proj/_git/app", "az");
+        await using var rig = await Rig.Make(origin, "az");
 
         var tools = await rig.Tools();
         Assert.Contains("pr_open", tools);
@@ -214,7 +240,7 @@ public class PrToolsProviderTests
     }
 
     [Fact]
-    public async Task GitHubOrigin_RunsGh_AsBefore()
+    public async Task GitHubOrigin_RunsGh()
     {
         await using var rig = await Rig.Make("https://github.com/acme/app.git", "gh", "glab", "az");
         Assert.Contains("gh ran pr list --head team/alpha --state all", await rig.PrStatus());
@@ -235,16 +261,25 @@ public class PrToolsProviderTests
     }
 
     [Theory]
-    [InlineData("git@bitbucket.org:acme/app.git", null, "not supported for Bitbucket from here")]
-    [InlineData("https://codeberg.org/acme/app.git", null, "not supported for Gitea from here")]
-    [InlineData("https://git.example.org/acme/app.git", null, "not supported for git.example.org from here")]
-    [InlineData("https://github.com/acme/app.git", RepoProviderKind.Gitea, "not supported for Gitea from here")]
-    [InlineData("https://github.com/acme/app.git", RepoProviderKind.Bitbucket, "not supported for Bitbucket from here")]
-    [InlineData("https://github.com/acme/app.git", RepoProviderKind.None, "not supported for github.com from here")]
-    [InlineData(null, null, "has no remote (no origin)")]
-    public async Task NoPullRequestProvider_WithGhEnabled_OffersBoth_ThatSaySoAndRunNothing(string? origin, RepoProviderKind? overrideKind, string expected)
+    [InlineData("gh", "git@bitbucket.org:acme/app.git", null, "not supported for Bitbucket from here")]
+    [InlineData("gh", "https://codeberg.org/acme/app.git", null, "not supported for Gitea from here")]
+    [InlineData("gh", "https://git.example.org/acme/app.git", null, "not supported for git.example.org from here")]
+    [InlineData("gh", "https://github.com/acme/app.git", RepoProviderKind.Gitea, "not supported for Gitea from here")]
+    [InlineData("gh", "https://github.com/acme/app.git", RepoProviderKind.Bitbucket, "not supported for Bitbucket from here")]
+    [InlineData("gh", "https://github.com/acme/app.git", RepoProviderKind.None, "not supported for github.com from here")]
+    [InlineData("gh", null, null, "has no remote (no origin)")]
+    [InlineData("glab", "git@bitbucket.org:acme/app.git", null, "not supported for Bitbucket from here")]
+    [InlineData("az", "git@bitbucket.org:acme/app.git", null, "not supported for Bitbucket from here")]
+    [InlineData("glab", "https://gitea.com/acme/app.git", null, "not supported for Gitea from here")]
+    [InlineData("az", "https://codeberg.org/acme/app.git", null, "not supported for Gitea from here")]
+    [InlineData("glab", "https://git.example.org/acme/app.git", null, "not supported for git.example.org from here")]
+    [InlineData("az", "https://gitlab.com/acme/app.git", RepoProviderKind.None, "not supported for gitlab.com from here")]
+    [InlineData("glab", "https://gitlab.com/acme/app.git", RepoProviderKind.Bitbucket, "not supported for Bitbucket from here")]
+    [InlineData("glab", null, null, "has no remote (no origin)")]
+    [InlineData("az", null, null, "has no remote (no origin)")]
+    public async Task NoPullRequestProvider_WithAPullRequestCliEnabled_OffersBoth_ThatSaySoAndRunNothing(string cli, string? origin, RepoProviderKind? overrideKind, string expected)
     {
-        await using var rig = await Rig.Make(origin, "gh");
+        await using var rig = await Rig.Make(origin, cli);
         if (overrideKind is { } k) rig.Repos.SetHostSetting(rig.Alpha, null, k, null);
 
         var tools = await rig.Tools();
@@ -253,8 +288,47 @@ public class PrToolsProviderTests
         foreach (var said in new[] { await rig.PrOpen(), await rig.PrStatus() })
         {
             Assert.Contains(expected, said);
-            Assert.DoesNotContain("gh ran", said);
+            RanNothing(said);
         }
+        Assert.Empty(rig.Pending);
+    }
+
+    [Fact]
+    public async Task NoOrigin_TextNamesTheRepository()
+    {
+        await using var rig = await Rig.Make(null, "gh", "glab", "az");
+        Assert.Contains("main has no remote (no origin)", await rig.PrStatus());
+    }
+
+    [Theory]
+    [InlineData("https://github.com/acme/app.git")]
+    [InlineData("git@gitlab.com:acme/app.git")]
+    [InlineData(null)]
+    public async Task NoPullRequestCliEnabled_NotOffered(string? origin)
+    {
+        await using var rig = await Rig.Make(origin);
+        var tools = await rig.Tools();
+        Assert.DoesNotContain("pr_open", tools);
+        Assert.DoesNotContain("pr_status", tools);
+    }
+
+    [Fact]
+    public async Task ACredentialInTheOrigin_NeverReachesTheText()
+    {
+        await using var rig = await Rig.Make("https://ada:s3cr3tT0ken@bitbucket.org/acme/app.git", "glab");
+        var said = await rig.PrStatus();
+        Assert.Contains("not supported for Bitbucket from here", said);
+        Assert.DoesNotContain("s3cr3tT0ken", said);
+        Assert.DoesNotContain("ada:", said);
+        RanNothing(said);
+    }
+
+    [Fact]
+    public async Task UnknownRepoName_RefusedBeforeAnythingRuns()
+    {
+        await using var rig = await Rig.Make("https://github.com/acme/app.git", "gh");
+        var said = await rig.PrStatus("nope");
+        RanNothing(said);
         Assert.Empty(rig.Pending);
     }
 
@@ -279,6 +353,19 @@ public class PrToolsProviderTests
         Assert.Contains("pr_open", await rig.Tools()); // offered for cloud, on GitLab
         Assert.Contains("glab ran mr list --source-branch team/alpha", await rig.PrStatus("cloud"));
         Assert.Contains("made from here with gh, which is not enabled", await rig.PrStatus());
+    }
+
+    [Fact]
+    public async Task ExtraWithNoOrigin_MainOnGitHubWithOnlyGlab_OfferedForTheExtra_MainNamesGh()
+    {
+        await using var rig = await Rig.Make("https://github.com/acme/app.git", "glab");
+        var local = rig.GitDir("local-repo", null);
+        await rig.Repos.AddExtraAsync(rig.Alpha, "Alpha", "local", local, null, writable: true, Ct);
+        Assert.Contains("pr_status", await rig.Tools());
+        Assert.Contains("local has no remote (no origin)", await rig.PrStatus("local"));
+        var main = await rig.PrStatus();
+        Assert.Contains("made from here with gh, which is not enabled", main);
+        RanNothing(main);
     }
 
     [Fact]

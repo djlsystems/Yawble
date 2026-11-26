@@ -266,7 +266,7 @@ public class McpChecklistTests
         Assert.Equal(1, rig.Integrations.Discover.GetMcpChecklist("fake", null).NewCount);
         Assert.Equal(2, rig.Integrations.Discover.GetMcpChecklist("fake", null).Runs);
         Assert.Equal(Decisions.Allow, rig.Node(null, "get_thing").DefaultDecision); // a saved choice is kept
-        // the tools of the server are stored as before (mcpCheck keeps working)
+        // the tools of the server are stored too (mcpCheck reads them)
         Assert.Equal(3, (await rig.Rpc("integrations.mcpCheck", new JsonObject { ["name"] = "fake" }))!["tools"]!.GetValue<int>());
     }
 
@@ -366,7 +366,7 @@ public class McpChecklistTests
     }
 
     [Fact]
-    public async Task I2_Mcp_ATeamChoiceIsComparedWithTheTeamsOtherRules_NotOnlyTheDefault()
+    public async Task Mcp_ATeamChoiceIsComparedWithTheTeamsOtherRules_NotOnlyTheDefault()
     {
         if (CliRunner.Find("node") is null) Assert.Skip("node is not installed here");
         await using var rig = await Rig.Make(null, "create_issue", "get_thing");

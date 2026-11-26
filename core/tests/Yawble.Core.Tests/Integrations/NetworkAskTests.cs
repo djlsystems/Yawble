@@ -104,6 +104,18 @@ public sealed class NetworkAskTests : IDisposable
     [InlineData("xn--pypi-xxa.org")]
     [InlineData("api.nuget.org.")] // the gateway compares the name as sent
     [InlineData("api_nuget.org")]
+    [InlineData("127.0.0.1")]
+    [InlineData("0.0.0.0")]
+    [InlineData("172.16.0.1")]
+    [InlineData("2130706433")] // 127.0.0.1 as one number
+    [InlineData("fe80::1")]
+    [InlineData("[::ffff:10.0.0.1]")]
+    [InlineData("LOCALHOST.")]
+    [InlineData("box.internal")]
+    [InlineData("files.corp")]
+    [InlineData("nas.localdomain")]
+    [InlineData("https://api.nuget.org/v3/index.json")] // a URL from the gateway is not a host name
+    [InlineData("user@api.nuget.org")]
     public void HostsThatAreNeverAskedAbout_StayPlainRefusals(string host)
     {
         Assert.NotNull(NetworkAskFilter.Problem(host));
@@ -292,6 +304,15 @@ public sealed class NetworkAskTests : IDisposable
         await _asks.AnswerAsync(id, NetworkAskChoices.Agent, null, Ct);
         await Assert.ThrowsAsync<ArgumentException>(() => _asks.AnswerAsync(id, NetworkAskChoices.Deny, null, Ct));
         Assert.Single(_told);
+    }
+
+    [Fact]
+    public async Task AnAnswer_PushesTheChange_SoNeedsYouRefreshes()
+    {
+        _asks.Refused("Alpha/Priya", "api.nuget.org", "CONNECT", null);
+        Assert.Equal(1, _changed);
+        await _asks.AnswerAsync(Assert.Single(_asks.Asks()).Id, NetworkAskChoices.Deny, null, Ct);
+        Assert.Equal(2, _changed);
     }
 
     [Fact]
@@ -494,8 +515,34 @@ public sealed class NetworkAskTests : IDisposable
         var pypi = Assert.Single(open, a => a.Host == "pypi.org");
         Assert.Equal(("GET", "/simple/"), (pypi.Method, pypi.PathSample));
 
-        // The gateway log keeps the refusal as before.
+        // The gateway log keeps the refusal.
         Assert.Contains(f.Log.Read(5), e => e.Kind == GatewayEventKinds.ConnectDenied && e.Target == "api.nuget.org:443" && e.Detail == RunGateway.NotOnAllowlist);
+    }
+
+    [Fact]
+    public async Task TheGateway_LoopbackPrivateAndAppHosts_StayPlainRefusals()
+    {
+        await using var f = await GatewayFixture.StartAsync();
+        var team = InsertIn(f.Db, "INSERT INTO teams (name, created_at) VALUES ('Alpha', '2026-11-13T00:00:00Z') RETURNING id;");
+        InsertIn(f.Db, $"INSERT INTO members (team_id, name, role, created_at) VALUES ({team}, 'm5', 'member', '2026-11-13T00:00:00Z') RETURNING id;");
+        var policies = new PolicyStore(f.Db.ConnectionString);
+        var layout = PolicyFixtures.Layout(TargetOs.Windows, AgentCli.Claude);
+        var asks = new NetworkAskService(f.Db.ConnectionString,
+            new StoreNetworkPolicy(policies, (_, _) => Task.FromResult(layout), _ => Task.FromResult<RunLayout?>(layout)), (_, _, _, _, _) => Task.CompletedTask, f.Clock);
+        f.Host.Refusals = asks;
+        await using var gateway = f.StartRun(5);
+
+        foreach (var target in new[] { "localhost:443", "api.localhost:443", "10.0.0.5:443", "[::1]:443", "printer.local:443", "nas.lan:443", "cloud.yawble.ai:443" })
+        {
+            var (status, stream, client) = await ProxyClient.RawAsync(gateway, $"CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n");
+            using (client)
+            {
+                Assert.StartsWith("HTTP/1.1 403", status);
+                using var reader = new StreamReader(stream);
+                Assert.DoesNotContain("request_host", await reader.ReadToEndAsync(Ct));
+            }
+        }
+        Assert.Empty(asks.Asks(pendingOnly: false));
     }
 
     [Fact]
@@ -505,6 +552,7 @@ public sealed class NetworkAskTests : IDisposable
         Assert.Contains("request_host", RunGateway.AllowlistText("api.nuget.org", HostAskOutcome.Asked));
         Assert.Contains("request_host", RunGateway.AllowlistText("api.nuget.org", HostAskOutcome.Pending));
         Assert.Contains("denied api.nuget.org", RunGateway.AllowlistText("api.nuget.org", HostAskOutcome.Denied));
+        Assert.DoesNotContain("request_host", RunGateway.AllowlistText("api.nuget.org", HostAskOutcome.Denied));
         Assert.Contains("next run", RunGateway.AllowlistText("api.nuget.org", HostAskOutcome.AllowedNextRun));
     }
 

@@ -216,7 +216,7 @@ public class GrokKeeperTests
     [Fact]
     public async Task APromptRunThatLeavesAuthJsonEmpty_GetsItPutBack()
     {
-        // What was seen on 2026-11-22: `grok models` exit 0 (no change), then `grok -p` exit 1 and auth.json was `{}`.
+        // What grok does when xAI refuses the refresh: `grok models` exits 0 (no change), then `grok -p` exits 1 and leaves auth.json as `{}`.
         using var db = new TempDb();
         var home = GrokHome.InDataDir(Path.Combine(db.Dir, "data")).EnsureCreated();
         FakeSecrets.WriteGrokAuth(home, FakeSecrets.GrokSession1, DateTimeOffset.UtcNow.AddSeconds(-5)); // expired, refresh token

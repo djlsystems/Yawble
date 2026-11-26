@@ -317,10 +317,10 @@ public sealed class LinuxToolInstallTests : IDisposable
         Assert.Equal("bad_params", (await Assert.ThrowsAsync<RpcException>(() => CheckAgain(id + 100))).Code);
     }
 
-    // ------------------------------------------------------------------ gap tests (TesterWren)
+    // ------------------------------------------------------------------ who may install, pkexec waiting, the home-only note
 
     [Fact]
-    public async Task Gap_AnApprovedCompanionCall_IsStillRefusedInstallAndCheckAgain()
+    public async Task AnApprovedCompanionCall_IsStillRefusedInstallAndCheckAgain()
     {
         Offer(LinuxPackager.Dnf);
         var id = await Asked("python-3");
@@ -333,7 +333,7 @@ public sealed class LinuxToolInstallTests : IDisposable
     }
 
     [Fact]
-    public async Task Gap_TheCloudLinkMayNotInstallOnLinux_EvenWithPkexec()
+    public async Task TheCloudLinkMayNotInstallOnLinux_EvenWithPkexec()
     {
         Offer(LinuxPackager.Dnf);
         var id = await Asked("nodejs-lts");
@@ -344,7 +344,7 @@ public sealed class LinuxToolInstallTests : IDisposable
     }
 
     [Fact]
-    public async Task Gap_WhilePkexecWaitsForThePassword_CheckAgainIsBusy_AndASecondInstallIsBusy()
+    public async Task WhilePkexecWaitsForThePassword_CheckAgainIsBusy_AndASecondInstallIsBusy()
     {
         Offer(LinuxPackager.Dnf);
         var id = await Asked("dotnet-sdk-10");
@@ -367,7 +367,7 @@ public sealed class LinuxToolInstallTests : IDisposable
     }
 
     [Fact]
-    public async Task Gap_CancelledThenNotAuthorized_KeepTheAttemptsCount_AndNoManagerIsTold()
+    public async Task CancelledThenNotAuthorized_KeepTheAttemptsCount_AndNoManagerIsTold()
     {
         Offer(LinuxPackager.Pacman);
         var id = await Asked("python-3");
@@ -384,7 +384,7 @@ public sealed class LinuxToolInstallTests : IDisposable
     }
 
     [Fact]
-    public async Task Gap_ExitCode126WithoutPkexec_IsNotPossible_TheManualPathRunsNothing()
+    public async Task ExitCode126WithoutPkexec_IsNotPossible_TheManualPathRunsNothing()
     {
         _host.Installer = null;
         var id = await Asked("dotnet-sdk-10");
@@ -394,7 +394,7 @@ public sealed class LinuxToolInstallTests : IDisposable
     }
 
     [Fact]
-    public async Task Gap_HomeOnly_AfterAFailedInstall_TheErrorCarriesTheOutputAndTheHomeNote()
+    public async Task HomeOnly_AfterAFailedInstall_TheErrorCarriesTheOutputAndTheHomeNote()
     {
         Offer(LinuxPackager.Dnf);
         var id = await Asked("dotnet-sdk-10");
@@ -407,12 +407,12 @@ public sealed class LinuxToolInstallTests : IDisposable
         var message = r["message"]!.GetValue<string>();
         Assert.Contains("did not finish (exit code 1: No match for argument", message);
         var note = (await Item())["homeOnly"]!.GetValue<string>();
-        Assert.EndsWith(note, message); // the item's note is a suffix of the error, not equal to it (see the shell gap test)
+        Assert.EndsWith(note, message); // the item's note is a suffix of the error, not equal to it
         Assert.NotEqual(note, Assert.Single(_asks.Asks()).Error);
     }
 
     [Fact]
-    public async Task Gap_HomeOnly_IsNotOfferedOnceTheProgramIsWhereARunLooks()
+    public async Task HomeOnly_IsNotOfferedOnceTheProgramIsWhereARunLooks()
     {
         _host.Installer = null;
         var id = await Asked("dotnet-sdk-10");
@@ -468,7 +468,7 @@ public sealed class LinuxToolInstallTests : IDisposable
         Assert.Null(_asks.Asks(openOnly: false).Single(a => a.Id == id).LastResult);
     }
 
-    // ------------------------------------------------------------------ lastResult gap tests
+    // ------------------------------------------------------------------ lastResult
 
     private long Scalar(string sql)
     {
@@ -480,14 +480,14 @@ public sealed class LinuxToolInstallTests : IDisposable
     }
 
     [Fact]
-    public void Gap_0042_OnAFreshDatabase_AddsANullableLastResultColumn()
+    public void Migration0042_OnAFreshDatabase_AddsANullableLastResultColumn()
     {
         Assert.Contains("0042_tool_ask_last_result", SchemaMigrator.Migrate(_db.ConnectionString));
         Assert.Equal(1, Scalar("SELECT count(*) FROM pragma_table_info('tool_asks') WHERE name = 'last_result' AND \"notnull\" = 0 AND type = 'TEXT';"));
     }
 
     [Fact]
-    public async Task Gap_0042_OnAnUpgradedDatabase_KeepsTheAsks_WithNoLastResult_AndRunsOnce()
+    public async Task Migration0042_OnAnUpgradedDatabase_KeepsTheAsks_WithNoLastResult_AndRunsOnce()
     {
         Offer(LinuxPackager.Dnf);
         var id = await Asked("dotnet-sdk-10");
@@ -504,7 +504,7 @@ public sealed class LinuxToolInstallTests : IDisposable
 
         var ask = Assert.Single(_asks.Asks());
         Assert.Equal((id, "pending", 1, ToolAskService.CancelledMessage), (ask.Id, ask.State, ask.Attempts, ask.Error));
-        Assert.Null(ask.LastResult); // an ask from before 0042 has no code: the card shows its error as before
+        Assert.Null(ask.LastResult); // an ask stored without a code: the card shows its error text
         var item = await Item();
         Assert.True(item.ContainsKey("lastResult"));
         Assert.Null(item["lastResult"]);
@@ -516,7 +516,7 @@ public sealed class LinuxToolInstallTests : IDisposable
     }
 
     [Fact]
-    public async Task Gap_LastResult_ClearsOnInstallStart_EvenAfterACancel_AndOnCheckAgainFound()
+    public async Task LastResult_ClearsOnInstallStart_EvenAfterACancel_AndOnCheckAgainFound()
     {
         Offer(LinuxPackager.Apt);
         var id = await Asked("python-3");
@@ -544,7 +544,7 @@ public sealed class LinuxToolInstallTests : IDisposable
     }
 
     [Fact]
-    public void Gap_AnInstallTheAppClosedDuring_IsFailed_NotACancel()
+    public void AnInstallTheAppClosedDuring_IsFailed_NotACancel()
     {
         Insert($"INSERT INTO tool_asks (at, team_id, tool, member, count, last_seen, state, attempts, last_result) " +
                $"VALUES ('x', {_alpha}, 'nodejs-lts', 'Alpha/Priya', 1, 'x', 'installing', 1, 'cancelled') RETURNING id;");
@@ -557,7 +557,7 @@ public sealed class LinuxToolInstallTests : IDisposable
     }
 
     [Fact]
-    public async Task Gap_TheRemoteView_ReadsTheSameLastResult()
+    public async Task TheRemoteView_ReadsTheSameLastResult()
     {
         Offer(LinuxPackager.Dnf);
         var id = await Asked("dotnet-sdk-10");

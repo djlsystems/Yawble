@@ -427,7 +427,7 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
 
     // A batch: one connection and one transaction for many writes (the projector's page of bus messages), so the page
     // is one commit and one disk flush instead of one per statement. Only the thread that opened it uses it; every
-    // other caller keeps opening its own connection, as before.
+    // other caller opens its own connection.
     private SqliteConnection? _batch;
     private SqliteTransaction? _batchTx;
     private int _batchThread;

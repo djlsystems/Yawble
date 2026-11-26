@@ -273,7 +273,7 @@ still an agent's terminal window.
 
   `time` is the deliverable's overall time and where it went, the same object as on the `bus.deliverables` item:
   `createdAt`, `startedAt`, `endedAt` and `endedHow` (null while open), `open`, `overallMs`, `rebuilt` (from history,
-  for deliverables from before time accounting) and `breakdown` (`[{ "category", "ms" }]`, whose ms add up to `overallMs`).
+  for deliverables with no recorded times) and `breakdown` (`[{ "category", "ms" }]`, whose ms add up to `overallMs`).
   It is null when the app has no board. The timeline itself is `timeline.get { "deliverable": id }` (or `{ "card": id }`),
   which a Visitor may call.
 

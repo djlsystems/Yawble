@@ -20,7 +20,7 @@ public sealed class RepoProviderRpcTests : IAsyncLifetime
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private readonly TempDb _db = new();
-    private readonly string _work = Path.Combine(Path.GetTempPath(), "y446" + Guid.NewGuid().ToString("N")[..6]);
+    private readonly string _work = Path.Combine(Path.GetTempPath(), "yrepo" + Guid.NewGuid().ToString("N")[..6]);
     private BusEngine _bus = null!;
     private RpcDispatcher _rpc = null!;
     private string _cfg = null!;
@@ -46,7 +46,7 @@ public sealed class RepoProviderRpcTests : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         await _bus.DisposeAsync();
-        foreach (var dir in new[] { _work, _work + "lib" }.Where(Directory.Exists))
+        foreach (var dir in new[] { _work, _work + "lib", _work + "bb" }.Where(Directory.Exists))
         {
             foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)) File.SetAttributes(f, FileAttributes.Normal);
             try { Directory.Delete(dir, true); } catch (IOException) { }
@@ -155,6 +155,68 @@ public sealed class RepoProviderRpcTests : IAsyncLifetime
         // The main repository's override is untouched.
         Assert.Null(repoOverride((await Call("teams.repos", new JsonObject { ["teamId"] = teamId }))["main"]));
         static JsonNode? repoOverride(JsonNode? main) => main?["provider"];
+    }
+
+    [Fact]
+    public async Task SetRepoClearsWithEmptyStrings_MainIsMainInAnyCase_ABitbucketExtraHasNoPullRequests_AndAnUnpushedCommitHasNoLink()
+    {
+        Git("init", "-q", "-b", "main");
+        Git("commit", "-q", "--allow-empty", "-m", "first");
+        var pushed = Git("rev-parse", "HEAD");
+        Git("remote", "add", "origin", "https://oauth2:s3cr3tTOKEN@gitlab.corp.example:8443/grp/sub/app.git");
+        Git("update-ref", "refs/remotes/origin/main", pushed);
+        var teamId = await _bus.CreateTeamAsync("web", "Manager", "claude", _work, Ct);
+        await _bus.Repos!.EnsureTeamRepoAsync(teamId, "web", Ct);
+        Git("commit", "-q", "--allow-empty", "-m", "local only");
+        var unpushed = Git("rev-parse", "HEAD");
+
+        async Task<string?> Link(JsonObject p) => (await Call("git.webLink", p))["url"]?.GetValue<string>();
+
+        // Links by team name only and by id; the credential never shows; an unpushed commit has none.
+        Assert.Equal("https://gitlab.corp.example:8443/grp/sub/app/-/commit/" + pushed, await Link(new() { ["team"] = "web", ["kind"] = "commit", ["commit"] = pushed }));
+        Assert.Null(await Link(new() { ["teamId"] = teamId, ["team"] = "web", ["kind"] = "commit", ["commit"] = unpushed }));
+        Assert.Null(await Link(new() { ["teamId"] = teamId, ["kind"] = "file", ["commit"] = unpushed, ["file"] = "a.cs" }));
+        Assert.Equal("https://gitlab.corp.example:8443/grp/sub/app/-/compare/main...main",
+            await Link(new() { ["teamId"] = teamId, ["kind"] = "compare", ["from"] = "main", ["to"] = "main" }));
+        Assert.Equal("https://gitlab.corp.example:8443/grp/sub/app/-/merge_requests/4", await Link(new() { ["teamId"] = teamId, ["kind"] = "pr", ["pr"] = 4 }));
+
+        // teams.repos main: the five fields; provider null while detecting.
+        var main = (await Call("teams.repos", new JsonObject { ["teamId"] = teamId }))["main"]!.AsObject();
+        foreach (var k in new[] { "provider", "providerDetected", "linkPattern", "prSupported", "prUnavailable" }) Assert.True(main.ContainsKey(k), k);
+        Assert.Null(main["provider"]);
+        Assert.Equal("gitlab", main["providerDetected"]!.GetValue<string>());
+
+        // name "MAIN" is main; the pattern saved is used; "" provider and "" pattern clear it.
+        var set = await Call("teams.setRepo", new JsonObject { ["teamId"] = teamId, ["name"] = "MAIN", ["provider"] = "none", ["linkPattern"] = "{base}/c/{commit}" });
+        Assert.Equal(("none", "{base}/c/{commit}"), (set["provider"]!.GetValue<string>(), set["linkPattern"]!.GetValue<string>()));
+        Assert.Equal("https://gitlab.corp.example:8443/grp/sub/app/c/" + pushed, await Link(new() { ["teamId"] = teamId, ["kind"] = "commit", ["commit"] = pushed }));
+        Assert.Null(await Link(new() { ["teamId"] = teamId, ["kind"] = "commit", ["commit"] = unpushed })); // a pattern does not make an unpushed commit linkable
+        Assert.Null(await Link(new() { ["teamId"] = teamId, ["kind"] = "pr", ["pr"] = 4 }));            // none + no {pr} template
+        var cleared = await Call("teams.setRepo", new JsonObject { ["teamId"] = teamId, ["provider"] = "", ["linkPattern"] = "" });
+        Assert.Null(cleared["provider"]);
+        Assert.Null(cleared["linkPattern"]);
+        Assert.Equal("https://gitlab.corp.example:8443/grp/sub/app/-/commit/" + pushed, await Link(new() { ["teamId"] = teamId, ["kind"] = "commit", ["commit"] = pushed }));
+
+        // An extra on Bitbucket: its entry says pull requests are not supported; its links are Bitbucket's.
+        var bb = _work + "bb";
+        Directory.CreateDirectory(bb);
+        GitIn(bb, "init", "-q", "-b", "main");
+        GitIn(bb, "commit", "-q", "--allow-empty", "-m", "first");
+        var bsha = GitIn(bb, "rev-parse", "HEAD");
+        GitIn(bb, "remote", "add", "origin", "git@bitbucket.org:acme/tools.git");
+        GitIn(bb, "update-ref", "refs/remotes/origin/main", bsha);
+        await Call("teams.addRepo", new JsonObject { ["teamId"] = teamId, ["path"] = bb, ["name"] = "tools" });
+        var extra = (await Call("teams.repos", new JsonObject { ["teamId"] = teamId }))["extras"]!.AsArray().Single()!.AsObject();
+        foreach (var k in new[] { "provider", "providerDetected", "linkPattern", "prSupported", "prUnavailable" }) Assert.True(extra.ContainsKey(k), k);
+        Assert.Equal(("bitbucket", false), (extra["providerDetected"]!.GetValue<string>(), extra["prSupported"]!.GetValue<bool>()));
+        Assert.Contains("not supported for Bitbucket", extra["prUnavailable"]!.GetValue<string>());
+        Assert.Equal("https://bitbucket.org/acme/tools/commits/" + bsha, await Link(new() { ["teamId"] = teamId, ["repo"] = "tools", ["kind"] = "commit", ["commit"] = bsha }));
+        // The extra's override leaves main alone; an unknown repository is refused.
+        await Call("teams.setRepo", new JsonObject { ["teamId"] = teamId, ["name"] = "tools", ["provider"] = "gitea", ["linkPattern"] = null });
+        Assert.Equal("https://bitbucket.org/acme/tools/commit/" + bsha, await Link(new() { ["teamId"] = teamId, ["repo"] = "tools", ["kind"] = "commit", ["commit"] = bsha }));
+        Assert.Null((await Call("teams.repos", new JsonObject { ["teamId"] = teamId }))["main"]!["provider"]);
+        Assert.Equal("invalid", (await Assert.ThrowsAsync<RpcException>(() => _rpc.DispatchAsync("teams.setRepo", new JsonObject { ["teamId"] = teamId, ["name"] = "nope", ["provider"] = "github" }, Ct))).Code);
+        Assert.Equal("invalid", (await Assert.ThrowsAsync<RpcException>(() => _rpc.DispatchAsync("git.webLink", new JsonObject { ["teamId"] = teamId, ["repo"] = "nope", ["kind"] = "pr", ["pr"] = 1 }, Ct))).Code);
     }
 
     [Fact]

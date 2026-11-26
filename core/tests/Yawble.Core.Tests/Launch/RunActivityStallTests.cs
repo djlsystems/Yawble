@@ -12,9 +12,9 @@ namespace Yawble.Core.Tests.Launch;
 
 /// <summary>
 /// Stalled means the agent showed no sign of work for 10 minutes. A model request going out or streaming back
-/// is a sign of work: a run that talks to the model without calling the bus is working, not stalled. Seen 2026-11-18:
-/// one of DeveloperMarlo's cards showed 15 minutes Stalled while his run made model requests every few seconds. The idle
-/// watchdog still waits for a bus call.
+/// is a sign of work: a run that talks to the model without calling the bus is working, not stalled, even
+/// when its last bus call is 15 minutes old and it makes model requests every few seconds. The idle watchdog waits
+/// for a bus call all the same.
 /// </summary>
 public class RunActivityStallTests
 {

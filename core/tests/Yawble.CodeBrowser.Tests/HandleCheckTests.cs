@@ -4,17 +4,16 @@ using Xunit;
 namespace Yawble.CodeBrowser.Tests;
 
 /// <summary>
-/// Tester's break tests: the handle checks driven through the seams (HandlePath, LinkCount,
-/// AfterEnumerate) with fake final paths and link counts, plus a check that every refusal closes what it opened.
-/// They run on Windows (the Windows handle path) and, through the same seams, on macOS / Linux (the POSIX path);
-/// on this Windows machine the POSIX path is compiled but not run.
+/// The handle checks driven through the seams (HandlePath, LinkCount, AfterEnumerate) with fake final paths and
+/// link counts, plus a check that every refusal closes what it opened. They run on Windows (the Windows handle
+/// path) and, through the same seams, on macOS / Linux (the POSIX path).
 /// </summary>
-public class HandleCheckBreakTests : IDisposable
+public class HandleCheckTests : IDisposable
 {
     private readonly TempDir _tmp = new();
     private readonly string _clone;
 
-    public HandleCheckBreakTests()
+    public HandleCheckTests()
     {
         _clone = _tmp.Sub("clone");
         TempDir.Write(_clone, "src/app.cs", "class A {}\n");
@@ -28,7 +27,12 @@ public class HandleCheckBreakTests : IDisposable
         if (!OperatingSystem.IsWindows() && !PosixHandles.Supported) Assert.Skip("no handle checks on this OS or CPU");
     }
 
-    private static string Refused(Action a) => Assert.Throws<CodeBrowserException>(a) is { Code: CodeBrowserException.Refused } e ? e.Message : "wrong code";
+    private static string Refused(Action a)
+    {
+        var e = Assert.Throws<CodeBrowserException>(a);
+        Assert.Equal(CodeBrowserException.Refused, e.Code);
+        return e.Message;
+    }
 
     private static char Sep => Path.DirectorySeparatorChar;
 

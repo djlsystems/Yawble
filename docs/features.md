@@ -166,7 +166,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - Claude Code: the app's switch, a Claude subscription, or an Anthropic API key.
   - Grok: the app's switch, your Grok login, or an xAI API key.
   - The other CLIs: their own sign-in on this computer.
-- Credentials are kept in the OS credential store and used by the run's gateway, never inside the sandbox.
+- Credentials are kept in the OS credential store and used by the run's gateway outside the sandbox. Two cases put
+  your sign-in inside a member's own folder, where its agent can read it: a Codex terminal session, and every
+  Antigravity run.
 - Claude Code on macOS keeps its sign-in in the login Keychain item "Claude Code-credentials". The app's gateway reads
   it there with macOS's own `security` tool, the same tool Claude Code uses to keep the item, so macOS shows no
   Keychain prompt. The gateway keeps the token in memory and reads the item again only shortly before the token
@@ -198,8 +200,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 ## Sandbox and policy
 
 - Every agent run, Concierge turn and guardrail check runs in its own sandbox.
-- No model credential enters a sandbox. Each run has its own gateway on this computer. It is the run's only network
-  path, and it adds the real credential to model requests outside the sandbox.
+- Each run has its own gateway on this computer. It is the run's only network path, and it adds the real credential
+  to model requests outside the sandbox. The sandbox holds no model credential, except in a Codex terminal session
+  and an Antigravity run, which get a copy of your sign-in to that CLI.
 - The run gets a random run token. It works only for that run and stops when the run ends.
 - Network: model and team traffic go through the gateway. Other hosts are reachable only if allowed; every refusal
   is logged.
@@ -352,8 +355,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     when you pick it, exactly as the Network tab does (the same rights and the same audit entry), and only on a Mac.
 - **Decisions** (`needs_decision`): an agent asks you with a **summary** (the decision in one plain sentence),
   2 to 4 **options** (each a button with a label of at most 40 characters and the reply it sends), and **details**
-  (its findings, in Markdown, under the summary). A question in one Markdown text (`question`) still works and is
-  shown as before.
+  (its findings, in Markdown, under the summary). A question may also be one Markdown text (`question`); it is
+  shown as that text.
   - At most one option may carry an **action**, from a fixed list the app knows: `team.allowLocalhostMac`
     (turn on the team's Allow localhost (macOS)) and `deliverable.closeOverFail` (below). The agent only names it; nothing changes when it asks. When you
     pick that option the app applies the action first, then sends the option's reply as your answer. Anything else
@@ -471,7 +474,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - A card's or a deliverable's timeline (timeline.get) gives one row of category bands per card, the deliverable's summary
     row, and markers for planned, started, reopen, hand-back, question asked and answered, a run ended by the idle
     watchdog, and expired. A Visitor can read it.
-  - Cards from before time accounting have their timeline rebuilt from their history (planned, assigned, told,
+  - Cards with no recorded times have their timeline rebuilt from their history (planned, assigned, told,
     progress, handed back, done, moved, run ended, failed), marked "rebuilt from history"; a run the idle watchdog
     ended is Stalled from the line before it to its end.
   - The overall time shows as one quiet line (like 1h 12m 05s) on a card's bottom row, under each deliverable in the

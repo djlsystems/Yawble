@@ -24,7 +24,7 @@
     <None Include="Integrations/Fixtures/openapi/*" CopyToOutputDirectory="PreserveNewest" />
     <!-- The stand-in agent CLI that RealSandboxLauncherTests runs inside a real sandbox. -->
     <None Include="Launch/RealSandbox/standin-cli.py" CopyToOutputDirectory="PreserveNewest" />
-    <!-- A script the shell's designer built (shell/tests/unit/script-designer.test.ts) for DesignerBuiltWorkflowTests. -->
+    <!-- A workflow the shell's designer built (shell/tests/unit/workflow-designer.test.ts) for DesignerBuiltWorkflowTests. -->
     <None Include="Workflows/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>

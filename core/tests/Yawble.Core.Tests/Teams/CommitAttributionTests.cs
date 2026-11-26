@@ -6,6 +6,8 @@ namespace Yawble.Core.Tests.Teams;
 /// <summary>
 /// AI attribution in commit messages: each kind is found, a human co-author is left alone, and a member's branch whose
 /// new commits carry it is refused at fetch-back with the plain message (the commits are never rewritten).
+/// A hit is a line that starts, after optional spaces and in any letter case, with Co-Authored-By naming an AI,
+/// with Claude-Session:, or with an optional robot and "Generated with" an AI tool. Prose mid-line is not a hit.
 /// </summary>
 public class CommitAttributionTests
 {
@@ -42,6 +44,22 @@ public class CommitAttributionTests
     [InlineData("🤖 Generated with [Claude Code](https://claude.com/claude-code)")]
     [InlineData("Generated with Claude Code")]
     [InlineData("Generated with GitHub Copilot")]
+    // Other spellings: letter case, leading spaces or a tab, a space before the colon.
+    [InlineData("CO-AUTHORED-BY: CLAUDE <NOREPLY@ANTHROPIC.COM>")]
+    [InlineData("\tCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")]
+    [InlineData("Co-Authored-By : Claude <noreply@anthropic.com>")]
+    [InlineData("Co-Authored-By: Bot <noreply@openai.com>")]
+    [InlineData("Co-Authored-By: gemini-cli <x@example.com>")]
+    [InlineData("    Claude-Session: 0f3c")]
+    [InlineData("GENERATED WITH CLAUDE CODE")]
+    [InlineData("   Generated with [Codex](https://example.com)")]
+    // A tool's name or account with another address, or with none.
+    [InlineData("Co-Authored-By: Claude Code <noreply@example.com>")]
+    [InlineData("Co-Authored-By: claude[bot] <claude[bot]@users.noreply.github.com>")]
+    [InlineData("Co-Authored-By: Devin AI")]
+    [InlineData("Co-Authored-By: Claude Code")]
+    [InlineData("Co-Authored-By: claude[bot]")]
+    [InlineData("Co-Authored-By: Claude Dupont")]
     public void EachPatternIsCaught(string line)
     {
         var message = "Add the widget\n\nIt does the thing.\n\n" + line + "\n";
@@ -65,9 +83,56 @@ public class CommitAttributionTests
     [InlineData("- CommitAttribution: finds Co-Authored-By naming an AI vendor")]
     [InlineData("- Generated with Claude, the line is caught; a human one is not")]
     [InlineData("Notes: Co-Authored-By: Claude <noreply@anthropic.com> is refused")]
+    [InlineData("See the Co-Authored-By: Claude trailer rule in member.md")]
+    [InlineData("* Generated with Claude, then reviewed")]
+    [InlineData("> Claude-Session: quoted from a log")]
+    [InlineData("Co-Authored-By: Bob <bob@gptools.example>")]
+    [InlineData("Generated with make")]
+    [InlineData("Claude-Sessions are now kept")]
+    // A first name shared with a tool, with an address that does not repeat it, or with no address.
+    [InlineData("Co-Authored-By: Devin Aird <d.aird@example.com>")]
+    [InlineData("Co-Authored-By: Cody Botha <cody@example.com>")]
+    [InlineData("Co-Authored-By: Devin Aird")]
+    [InlineData("Co-Authored-By: Cody Botha")]
     public void HumanLinesAreLeftAlone(string line)
     {
         Assert.Empty(CommitAttribution.Find("Subject\n\n" + line + "\n"));
+    }
+
+    private const string Robot = "\U0001F916";
+
+    [Theory]
+    [InlineData(" Generated with [Claude Code](https://claude.com/claude-code)")]
+    [InlineData("Generated with [Claude Code](https://claude.com/claude-code)")]
+    [InlineData("  Generated with Claude Code")]
+    public void TheRobotLine_IsCaught_WithOrWithoutSpacesAroundTheRobot(string rest)
+    {
+        foreach (var line in new[] { Robot + rest, "  " + Robot + rest })
+            Assert.Equal([line.Trim()], CommitAttribution.Find("Subject\n\n" + line));
+    }
+
+    [Fact]
+    public void ASubjectLineCanItselfBeAHit()
+    {
+        Assert.True(CommitAttribution.Has("Generated with Claude Code"));
+    }
+
+    [Fact]
+    public void SeveralHitsInOneMessage_AreReportedInOrder_AndHumanOnesAreSkipped()
+    {
+        var message = "Subject\n\nCo-Authored-By: Jane <jane@x>\nClaude-Session: 1\n\nCo-Authored-By: Copilot <c@github.com>\n"
+            + Robot + " Generated with [Claude Code](https://claude.com/claude-code)\n";
+        Assert.Equal(
+            ["Claude-Session: 1", "Co-Authored-By: Copilot <c@github.com>", Robot + " Generated with [Claude Code](https://claude.com/claude-code)"],
+            CommitAttribution.Find(message));
+    }
+
+    [Fact]
+    public void AnEmptyOrCleanMessage_HasNoHits()
+    {
+        Assert.False(CommitAttribution.Has(""));
+        Assert.False(CommitAttribution.Has("\n\r\n"));
+        Assert.False(CommitAttribution.Has("Fix the build\n\nCo-Authored-By: Jane <jane@x>"));
     }
 
     [Fact]
@@ -100,6 +165,43 @@ public class CommitAttributionTests
         var found = CommitAttribution.ParseLog(log);
         Assert.Equal(["bbbb", "cccc"], found.Select(c => c.Sha));
         Assert.Equal(["Claude-Session: 1", "Co-Authored-By: Claude <noreply@anthropic.com>"], found[0].Lines);
+    }
+
+    [Fact]
+    public void ParseLog_EmptyAndCleanLogs_GiveNoCommits_AndAnUnterminatedLastRecordIsRead()
+    {
+        Assert.Empty(CommitAttribution.ParseLog(""));
+        Assert.Empty(CommitAttribution.ParseLog("aaaa\0Clean\n\x1e\nbbbb\0Also clean\n\x1e\n"));
+        var found = CommitAttribution.ParseLog("\naaaa\0Clean\n\x1e\ncccc\0Bad\n\nClaude-Session: 9");
+        Assert.Equal("cccc", Assert.Single(found).Sha);
+    }
+
+    [Fact]
+    public void LogFormat_SeparatesShaAndBodyAsParseLogExpects()
+    {
+        Assert.Equal("--format=%H%x00%B%x1e", CommitAttribution.LogFormat);
+    }
+
+    [Fact]
+    public void RefusalText_ListsAtMostFiveCommits_SaysHowManyMore_AndCopesWithAShortSha()
+    {
+        var commits = Enumerable.Range(1, 7)
+            .Select(i => new AttributedCommit(i == 1 ? "abc" : new string((char)('a' + i), 40), ["Claude-Session: " + i]))
+            .ToList();
+        var text = CommitAttribution.RefusalText("Bo", "members/alpha/bo", commits);
+        Assert.Contains("abc:", text);
+        Assert.Contains("Claude-Session: 5", text);
+        Assert.DoesNotContain("Claude-Session: 6", text);
+        Assert.Contains("and 2 more", text);
+        Assert.Contains("members/alpha/bo", text);
+        Assert.Contains("Bo must amend its own unpushed commits", text);
+    }
+
+    [Fact]
+    public void RefusalText_WithFiveOrFewer_SaysNoMore()
+    {
+        var text = CommitAttribution.RefusalText("Bo", "b", [new AttributedCommit(new string('a', 40), ["Claude-Session: 1"])]);
+        Assert.DoesNotContain("more", text.Split("these do:")[1].Split('.')[0]);
     }
 
     [Fact]

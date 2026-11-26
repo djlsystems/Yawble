@@ -74,8 +74,8 @@ public enum CredentialMode
     /// </summary>
     CopilotGatewaySignIn,
 
-    /// <summary>Antigravity with the person's own sign-in. Not usable: its sign-in is in the OS credential store and
-    /// it has no supported way to be given it, so runs refuse with the reason.</summary>
+    /// <summary>Antigravity with the person's own sign-in: read from Windows Credential Manager by the host at launch and
+    /// written to the token file in the member's home (AntigravityTokenFile). Off Windows runs refuse with the reason.</summary>
     AntigravityHostSignIn,
 }
 

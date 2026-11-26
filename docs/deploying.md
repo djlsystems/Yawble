@@ -93,7 +93,7 @@ A per-user install's uninstaller is `%LOCALAPPDATA%\Programs\Yawble\Uninstall Ya
   Other users' data on the same computer stays. To remove it, delete those two folders in each profile.
 - **Keep my data:** run interactively, the uninstaller asks whether to remove the data. **No** keeps it, for a
   reinstall that picks up where it left off. `--keep-data` keeps it without asking, with or without `/S`.
-- **Updates:** an update runs the old version's uninstaller and always keeps the data. So does any run started by an
+- **Updates:** an update runs the installed version's uninstaller and always keeps the data. So does any run started by an
   installer (`--updated` or `/KEEP_APP_DATA`).
 - **Folders you chose:** a folder named by `YAWBLE_DATA_DIR` or `YAWBLE_HOME` is never removed. If one of the two data
   folders is inside such a folder, or contains it, that data folder is kept too, and the uninstall log says so.
@@ -101,7 +101,7 @@ A per-user install's uninstaller is `%LOCALAPPDATA%\Programs\Yawble\Uninstall Ya
   `yawble-core.exe` is still running for the user after that, for example from another install, it waits a few
   seconds, then asks you to quit Yawble and choose **Retry**. **Cancel**, or a silent uninstall, stops with exit code 2
   and removes nothing.
-- **Older versions:** builds released before this change keep all data on uninstall. To remove it, delete
+- **Versions without the data question:** a build whose uninstaller does not ask keeps all data. To remove it, delete
   `%LOCALAPPDATA%\Yawble` and `%APPDATA%\yawble-companion`.
 
 ### Linux

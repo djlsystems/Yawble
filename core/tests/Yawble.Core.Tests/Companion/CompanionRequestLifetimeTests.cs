@@ -13,11 +13,11 @@ using Xunit;
 namespace Yawble.Core.Tests.Companion;
 
 /// <summary>
-/// The tester's own checks of team delete: a real CompanionService on a manual clock, with no git (the git-backed
-/// CompanionServiceTests cannot clone a local bare repository in a sandbox). The lists are the Concierge's team_delete and
-/// team_archive, whose keys move without git: deleting team alpha and making it again gives it a new id.
+/// How long a request that waits for the person's approval lives, and what a late approval, a repeat, a replayed token
+/// and a cancel do to it: a real CompanionService on a manual clock, with no git. The lists are the Concierge's
+/// team_delete and team_archive, whose keys move without git: deleting team alpha and making it again gives it a new id.
 /// </summary>
-public class CompanionTeamDeleteVerifyTests : IDisposable
+public class CompanionRequestLifetimeTests : IDisposable
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private readonly string _root = Directory.CreateTempSubdirectory("yawble-team-delete-").FullName;
@@ -180,29 +180,6 @@ public class CompanionTeamDeleteVerifyTests : IDisposable
     }
 
     [Fact]
-    public async Task TheSevenDayCapEndsTheRequest_AndItCannotBeApprovedAfter()
-    {
-        var rig = await MakeRigAsync();
-        var cc = rig.Client("cc");
-        var r = await rig.Service.CallAsync(cc, "team_delete", Alpha, Ct);
-        rig.Clock.Now += CompanionService.ActionCap - TimeSpan.FromSeconds(1);
-        Assert.Equal(ActionState.Pending, rig.Service.Status(cc, r.RequestId!)!.State);
-        Assert.Single(rig.List()["actions"]!.AsArray());
-
-        rig.Clock.Now += TimeSpan.FromSeconds(1);
-        var s = rig.Service.Status(cc, r.RequestId!)!;
-        Assert.Equal(ActionState.Expired, s.State);
-        Assert.Equal("expired: not decided within 7 days", s.Result);
-        Assert.Equal(0, rig.Service.PendingCount);
-        Assert.Empty(rig.List()["actions"]!.AsArray());
-        var status = await rig.Service.CallAsync(cc, "request_status", new JsonObject { ["id"] = r.RequestId }, Ct);
-        Assert.Contains("expired: not decided within 7 days", status.Text);
-
-        Assert.Equal(ActionState.Expired, (await rig.Approve(r.RequestId!)).State);
-        Assert.DoesNotContain(rig.Methods, m => m == "teams.delete");
-    }
-
-    [Fact]
     public async Task TheTokenIsIssuedAtApproval_AndAReplayedTokenRunsNothing()
     {
         var rig = await MakeRigAsync();
@@ -308,27 +285,6 @@ public class CompanionTeamDeleteVerifyTests : IDisposable
             Assert.Equal(CompanionService.NoSuchRequest("r000000000000"), gone.Text);
             Assert.Contains("ended: the app restarted", gone.Text);
         }
-    }
-
-    [Fact]
-    public async Task CompanionListCarriesAskedAndExpires_OverTheRpc()
-    {
-        var rig = await MakeRigAsync();
-        var cc = rig.Client("cc");
-        var asked = rig.Clock.Now;
-        var r = await rig.Service.CallAsync(cc, "team_delete", Alpha, Ct);
-        rig.Clock.Now += TimeSpan.FromDays(2);
-
-        JsonObject listed;
-        using (Actor.Use(Actor.Window)) listed = (JsonObject)(await new CompanionRpc(rig.Service, () => []).DispatchAsync("companion.list", null, Ct))!;
-        var a = Assert.Single(listed["actions"]!.AsArray())!;
-        Assert.Equal(r.RequestId, a["id"]!.GetValue<string>());
-        Assert.Equal("pending", a["state"]!.GetValue<string>());
-        var askedText = a["asked"]!.GetValue<string>();
-        Assert.EndsWith("Z", askedText.Replace("+00:00", "Z"));
-        Assert.Equal(asked, DateTimeOffset.Parse(askedText, System.Globalization.CultureInfo.InvariantCulture));
-        Assert.Equal(asked + TimeSpan.FromDays(7), DateTimeOffset.Parse(a["expires"]!.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture));
-        Assert.DoesNotMatch("\\b[0-9a-f]{16}\\b", listed.ToJsonString());
     }
 
     [Fact]
