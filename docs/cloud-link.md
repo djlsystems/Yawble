@@ -53,8 +53,8 @@ written to `cloud-link-audit.log` in the app's data folder, with the time, the v
 ## Read-only viewers (Visitors)
 
 The site marks each call with the viewer's access: `full` for an Owner or a workgroup Member, `read` for a workgroup
-Visitor. The app checks it on every call. A call with no access, or any value other than `read`, is full, so an
-older site works as before. The app's hello on the connection lists `"access"` in its `caps`; the site lets a Visitor
+Visitor. The app checks it on every call. A call with no access, or any value other than exactly `full` or `read`,
+is refused and nothing runs. The app's hello on the connection lists `"access"` in its `caps`; the site lets a Visitor
 open only a computer that says it.
 
 A read-only viewer sees the same screens and gets the same live updates. The remote view shows a

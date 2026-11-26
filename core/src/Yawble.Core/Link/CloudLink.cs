@@ -30,8 +30,8 @@ public sealed record LinkSettings(
 ///   instance's id and secret, kept in the data folder.</item>
 /// <item>Connected: ONE outbound WebSocket (no listening port). The site relays each viewer's JSON-RPC call
 ///   ({type:"call", session, id, method, params, user, access}); the core answers it through the same dispatcher as the
-///   desktop window, after <see cref="RemoteAccess"/>. "access" is the viewer's: "read" (a workgroup Visitor) may only
-///   call reads; anything else, or none, is full. While anyone is viewing, the core's pushes (terminal output,
+///   desktop window, after <see cref="RemoteAccess"/>. "access" is the viewer's: "full", or "read" (a workgroup Visitor), who may only
+///   call reads; a call with any other value, or none, is refused. While anyone is viewing, the core's pushes (terminal output,
 ///   state) go up as {type:"event"}.</item>
 /// <item>Every remote call that changes something is written to cloud-link-audit.log with who made it.</item>
 /// </list>
@@ -526,8 +526,8 @@ public sealed class CloudLink : IAsyncDisposable
     /// <summary>Each viewer session's access (full | read) as its latest call said, while the link is connected.</summary>
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _sessionAccess = new(StringComparer.Ordinal);
 
-    /// <summary>A viewer session's access as its latest call said; full for a session that has not called yet.</summary>
-    internal string SessionAccess(string session) => _sessionAccess.TryGetValue(session, out var a) ? a : RemoteAccess.Full;
+    /// <summary>A viewer session's access as its latest call said; null for a session with no call that stated one.</summary>
+    internal string? SessionAccess(string session) => _sessionAccess.TryGetValue(session, out var a) ? a : null;
 
     /// <summary>One relayed call: checked against <see cref="RemoteAccess"/> for this viewer's access, run, audited and answered.</summary>
     internal async Task AnswerAsync(JsonObject call, Func<JsonObject, Task> send, CancellationToken ct)
@@ -535,10 +535,17 @@ public sealed class CloudLink : IAsyncDisposable
         var method = call["method"]?.GetValue<string>() ?? "";
         var parameters = call["params"] as JsonObject;
         var user = call["user"]?.GetValue<string>() ?? "unknown";
-        // "full" (Owner, workgroup Member) or "read" (workgroup Visitor); a site that does not say means full.
-        var access = RemoteAccess.AccessOf(call["access"]);
-        if ((call["session"] as JsonValue)?.TryGetValue<string>(out var session) == true) _sessionAccess[session] = access;
         var reply = new JsonObject { ["type"] = "result", ["session"] = call["session"]?.DeepClone(), ["id"] = call["id"]?.DeepClone() };
+        // "full" (Owner, workgroup Member) or "read" (workgroup Visitor). A call that says neither is refused: nothing
+        // runs for a caller whose access is not known.
+        if (RemoteAccess.AccessOf(call["access"]) is not { } access)
+        {
+            reply["error"] = new JsonObject { ["code"] = "remote_refused", ["message"] = RemoteAccess.NoAccessRefusal };
+            Audit(user, method, RemoteAccess.NoAccessRefusal);
+            try { await send(reply).ConfigureAwait(false); } catch (Exception e) when (e is WebSocketException or OperationCanceledException or ObjectDisposedException) { }
+            return;
+        }
+        if ((call["session"] as JsonValue)?.TryGetValue<string>(out var session) == true) _sessionAccess[session] = access;
         bool allowHost, showCode;
         lock (_lock)
         {

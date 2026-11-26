@@ -350,7 +350,7 @@ public class CloudLinkTests
 
     private static JsonObject Call(string session, int id, string method, JsonObject? p) => new()
     {
-        ["type"] = "call", ["session"] = session, ["id"] = id, ["method"] = method, ["params"] = p, ["user"] = "person@example.com",
+        ["type"] = "call", ["session"] = session, ["id"] = id, ["method"] = method, ["params"] = p, ["user"] = "person@example.com", ["access"] = "full",
     };
 
     private static async Task WaitFor(Func<bool> condition)
