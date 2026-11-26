@@ -79,6 +79,21 @@ public static class CliRules
         return Regex.IsMatch(line, regex, RegexOptions.IgnoreCase | RegexOptions.Singleline, TimeSpan.FromMilliseconds(200));
     }
 
+    /// <summary>The most words a command path has when its help is read.</summary>
+    public const int HelpPathMax = 6;
+
+    private static readonly Regex CommandWord = new("^[a-z][a-z0-9-]*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Why these words cannot be a command path to read the help of, or null. A path is command words only: an option
+    /// ("-c", "--"), a value ("alias.x=!cmd") or a long list could make the program run something instead of printing help.
+    /// </summary>
+    public static string? HelpPathProblem(IReadOnlyList<string> words) =>
+        words.Count > HelpPathMax ? $"cli_help takes a command of at most {HelpPathMax} words, e.g. [\"pr\", \"create\"]"
+        : words.FirstOrDefault(w => !CommandWord.IsMatch(w)) is { } bad
+            ? $"cli_help takes a command's words only (letters, digits and dashes, starting with a letter), e.g. [\"pr\", \"create\"]: \"{(bad.Length > 40 ? bad[..40] + "..." : bad)}\" is not one. Options and values are not accepted; the help flag is added for you."
+        : null;
+
     /// <summary>A rule the person may save: the pattern as below; an allow rule may not name a credential word (the floor would refuse the call anyway).</summary>
     public static string? Problem(string pattern, string decision) =>
         Problem(pattern) ?? (decision == Decisions.Allow && CredentialFloor.CheckPattern(pattern) is { } word
