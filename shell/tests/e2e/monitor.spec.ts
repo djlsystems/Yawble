@@ -326,6 +326,8 @@ async function focusTeam(page: Page, team = TEAM, tap = false): Promise<number> 
           const g = await lastFrame(page); const h2 = hubAt(g, team)!; const s2 = screen(h2.op, h2.x, h2.y);
           console.log('TRY', i, 'k', h.op.m[0].toFixed(3), 'at', s.x.toFixed(1), s.y.toFixed(1), 'hub after', s2.x.toFixed(1), s2.y.toFixed(1), 'picked', await page.locator('[data-test=monitor-unpick]').count(), 'tip', (await page.locator('[data-test=monitor-tip]').count()) ? (await page.locator('[data-test=monitor-tip]').innerText()).replace(/\s+/g, ' ').slice(0, 60) : 'none');
         }
+        // A commit resting on the hub takes the click and opens its Commit view: closed here, so it does not cover the wall.
+        if (await page.locator('[data-test=commit-view]').count()) await page.locator('[data-test=modal-close]').last().click();
         if (focused) return i;
       } else if (process.env.DBG_CLICK) console.log('SKIP', i, 'hub off the wall: k', h.op.m[0].toFixed(3), 'at', s.x.toFixed(1), s.y.toFixed(1), 'wall', box.width.toFixed(0), box.height.toFixed(0));
     } else if (process.env.DBG_CLICK) {
