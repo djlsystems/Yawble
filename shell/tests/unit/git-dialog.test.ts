@@ -24,7 +24,7 @@ function fakeApi(answers: Record<string, (params: any) => unknown>) {
 
 const team = { id: 3, name: 'ops', repoPath: null, members: 2, running: 0, queued: 0 };
 const base: TeamGitStatus = {
-  repoPath: 'C:\work\service', managed: false, baseBranch: 'main', checkedOut: 'main', dirty: false, origin: 'https://github.com/x/service.git',
+  repoPath: 'C:\\work\\service', managed: false, baseBranch: 'main', checkedOut: 'main', dirty: false, origin: 'https://github.com/x/service.git',
   baseSha: 'aaaaaaaaaaaa', originBaseSha: 'aaaaaaaaaaaa', baseAheadOfOrigin: 0, baseBehindOrigin: 0,
   teamBranch: 'team/ops', teamSha: 'bbbbbbbbbbbb', teamAheadOfBase: 2, teamBehindBase: 0,
   merge: 'fast-forward', conflictFiles: [], members: [{ branch: 'members/ada', sha: 'cccccccccccc', aheadOfBase: 1, inTeamBranch: true }],

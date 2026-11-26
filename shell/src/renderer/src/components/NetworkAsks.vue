@@ -31,7 +31,7 @@ let again = false;
 async function load() {
   if (loading) { again = true; return; }
   loading = true;
-  let ok = true;
+  let ok: boolean;
   try {
     do {
       again = false;

@@ -118,7 +118,7 @@ export function pageThemeEnv(w: (Window & typeof globalThis) | undefined = typeo
     key: yawble?.remote ? REMOTE_THEME_KEY : THEME_KEY,
     notify: yawble?.remote ? undefined : (t) => yawble?.setTheme?.(t),
   };
-  let q: URLSearchParams | null = null;
+  let q: URLSearchParams | null;
   try { q = new URLSearchParams(w?.location?.search ?? ''); } catch { q = null; }
   if (q?.get('embed') === '1') {
     const given = q.get('theme');

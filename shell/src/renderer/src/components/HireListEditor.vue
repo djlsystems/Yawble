@@ -18,6 +18,7 @@ const roleOf = (name: string) => props.roles.find((r) => r.name === name);
 const free = computed(() => props.roles.filter((r) => !props.rows.some((x) => x.role === r.name)));
 watch(() => props.rows.map((r) => r.agent), (clis) => { for (const c of new Set(clis)) void props.models.loadModels(c); }, { immediate: true });
 
+/* eslint-disable vue/no-mutating-props -- the editor changes the caller's list in place and says so with `changed` */
 function add() {
   const r = free.value[0] ?? props.roles[0];
   if (!r) return;
@@ -25,6 +26,7 @@ function add() {
   emit('changed');
 }
 function remove(i: number) { props.rows.splice(i, 1); emit('changed'); }
+/* eslint-enable vue/no-mutating-props */
 function roleChanged(row: HireRow) {
   const r = roleOf(row.role);
   if (r) { row.agent = r.agent; row.model = r.model ?? null; }

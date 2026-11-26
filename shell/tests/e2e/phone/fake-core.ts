@@ -398,7 +398,7 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'git.mergePreview': () => mergePreview(),
   'git.mergeDiff': (p) => commitDiff(COMMIT_ADA, String(p?.path ?? '')),
   'git.deletePreview': (p) => deletePreview(String(p?.branch ?? '')),
-  'git.merge': (p) => {
+  'git.merge': () => {
     gitPreview.merged = true;
     return { outcome: 'merge', message: 'Merged team/payments into main and pushed main to origin.', changed: true, sha: COMMIT_MERGE, files: null, status: gitPreviewStatus(),
       commits: [R.merge(), R.ada()], commitCount: 2, commitsTruncated: false, range: pair(COMMIT_BASE, COMMIT_MERGE) };

@@ -73,7 +73,6 @@ for (const [w, h] of [[375, 501], [375, 667], [667, 263], [667, 375]] as const) 
       return { vw: innerWidth, vh: innerHeight, scrollW: document.documentElement.scrollWidth, term: r(term), head: r(head), screen: r(screen), controls,
         headShown: !!more && !!atHead && more.contains(atHead), heads: term?.querySelectorAll('[data-test=terminal-pane-head]').length ?? 0 };
     });
-    // eslint-disable-next-line no-console
     console.log(JSON.stringify({ size: `${w}x${h}`, ...m }));
     expect(m.scrollW, 'no sideways scroll').toBeLessThanOrEqual(m.vw);
     expect(m.heads, 'one header row').toBe(1);
@@ -113,7 +112,6 @@ test('desktop 1280x800: one frame, one view, the pane fills its grid tile', asyn
     }
     return out;
   });
-  // eslint-disable-next-line no-console
   console.log(JSON.stringify(m));
   for (const [n, v] of Object.entries(m)) {
     expect(v.views, `${n}: one view`).toBe(1);

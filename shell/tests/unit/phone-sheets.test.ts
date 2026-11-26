@@ -265,18 +265,9 @@ const banner = (): TerminalBanner => ({
   title: 'web / DeveloperAda · sandbox', details: ['timeout 15 min'], loosened: [], interactive: false,
   state: 'idle', runId: null, queuePosition: null, queueLength: 0, lastRunState: 'completed', lastRunReason: null,
 } as unknown as TerminalBanner);
-/** A long policy: 8 entries and 2 loosened. */
-const longBanner = (): TerminalBanner => ({
-  ...banner(),
-  details: ['sandbox job object', 'CLI claude 2.1', 'network via proxy', 'allow api.anthropic.com', 'allow registry.npmjs.org',
-    'timeout 15 min', 'idle timeout 5 min', 'memory 4 GB'],
-  loosened: ['writes outside the clone allowed', 'network host github.com added by the person'],
-} as unknown as TerminalBanner);
 /** The iPhone SE frames the card names for the terminal (375 x 501 portrait, 667 x 263 landscape). */
 const TermPortrait: Frame = { name: 'portrait 375 x 501', width: 375, height: 501 };
 const TermPhones = [TermPortrait, Landscape];
-/** A CSS length in px at the frame's height (happy-dom may hand back a vh value as declared). */
-const lengthPx = (v: string, frame: Frame) => (/^[\d.]+vh$/.test(v.trim()) ? (parseFloat(v) * frame.height) / 100 : px(v));
 const ada = (): AgentCard => ({
   member: { id: 4, teamId: 1, team: 'web', name: 'DeveloperAda', role: 'member', cli: 'claude', instructions: '', model: '', credential: 'default' },
   state: 'idle', queuePosition: null, queueLength: 0, queuedInstructions: 0, statusLine: 'Done.', runId: null, runStartedAt: null,

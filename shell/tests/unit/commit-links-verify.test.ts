@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { defineComponent, h } from 'vue';
-import { configureCommitResolve, commitChoice, closeChoice, installCommitResolve, resetCommitResolve } from '../../src/renderer/src/commitResolve';
+import { configureCommitResolve, closeChoice, installCommitResolve, resetCommitResolve } from '../../src/renderer/src/commitResolve';
 import { closeCommit, commitTarget, commitTeams, installCommitLinks, teamsFor } from '../../src/renderer/src/commitView';
 import { renderMarkdown } from '../../src/renderer/src/markdown';
 import { LOCAL_MARK } from '../../src/renderer/src/localMark';
@@ -22,7 +22,7 @@ import TranscriptView from '../../src/renderer/src/components/TranscriptView.vue
 import CardPanel from '../../src/renderer/src/board/CardPanel.vue';
 import { mountPane, paneRow } from './deliverable-pane-fake';
 import MemberActivity from '../../src/renderer/src/components/MemberActivity.vue';
-import { GIT_COMMITS_RESOLVE, type AgentCard, type BoardCard, type TeamSummary, type YawbleApi } from '../../src/shared/api';
+import { GIT_COMMITS_RESOLVE, type AgentCard, type BoardCard, type YawbleApi } from '../../src/shared/api';
 
 const real = <T = any>(name: string): T => JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'commit-links', `${name}.json`), 'utf8'));
 const TWO = real('resolve-two-teams');

@@ -158,7 +158,7 @@ describe('the member tile', () => {
     const current = { m: plain as unknown };
     let refuse = true;
     const w = keep(mount(WorkflowMemberPane, { props: { card, api: memberApi(calls, current, {
-      'workflows.memberUpdate': (p) => {
+      'workflows.memberUpdate': () => {
         if (refuse) throw Object.assign(new Error(`'${SUPPORT}' cannot be replaced by ${OTHER}: ${OTHER} is not turned on for Support`), { code: 'bad_workflow' });
         current.m = overridden;
         return current.m;

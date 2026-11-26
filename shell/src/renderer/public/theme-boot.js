@@ -16,17 +16,17 @@
       var q = new URLSearchParams(window.location.search);
       embed = q.get('embed') === '1';
       given = q.get('theme');
-    } catch (e) { embed = false; } // no location: not embedded
+    } catch { embed = false; } // no location: not embedded
     var kept = null;
     if (embed) kept = given;
     else {
-      try { kept = window.localStorage.getItem(key); } catch (e) { kept = null; } // storage blocked: follow the OS
+      try { kept = window.localStorage.getItem(key); } catch { kept = null; } // storage blocked: follow the OS
     }
     if (kept === 'light' || kept === 'dark') theme = kept;
     else if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches) theme = 'dark';
-  } catch (e) { theme = 'light'; }
+  } catch { theme = 'light'; }
   try {
     root.setAttribute('data-theme', theme);
     root.style.colorScheme = theme;
-  } catch (e) { /* leave it to theme.ts */ }
+  } catch { /* leave it to theme.ts */ }
 })();

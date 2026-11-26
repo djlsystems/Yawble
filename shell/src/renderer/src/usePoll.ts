@@ -47,7 +47,7 @@ export function createPoll(fn: PollFn, intervalMs: number | (() => number), opti
   const run = async () => {
     if (!running || inFlight) return;
     inFlight = true;
-    let ok = true;
+    let ok: boolean;
     try { ok = (await fn()) !== false; } catch { ok = false; }
     inFlight = false;
     if (!running) return;

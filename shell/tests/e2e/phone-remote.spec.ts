@@ -645,6 +645,8 @@ for (const size of SE) {
         const SHOTS_SE = path.join(path.dirname(SHOTS), 'phone-se-screens');
         mkdirSync(SHOTS_SE, { recursive: true });
         const shot = (screen: string) => page.screenshot({ path: path.join(SHOTS_SE, `${screen}-${tag(size)}.png`) });
+        // Each page opened below is closed for the next: its script errors are kept for the check at the end.
+        const seen: string[] = [];
         let { page, ctx, errors } = await open(browser, size, { asks: false });
 
         // Backlog: the list, then the search-and-sort fold open (its fields).
@@ -663,7 +665,7 @@ for (const size of SE) {
         // Three states: an integration ask and a Manager decision pending (above the members), the same with the sync bar,
         // and nothing pending (the members right under Tell).
         for (const [screen, sync, needsYou] of [['team', false, true], ['team-sync', true, true], ['team-quiet', false, false], ['team-quiet-sync', true, false]] as const) {
-          if (screen !== 'team') { await ctx.close(); ({ page, ctx, errors } = await open(browser, size, { asks: false, sync, needsYou })); }
+          if (screen !== 'team') { seen.push(...errors); await ctx.close(); ({ page, ctx, errors } = await open(browser, size, { asks: false, sync, needsYou })); }
           await nav(page, 'nav-teams');
           await page.locator('[data-test=team-open-payments]').click();
           await expect(page.locator('[data-test=team-title]')).toBeVisible();
@@ -680,6 +682,7 @@ for (const size of SE) {
           const mb = await page.locator('[data-test=agent-Manager]').boundingBox();
           rec(`${screen}-member-scrolled`, m, { memberAfterScroll: mb && { top: Math.round(mb.y), bottom: Math.round(mb.y + mb.height) } });
         }
+        seen.push(...errors);
         await ctx.close();
         ({ page, ctx, errors } = await open(browser, size, { asks: false }));
 
@@ -775,7 +778,7 @@ for (const size of SE) {
             if (await sb.isVisible().catch(() => false)) await sb.click();
           }
         }
-        expect(errors).toEqual([]);
+        expect([...seen, ...errors]).toEqual([]);
         await ctx.close();
       });
     }

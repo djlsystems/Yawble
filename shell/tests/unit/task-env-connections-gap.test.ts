@@ -3,7 +3,7 @@
 // (HostTaskRpc.DefJson: connectionId is a STRING; HostTaskService ask detail: env_from_connections is a list of shown lines;
 // a refused run puts the binding problem in missingEnv with state 'refused').
 import { flushPromises, mount } from '@vue/test-utils';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { stopConfirmStubs, stubConfirm } from './confirm-stub';
 afterEach(() => { stopConfirmStubs(); });
 import ConnectionsPanel from '../../src/renderer/src/components/ConnectionsPanel.vue';

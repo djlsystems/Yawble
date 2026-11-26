@@ -260,7 +260,7 @@ describe('the Monitor view', () => {
     w.unmount();
   });
   it('an activity row\'s face follows its member\'s state: running turns, idle when the member is unknown', async () => {
-    let state = 'running';
+    const state = 'running';
     const api = {
       call: async (method: string) => {
         if (method === 'app.overview') return { slots: { running: 1, limit: 4, queued: 0 }, teams: [{ id: 1, name: 'payments', repoPath: null, members: 1, running: 1, queued: 0 }] };
@@ -579,16 +579,6 @@ describe('Team spacing', () => {
   const homeDistances = (scene: MonitorScene) => {
     const hs = scene.clusters().map((c) => c.home);
     return hs.flatMap((p, i) => hs.slice(i + 1).map((q) => Math.round(Math.hypot(p.x - q.x, p.y - q.y))));
-  };
-
-  /** The least distance between two teams' drawn things (each part's box), for every pair of teams: as the team-spacing e2e spec measures it. */
-  const partGaps = (scene: MonitorScene) => {
-    const cl = scene.clusters();
-    const apart = (a: { x0: number; y0: number; x1: number; y1: number }, b: typeof a) => {
-      const dx = Math.max(0, b.x0 - a.x1, a.x0 - b.x1), dy = Math.max(0, b.y0 - a.y1, a.y0 - b.y1);
-      return dx || dy ? Math.hypot(dx, dy) : -1; // -1: they overlap
-    };
-    return cl.flatMap((a, i) => cl.slice(i + 1).map((b) => Math.min(...a.parts.flatMap((p) => b.parts.map((q) => apart(p, q))))));
   };
 
   it('at the default, two teams\' clusters (members, deliverable nodes, code map) sit close but do not overlap', () => {

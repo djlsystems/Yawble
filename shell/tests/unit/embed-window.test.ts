@@ -124,7 +124,7 @@ describe('embed mode in the window (App.vue)', { timeout: 30_000 }, () => {
   });
 
   it('navigate messages go through the sidebar\'s handlers: places, a team, a chat, New chat, Delete with the in-frame confirm', async () => {
-    const { w, send, navs, calls } = await page('?embed=1&theme=dark');
+    const { send, navs, calls } = await page('?embed=1&theme=dark');
     await send({ type: 'yawble.navigate', to: { kind: 'place', id: 'documents' } });
     expect(navs().at(-1)!.places.find((p: any) => p.active)?.id).toBe('documents');
     await send({ type: 'yawble.navigate', to: { kind: 'team', id: 7 } });

@@ -27,7 +27,7 @@ function fakeCore(answers: Record<string, (params: any) => unknown> = {}) {
     'code.list': (p) => ({ path: p.path, entries: [{ name: 'README.md', path: 'README.md', kind: 'file', size: 60, mtime: new Date(NOW - 5000).toISOString(), marker: 'live', hidden: false }] }),
     'code.read': (p) => ({ path: p.path, type: 'markdown', size: 60, content: '# Notes\n\n<script>alert(1)</script>\n<img src=x onerror="alert(1)">\n[x](javascript:alert(1))',
       lines: [{ from: 1, to: 1, kind: 'added', at: new Date(NOW - 5000).toISOString() }], removed: [], linesUnknown: false }),
-    'code.download': (p) => ({ name: 'README.md', base64: btoa('# Notes'), size: 7 }),
+    'code.download': () => ({ name: 'README.md', base64: btoa('# Notes'), size: 7 }),
     'code.close': () => ({}),
     ...answers,
   };

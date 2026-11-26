@@ -69,11 +69,10 @@ class FakeWindow implements PageWindow {
     return Promise.resolve(this.scriptResult(code));
   }
   capturePage() {
-    const self = this;
     const image = (width: number) => ({
       getSize: () => ({ width, height: 100 }),
       resize: (o: { width: number }) => {
-        self.resizedTo = o.width;
+        this.resizedTo = o.width;
         return image(o.width);
       },
       toPNG: () => Buffer.from(`png${width}`),

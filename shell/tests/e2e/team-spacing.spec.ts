@@ -32,7 +32,7 @@ test.beforeAll(async () => {
   await buildRenderer();
 });
 
-const INK = '#e2e8f0', INK_DIM = '#94a3b8', BLOCKED = '#fb923c', DONE = '#34d399';
+const INK = '#e2e8f0', INK_DIM = '#94a3b8', DONE = '#34d399';
 const FILE_COLORS = ['#7dd3fc', '#a3e635', '#2dd4bf'];
 const TEAMS = ['alpha', 'bravo', 'charlie'];
 const MEMBERS: Record<string, string[]> = {
@@ -759,7 +759,7 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
     const tag = `${theme}-${w}${activity === 'collapsed' ? '-noactivity' : ''}`;
     results.nodes[`labels-${tag}`] = r;
     const { page, ctx, errors } = await open(browser, { w, theme, teams: 3, activity });
-    let f = await settle(page, 3);
+    const f = await settle(page, 3);
     const k = zoomOf(f);
     const box = await canvasBox(page);
     const labels = wfLabels(f);

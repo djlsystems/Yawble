@@ -169,7 +169,7 @@ function onWallUp(e: PointerEvent): void {
   press = null;
   if (!p || p.id !== e.pointerId || Math.hypot(e.clientX - p.x, e.clientY - p.y) >= ClickSlopPx) return;
   const [x, y] = canvasPoint(e);
-  let you = false;
+  let you: boolean;
   try { you = extras()?.hitYouNode?.(x, y) === true; } catch { you = false; }
   // On a phone (no hover) a tap shows what is in it first; its button opens Needs you. A desktop click opens it.
   if (you) {

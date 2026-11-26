@@ -25,7 +25,7 @@ export function splitReport(text: string): Report {
 /** A one-line report longer than a sentence: a paragraph break after its first sentence (within the first 300 chars). */
 function summaryFirst(body: string): string {
   if (body.includes('\n') || body.length < 100) return body;
-  const end = /[.!?](?=\s+[A-Z0-9(`*"'#\[])/g;
+  const end = /[.!?](?=\s+[A-Z0-9(`*"'#[])/g;
   for (let m = end.exec(body); m; m = end.exec(body)) {
     const i = m.index + 1;
     if (i < 20) continue;

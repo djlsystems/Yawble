@@ -980,8 +980,8 @@ for (const W of [1280, 375]) {
     const atOpen = await both(2, 12_000);
     await page.evaluate(() => { (window as any).__frames = []; });
     await page.waitForTimeout(2500); // a window longer than a flight: nothing may fly in or sound for those waiting at open
-    let fs = await frames(page);
-    r.atOpen ={ ...atOpen, flights: starts(fs, (f) => youHeads(f).length), tones: await tonesNeedYou(page), soundOn: await page.evaluate(() => localStorage.getItem('yawble.monitor.sound')) };
+    const fs = await frames(page);
+    r.atOpen = { ...atOpen, flights: starts(fs, (f) => youHeads(f).length), tones: await tonesNeedYou(page), soundOn: await page.evaluate(() => localStorage.getItem('yawble.monitor.sound')) };
     expect(r.atOpen.header).toBe(2);
     expect(r.atOpen.node).toBe('2');
     expect(r.atOpen.flights, 'nothing flies for those waiting at open').toBe(0);

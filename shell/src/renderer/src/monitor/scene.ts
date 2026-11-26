@@ -2,7 +2,7 @@ import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY
 import { LayoutDefaults, type LayoutSettings } from './layout';
 import { avatarSheet, initials, loadAvatarSheet, memberAvatar, tileSource, type MemberState } from '../faces/faces';
 import { DoingMs, memberKey, RunEndShowMs, teamKey, spaced, deliverableKey, type Effect, type MonitorModel, type TeamSnapshot, type Tone } from './model';
-import { deliverableTime, type DeliverableSummary } from '../../../shared/api';
+import type { DeliverableSummary } from '../../../shared/api';
 import { drawHandbackMark, drawStepIcon, drawDeliverableIcon } from './icons';
 import { StepLook } from './steps';
 import {
@@ -10,7 +10,7 @@ import {
   type MapFile, type TeamMapView,
 } from './codemap';
 import { busyMembers, nodeLabelFont, placeDeliverableLabels, deliverableNodeLabel, deliverableNodeLook, type LabelAsk, type LabelBox, type LabelObstacle, type PlacedLabel } from './deliverables';
-import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodMs, runFill, teamOfKey, youNodeAt, type Density, type KeepOut } from './rhythm';
+import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodMs, runFill, youNodeAt, type Density, type KeepOut } from './rhythm';
 
 /**
  * THE MONITOR'S SCENE: one canvas on a dark wall. Teams are territories (a glow in the team's hue with its name),

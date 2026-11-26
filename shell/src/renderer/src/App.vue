@@ -541,7 +541,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
   <div class="app" :class="{ collapsed: collapsed && !phone && !embed, 'own-bar': ownBar, mac, phone, embed, 'drawer-open': phone && drawerOpen && !embed }" :data-embed="embed ? '1' : undefined">
     <div v-if="phone && drawerOpen && !embed" class="scrim" data-test="drawer-scrim" @click="drawerOpen = false" />
     <!-- Embedded in the cloud page: no sidebar at all, wide or phone; the cloud draws it from yawble.nav. -->
-    <Sidebar v-if="!embed" id="app-drawer":rail="collapsed && !phone" :drawer="phone" :open="drawerOpen" :menu="drawerMenu" @command="command":view="view" :conversations="conversations" :teams="teams" :conversation-id="conversationId"
+    <Sidebar v-if="!embed" id="app-drawer" :rail="collapsed && !phone" :drawer="phone" :open="drawerOpen" :menu="drawerMenu" @command="command" :view="view" :conversations="conversations" :teams="teams" :conversation-id="conversationId"
       :team-id="selected" :slots="overview?.slots ?? null" :remote="!!api.remote" :loading="{ teams: !overview && !error, chats: !chatsLoaded }" :removing="removingChat"
       @new-chat="newChat" @open-conversation="openConversation" @open-team="openTeam" @go="go"
       @rename="rename" @remove="remove" @new-team="drawerOpen = false; dialog = 'newTeam'" @collapse="phone ? (drawerOpen = false) : (collapsed = true)" @expand="collapsed = false"
@@ -612,7 +612,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
           @board="focusTeamId = $event; go('board')" />
         <DeliverablesView v-else-if="view === 'deliverables'" :teams="teams" :api="api" :poll-ms="pollMs" :request="deliverablesRequest" @open-team="openTeam"
           @board="focusTeamId = $event; go('board')" @backlog="go('backlog')" />
-        <SettingsView v-else-if="view === 'settings'" :key="settingsKey" :landing="settingsLanding" :api="api":tab="prefTab" :teams="teams" :poll-ms="pollMs" :integrations-tab="integrationsTab" @tab="prefTab = $event; integrationsTab = null" @connections="openConnections" @changed="changed" @link="link = $event as LinkStatus" />
+        <SettingsView v-else-if="view === 'settings'" :key="settingsKey" :landing="settingsLanding" :api="api" :tab="prefTab" :teams="teams" :poll-ms="pollMs" :integrations-tab="integrationsTab" @tab="prefTab = $event; integrationsTab = null" @connections="openConnections" @changed="changed" @link="link = $event as LinkStatus" />
 
       </div>
       <TerminalPane v-if="terminalPane.open" :api="api" :poll-ms="pollMs" />

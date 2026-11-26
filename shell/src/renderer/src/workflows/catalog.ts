@@ -212,7 +212,7 @@ function fieldType(ctx: DesignContext, type: string, field: string): string {
 /** The type of a dotted path: settings.x, vars.x.y, a loop item and its fields. */
 export function pathType(ctx: DesignContext, path: string, items: readonly { name: string; type: string }[] = []): string {
   const [root, ...rest] = path.trim().split('.');
-  let type: string | null = null;
+  let type: string | null;
   let fields = rest;
   if (root === 'settings' && rest.length) {
     type = ctx.doc.settings?.find((s) => s?.name === rest[0])?.type ?? null;
