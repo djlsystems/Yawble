@@ -49,6 +49,10 @@ sandbox.lock.json           the pinned sandbox release, request contract and tel
 - **Frames.** `[u32 big-endian length][u8 kind][payload]`; kind 1 is JSON, kind 2 carries terminal bytes.
 - **Auth.** The shell starts the core with a 256-bit token in `YAWBLE_IPC_TOKEN`. The first request on every
   connection must be `auth` with that token, or the core closes the connection.
+- **Requests.** The core runs the requests of a connection side by side and answers each when it is done; a reply
+  carries its request's id, so replies can come in another order than the requests. The calls of one terminal
+  (`terminal.*` with the same `channel`) take effect in the order sent. At most 32 requests of a connection run at
+  once; the next one is read when one of them is answered.
 - **Lifetime.** The core prints `YAWBLE-READY <address>` when it listens and exits when its stdin closes, so it never
   outlives the shell.
 - **One core per data folder.** First the core takes `<data>/core.lock` with FileShare.None (flock `LOCK_EX|LOCK_NB` on

@@ -11,6 +11,9 @@ namespace Yawble.Core.Bus;
 public sealed record TeamSummary(long Id, string Name, string? RepoPath, int Members, int Running, int Queued, bool Paused = false, bool Archived = false,
     int DeliverableExpiryDays = BusEngine.DefaultDeliverableExpiryDays, int Waiting = 0);
 
+/// <summary>The team list and each team's open questions (needs_decision messages the person has not answered), by team name.</summary>
+public sealed record TeamsOverview(IReadOnlyList<TeamSummary> Teams, IReadOnlyDictionary<string, IReadOnlyList<Message>> OpenDecisions);
+
 /// <summary>The header: global running / limit, and how many wait for a slot across all teams.</summary>
 public sealed record RunSlots(int Running, int Limit, int Queued);
 
@@ -166,23 +169,32 @@ public sealed partial class BusEngine
             return _store.MemberRows(memberId: memberId).Single();
         }), ct);
 
-    public Task<IReadOnlyList<TeamSummary>> TeamsAsync(CancellationToken ct = default) =>
-        WithGate<IReadOnlyList<TeamSummary>>(() =>
+    public async Task<IReadOnlyList<TeamSummary>> TeamsAsync(CancellationToken ct = default) =>
+        (await TeamsOverviewAsync(ct)).Teams;
+
+    /// <summary>
+    /// Every team's summary and every team's open questions (by team name; a team with none has no entry), read in one
+    /// gate entry from one open-questions statement however many teams there are.
+    /// </summary>
+    public Task<TeamsOverview> TeamsOverviewAsync(CancellationToken ct = default) =>
+        WithGate(() =>
         {
             var queue = _store.Queue();
             var members = _store.MemberRows();
-            return _store.Teams().Select(t =>
+            var open = _store.OpenDecisionsByTeam();
+            var teams = _store.Teams().Select(t =>
             {
                 var mine = members.Where(m => m.TeamId == t.Id).ToList();
                 var ids = mine.Select(m => m.Id).ToHashSet();
                 // The member cards' rule: a member with an open needs_decision waits on the person.
-                var asking = mine.Count == 0 ? null : OpenDecisionByMember(t.Name);
-                var waiting = asking is null ? 0 : mine.Count(m => asking.ContainsKey($"{m.Team}/{m.Name}"));
+                var asking = open.GetValueOrDefault(t.Name)?.Select(m => m.Source).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var waiting = asking is null ? 0 : mine.Count(m => asking.Contains($"{m.Team}/{m.Name}"));
                 return new TeamSummary(t.Id, t.Name, t.RepoPath, ids.Count,
                     // An interactive session holds a run slot, so it counts as running.
                     _active.Values.Count(a => ids.Contains(a.Context.Member.Id)) + _sessions.Keys.Count(ids.Contains),
                     queue.Count(q => ids.Contains(q.MemberId)), t.Paused, t.Archived, t.DeliverableExpiryDays ?? DefaultDeliverableExpiryDays, waiting);
             }).ToArray();
+            return new TeamsOverview(teams, open);
         }, ct);
 
     public Task<RunSlots> RunSlotsAsync(CancellationToken ct = default) =>
@@ -193,10 +205,10 @@ public sealed partial class BusEngine
         {
             var queue = _store.Queue();
             var unstarted = _store.Pending(started: false);
-            var runs = _store.Runs();
             var held = _store.HeldTeams();
             TidyLease(_store.Clock.GetUtcNow());
             var rows = _store.MemberRows(teamId);
+            var lastRuns = _store.LastRuns(teamId);
             // A member with an open needs_decision shows "Waiting on you" (and the decision's id), whatever it said after.
             var asking = rows.Count == 0 ? new Dictionary<string, Message>(StringComparer.OrdinalIgnoreCase) : OpenDecisionByMember(rows[0].Team);
             return rows.Select(m =>
@@ -205,7 +217,7 @@ public sealed partial class BusEngine
                 var active = _active.Values.FirstOrDefault(a => a.Context.Member.Id == m.Id);
                 var position = RunScheduler.PositionOf(queue, q => q.MemberId == m.Id);
                 var qualified = $"{m.Team}/{m.Name}";
-                var last = runs.Where(r => r.MemberId == m.Id).MaxBy(r => r.Id);
+                var last = lastRuns.GetValueOrDefault(m.Id);
                 var decision = asking.GetValueOrDefault(qualified);
                 var mine = unstarted.Where(p => string.Equals(p.Subscriber, qualified, StringComparison.OrdinalIgnoreCase)).ToList();
                 var (waitState, waitsFor) = mine.Count == 0 ? (null, null) : WaitOf(m.Id, m.TeamId, mine, queue, held);

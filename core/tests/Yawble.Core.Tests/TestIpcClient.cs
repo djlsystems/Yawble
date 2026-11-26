@@ -84,6 +84,20 @@ internal sealed class TestIpcClient : IAsyncDisposable
         }
     }
 
+    /// <summary>The next reply (a frame with an id), whichever request it answers, skipping pushed events: null when the connection closed.</summary>
+    public async Task<JsonObject?> ReadNextReplyAsync(CancellationToken ct)
+    {
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        bounded.CancelAfter(Limit);
+        while (true)
+        {
+            var frame = await FrameCodec.ReadAsync(_stream, bounded.Token).WaitAsync(Limit, ct);
+            if (frame is null) return null;
+            var message = JsonNode.Parse(frame.Value.Payload.Span)!.AsObject();
+            if (message["id"] is { } id && id.GetValueKind() == JsonValueKind.Number) return message;
+        }
+    }
+
     /// <summary>Writes one frame of any kind and payload as is (an oversized or malformed frame).</summary>
     public async Task WriteRawAsync(FrameKind kind, byte[] payload, CancellationToken ct)
     {

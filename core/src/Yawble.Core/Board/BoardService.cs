@@ -81,7 +81,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
                 // One transaction per page: one disk flush for the page, and the cursor moves with what it read.
                 store.InBatch(() =>
                 {
-                    foreach (var m in page) _projector.Apply(m);
+                    foreach (var m in page) ApplyOrSkip(m);
                     store.SetCursor(page[^1].Seq);
                 });
                 read += page.Count;
@@ -89,6 +89,33 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
         }
         finally { _gate.Release(); }
     }
+
+    /// <summary>The messages skipped so far (each is reported once, also when its page is read again).</summary>
+    private readonly HashSet<long> _skipped = [];
+
+    /// <summary>
+    /// Applies one message as a unit of the page. A message the projector cannot apply (a payload of a shape it does
+    /// not expect, a row a constraint refuses) is skipped: what it had written so far is undone, a warning names its
+    /// seq, and the page goes on, so the cursor passes it and the messages after it still reach the board. A failure
+    /// of the database itself (busy, disk) is not the message's: it ends the page, which is read again.
+    /// </summary>
+    private void ApplyOrSkip(Message m)
+    {
+        try
+        {
+            store.InUnit("message", () => _projector.Apply(m));
+        }
+        catch (Exception e) when (IsOfTheMessage(e))
+        {
+            if (!_skipped.Add(m.Seq)) return;
+            Logs.Diag.Warning("board", $"message {m.Seq} ({m.Type}) could not be applied to the board and was skipped: {e.GetType().Name}: {e.Message}",
+                ("seq", m.Seq), ("type", m.Type), ("source", m.Source), ("deliverable", m.CorrelationId), ("exception", e.GetType().Name));
+        }
+    }
+
+    // SQLite result codes that speak of the row, not of the database: TOOBIG, CONSTRAINT, MISMATCH, RANGE.
+    private static bool IsOfTheMessage(Exception e) =>
+        e is Microsoft.Data.Sqlite.SqliteException sql ? sql.SqliteErrorCode is 18 or 19 or 20 or 25 : e is not OperationCanceledException;
 
     public async Task<JsonNode?> DispatchAsync(string method, JsonObject? p, CancellationToken ct)
     {

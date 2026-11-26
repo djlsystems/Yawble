@@ -91,8 +91,15 @@ public static class PullRequestProviders
         return false;
     }
 
-    /// <summary>The person's CLIs on the host, with the variables that keep each from prompting.</summary>
-    public static async Task<GitResult> RunOnHostAsync(string cli, string workingDirectory, IReadOnlyList<string> args, CancellationToken ct)
+    /// <summary>The person's CLIs on the host, with the variables that keep each from prompting, for at most <see cref="HostProcess.DefaultTimeout"/>.</summary>
+    public static Task<GitResult> RunOnHostAsync(string cli, string workingDirectory, IReadOnlyList<string> args, CancellationToken ct) =>
+        RunOnHostAsync(cli, workingDirectory, args, HostProcess.DefaultTimeout, ct);
+
+    /// <summary>
+    /// As above, with its own time limit. A call that runs out of time is stopped (with the processes it started) and is
+    /// a failed result that says so; a cancelled one is stopped the same way before the cancellation goes on.
+    /// </summary>
+    public static async Task<GitResult> RunOnHostAsync(string cli, string workingDirectory, IReadOnlyList<string> args, TimeSpan timeout, CancellationToken ct)
     {
         var psi = new ProcessStartInfo(cli) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, WorkingDirectory = workingDirectory };
         switch (cli)
@@ -108,7 +115,8 @@ public static class PullRequestProviders
             p.StandardInput.Close();
             var o = p.StandardOutput.ReadToEndAsync(ct);
             var e = p.StandardError.ReadToEndAsync(ct);
-            await p.WaitForExitAsync(ct);
+            if (!await HostProcess.WaitOrStopAsync(p, timeout, ct))
+                return new GitResult(-1, "", $"{cli} {string.Join(' ', args.Take(2))} did not finish within {timeout.TotalSeconds:0} s and was stopped; the service may be unreachable");
             return new GitResult(p.ExitCode, (await o).Trim(), (await e).Trim());
         }
         catch (System.ComponentModel.Win32Exception) { return new GitResult(-1, "", $"{cli} is not installed on this computer"); }

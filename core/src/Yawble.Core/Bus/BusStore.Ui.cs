@@ -144,13 +144,30 @@ public sealed partial class BusStore
         Messages(
             """
             WHERE type = $type AND source LIKE $prefix ESCAPE '\'
-              AND NOT EXISTS (SELECT 1 FROM messages a WHERE a.causation_seq = messages.seq AND a.source = $person)
-              AND NOT EXISTS (SELECT 1 FROM messages a WHERE a.source = $person AND a.correlation_id = messages.correlation_id
-                              AND a.seq > messages.seq AND a.type = $instr || messages.source)
-            """,
+            """ + Unanswered,
             ("$type", MessageTypes.NeedsDecision), ("$prefix", team.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "/%"),
             ("$person", MessageTypes.PersonSource), ("$instr", MessageTypes.InstructionPrefix));
 
-    /// <summary>The most recent ended run of a member (its card shows the reason: completed, failed, stopped...).</summary>
-    public RunRow? LastRun(long memberId) => Runs().Where(r => r.MemberId == memberId).MaxBy(r => r.Id);
+    /// <summary>
+    /// Every team's open questions (<see cref="OpenDecisions(string)"/>'s rule) from one statement, by team name, oldest
+    /// first within a team. A reader that shows all teams asks once, not once per team.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<Message>> OpenDecisionsByTeam() =>
+        Messages("WHERE type = $type AND instr(source, '/') > 1" + Unanswered,
+                ("$type", MessageTypes.NeedsDecision), ("$person", MessageTypes.PersonSource), ("$instr", MessageTypes.InstructionPrefix))
+            .GroupBy(m => m.Source[..m.Source.IndexOf('/')], StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<Message>)[.. g], StringComparer.OrdinalIgnoreCase);
+
+    // Not answered: no reply to the question, and nothing the person told the asker later in the same deliverable.
+    private const string Unanswered =
+        """
+
+          AND NOT EXISTS (SELECT 1 FROM messages a WHERE a.causation_seq = messages.seq AND a.source = $person)
+          AND NOT EXISTS (SELECT 1 FROM messages a WHERE a.source = $person AND a.correlation_id = messages.correlation_id
+                          AND a.seq > messages.seq AND a.type = $instr || messages.source)
+        """;
+
+    /// <summary>A member's newest run (its card shows the reason: completed, failed, stopped...), found through ix_runs_member.</summary>
+    public RunRow? LastRun(long memberId) =>
+        ReadRuns("WHERE member_id = $m ORDER BY id DESC LIMIT 1", ("$m", memberId)).FirstOrDefault();
 }

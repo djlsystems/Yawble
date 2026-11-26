@@ -91,7 +91,10 @@ public sealed class ConfirmationBook(TimeProvider? clock = null)
     }
 }
 
-/// <summary>Runs the person's gh on the host (signed in as they are). Tests pass a fake instead.</summary>
+/// <summary>
+/// Runs the person's gh on the host (signed in as they are), for at most <see cref="HostProcess.DefaultTimeout"/>: a gh
+/// that runs out of time, or whose caller gives up, is stopped. Tests pass a fake instead.
+/// </summary>
 public static class HostGh
 {
     public static async Task<GitResult> RunAsync(string workingDirectory, IReadOnlyList<string> args, CancellationToken ct)
@@ -105,7 +108,8 @@ public static class HostGh
             p.StandardInput.Close();
             var o = p.StandardOutput.ReadToEndAsync(ct);
             var e = p.StandardError.ReadToEndAsync(ct);
-            await p.WaitForExitAsync(ct);
+            if (!await HostProcess.WaitOrStopAsync(p, HostProcess.DefaultTimeout, ct))
+                return new GitResult(-1, "", $"gh {string.Join(' ', args.Take(2))} did not finish within {HostProcess.DefaultTimeout.TotalSeconds:0} s and was stopped; GitHub may be unreachable");
             return new GitResult(p.ExitCode, (await o).Trim(), (await e).Trim());
         }
         catch (System.ComponentModel.Win32Exception) { return new GitResult(-1, "", "gh is not installed on this computer"); }

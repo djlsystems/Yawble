@@ -392,13 +392,46 @@ public sealed partial class BusStore : IDisposable
         Exec("UPDATE runs SET state = $st, ended_at = $t, reason = $r WHERE id = $id AND state = 'running';",
             ("$st", state), ("$t", Now()), ("$r", reason), ("$id", runId));
 
-    public IReadOnlyList<RunRow> Runs(string? state = null)
+    private const string RunColumns =
+        "id, member_id, queue_id, causation_seq, correlation_id, items, state, queued_at, started_at, ended_at, reason, failure_class";
+
+    public IReadOnlyList<RunRow> Runs(string? state = null) =>
+        ReadRuns(state is null ? "ORDER BY id" : "WHERE state = $st ORDER BY id", ("$st", state));
+
+    /// <summary>These runs by id (the scheduler's live sandboxes): a primary-key lookup each, never the whole table.</summary>
+    public IReadOnlyList<RunRow> RunsById(IEnumerable<long> ids) =>
+        ReadRuns("WHERE id IN (SELECT value FROM json_each($ids)) ORDER BY id", ("$ids", "[" + string.Join(",", ids) + "]"));
+
+    /// <summary>
+    /// The newest run of each member of a team, by member id (a member that never ran has no entry). Reads one row
+    /// per member through ix_runs_member(member_id, id), however long the run history is.
+    /// </summary>
+    public IReadOnlyDictionary<long, RunRow> LastRuns(long teamId) =>
+        ReadRuns(
+            """
+            WHERE id IN (SELECT max(id) FROM runs
+                         WHERE member_id IN (SELECT id FROM members WHERE team_id = $t) GROUP BY member_id)
+            """, ("$t", teamId)).ToDictionary(r => r.MemberId);
+
+    /// <summary>A run's wait for a slot: who ran, when it joined the queue and when it started.</summary>
+    public sealed record RunWait(long Id, long MemberId, string QueuedAt, string StartedAt);
+
+    /// <summary>
+    /// The runs made after run <paramref name="afterId"/>, oldest first. A run's member, queue time and start time are
+    /// written once, at admission, so a reader that keeps totals needs only the rows it has not seen.
+    /// </summary>
+    public IReadOnlyList<RunWait> RunWaitsAfter(long afterId)
     {
-        using var cmd = Command(
-            $"""
-             SELECT id, member_id, queue_id, causation_seq, correlation_id, items, state, queued_at, started_at, ended_at, reason, failure_class
-             FROM runs {(state is null ? "" : "WHERE state = $st")} ORDER BY id;
-             """, ("$st", state));
+        using var cmd = Command("SELECT id, member_id, queued_at, started_at FROM runs WHERE id > $a ORDER BY id;", ("$a", afterId));
+        using var r = cmd.ExecuteReader();
+        var list = new List<RunWait>();
+        while (r.Read()) list.Add(new RunWait(r.GetInt64(0), r.GetInt64(1), r.GetString(2), r.GetString(3)));
+        return list;
+    }
+
+    private List<RunRow> ReadRuns(string tail, params (string Name, object? Value)[] args)
+    {
+        using var cmd = Command($"SELECT {RunColumns} FROM runs {tail};", args);
         using var r = cmd.ExecuteReader();
         var list = new List<RunRow>();
         while (r.Read())
@@ -436,9 +469,13 @@ public sealed partial class BusStore : IDisposable
     /// <summary>How many statements this store has run (tests count a read's queries: the no-N+1 check).</summary>
     public long Queries { get; private set; }
 
+    /// <summary>Called with the text of each statement this store runs (tests read the plans of a read's statements).</summary>
+    internal Action<string>? Statement { get; set; }
+
     private SqliteCommand Command(string sql, params (string Name, object? Value)[] args)
     {
         Queries++;
+        Statement?.Invoke(sql);
         var cmd = _connection.CreateCommand();
         cmd.Transaction = _tx;
         cmd.CommandText = sql;

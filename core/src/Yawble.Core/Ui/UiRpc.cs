@@ -282,12 +282,13 @@ public sealed class UiRpc(
 
     private async Task<JsonNode?> OverviewAsync(CancellationToken ct)
     {
-        var teams = await bus.TeamsAsync(ct);
+        // The team list's waiting counts and the questions counted here come from the same read of the open questions.
+        var (teams, openByTeam) = await bus.TeamsOverviewAsync(ct);
         var needsYou = 0;
         var newest = new List<NeedsYouItem>(); // the OS notification names the newest thing waiting and its team
         foreach (var t in teams)
         {
-            var open = await bus.OpenDecisionsAsync(t.Name, ct);
+            if (!openByTeam.TryGetValue(t.Name, out var open)) continue;
             needsYou += open.Count;
             foreach (var d in open)
                 newest.Add(new(d.OccurredAt, "question", Bus.DecisionAsk.Read(d.Payload).Headline, t.Name));
@@ -444,7 +445,10 @@ public sealed class UiRpc(
         var cards = await bus.AgentCardsAsync(teamId, ct);
         var everyone = await bus.AllMemberRowsAsync(ct);
         var team = cards.FirstOrDefault()?.Member.Team;
-        var asking = team is null ? [] : (await bus.OpenDecisionsAsync(team, ct)).Select(m => m.Source[(m.Source.IndexOf('/') + 1)..]).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // A card carries its member's open question (DecisionId): who is asking needs no second read of the questions.
+        var asking = cards.Where(c => c.DecisionId is not null).Select(c => c.Member.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // The global policy and the team's network allow list are the same for every card: read once, not once per card.
+        var shared = cards.Count == 0 ? null : policies.SharedOf(teamId);
         var reports = team is null ? new Dictionary<string, Message>() : await bus.LatestReportsAsync(team, ct);
         var list = new JsonArray();
         foreach (var card in cards)
@@ -457,7 +461,7 @@ public sealed class UiRpc(
             if (Models is { } models) node["agentModel"] = Agents.MemberModels.Json(models.For(card.Member));
             try
             {
-                var effective = Effective(card.Member, everyone);
+                var effective = policies.Effective(card.Member.Id, layouts.For(card.Member, everyone), machineMemoryMb, shared!);
                 node["net"] = PolicyBanner.Net(effective.Policy);
                 node["wallTimeout"] = PolicyBanner.Duration(effective.Policy.Compute.WallTimeoutSec);
                 node["loosened"] = S(effective.Policy.Loosened);
