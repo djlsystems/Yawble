@@ -370,8 +370,16 @@ async function untilFrames(page: Page, ok: (fs: Frame[]) => unknown, timeout = 1
 async function most(page: Page, get: (f: Frame) => number, ms: number): Promise<number> {
   const t0 = await page.evaluate(() => performance.now());
   await page.waitForTimeout(ms); // a measurement window: the most drawn in this stretch of time
-  const fs: Frame[] = await page.evaluate((t) => (window as any).__frames.filter((f: Frame) => f.at > t), t0);
-  return Math.max(0, ...fs.map(get));
+  // The window's frames are set aside in the page (the recorder drops its oldest as it goes) and read 30 at a time:
+  // a few seconds of a full wall (240 map nodes) is tens of megabytes, more than one answer from the page carries.
+  const n = await page.evaluate((t) => ((window as any).__held = (window as any).__frames.filter((f: Frame) => f.at > t)).length, t0);
+  let best = 0;
+  for (let i = 0; i < n; i += 30) {
+    const fs: Frame[] = await page.evaluate(([a, b]) => (window as any).__held.slice(a, b), [i, i + 30]);
+    best = Math.max(best, ...fs.map(get));
+  }
+  await page.evaluate(() => { delete (window as any).__held; });
+  return best;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1325,10 +1333,11 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
   const feed = new Feed();
   const teams = [TEAM, TEAM2, 'team-3', 'team-4', 'team-5'];
   const who = (t: string) => (t === TEAM ? ADA : t === TEAM2 ? 'DeveloperCleo' : 'DeveloperZed');
-  for (const t of teams) {
-    feed.row('instruction', who(t), 'Manager', 10, 300_000, 'Busy', t);
-    for (let i = 0; i < 64; i++) feed.step(who(t), 'edit', `src/area${i % 8}/file${i}.ts`, 240_000 - i * 50, t);
-  }
+  // 64 files a team, touched half a minute ago: quiet (no step icon), and inside the two minutes a file stays on the map.
+  // The test outlasts those two minutes, so each level touches them again before it measures the map.
+  const touchFiles = () => { for (const t of teams) for (let i = 0; i < 64; i++) feed.step(who(t), 'edit', `src/area${i % 8}/file${i}.ts`, 30_000 - i * 50, t); };
+  for (const t of teams) feed.row('instruction', who(t), 'Manager', 10, 300_000, 'Busy', t);
+  touchFiles();
   const { page, ctx, errors } = await open(browser, { feed, extraTeams: 3 });
   await until(page, (x) => fileDots(x).length > 0, Boolean, 15_000);
   await still(page, 30_000);
@@ -1340,6 +1349,9 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
   for (const level of ['calm', 'normal', 'lively'] as const) {
     await page.locator(`[data-test=monitor-density-${level}]`).first().click();
     await expect(page.locator(`[data-test=monitor-density-${level}]`).first()).toHaveAttribute('aria-pressed', 'true');
+    const stepsRead = feed.calls.length;
+    touchFiles();
+    await readAfter(feed, 'monitor.steps', stepsRead);
     await still(page, 30_000); // the maps redrawn at the new cap
     const map = await most(page, (x) => fileDots(x).length, 1500);
     // Six steps at once on Ada: the step icons on her.
@@ -1358,8 +1370,10 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
     // Against test 6's flake: sampled for 8 s, keeping when the dots first show and what the old 3 s window saw.
     const trace: { ms: number; dots: number }[] = [];
     while (Date.now() - pushedAt < 8000) {
-      let best = 0;
-      for (const x of await recent(page)) best = Math.max(best, commitDots(x).length);
+      // Counted in the page (as commitDots counts them): the last frames of a full wall are megabytes, and bringing
+      // them over every 120 ms would slow the wall being timed.
+      const best = await page.evaluate((commit) => Math.max(0, ...(window as any).__frames.slice(-12).map((f: Frame) =>
+        f.ops.filter((o) => o.op === 'fill' && o.items?.length === 1 && o.items[0].t === 'arc' && o.style === commit && o.items[0].r >= 4.19).length)), C.commit);
       trace.push({ ms: Date.now() - pushedAt, dots: best });
       await page.waitForTimeout(120); // the trace's sampling interval (it records when the dots first show)
     }
@@ -1385,7 +1399,7 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
   expect(r.calm.paymentsCommitDots).toBeLessThanOrEqual(3);
   expect(r.normal.paymentsCommitDots).toBe(8);
   expect(r.lively.paymentsCommitDots).toBe(8);
-  expect(r.lively.stored).toBe('lively');
+  expect(r.lively.stored, 'lively is the default, and the default is not stored').toBeNull();
   // The dots show 2.4-3.0 s after the commits (a 1.2 s poll, then their entry); the old 3 s window missed one
   // at 3033 ms. Sampled for 8 s now; they must still show within 6 s.
   for (const level of ['calm', 'normal', 'lively'] as const) expect(r[level].firstCommitDotMs, `${level}: commit dots within 6 s`).toBeLessThanOrEqual(6000);
@@ -1540,11 +1554,11 @@ for (const theme of ['light', 'dark'] as const)
       await unhover(page);
       await shot(page, `${tag}-focus-on`);
       await page.locator('[data-test=monitor-focus-leave]').click();
-      // Each density: on the phone it sits at the top of the cog's panel.
+      // Each density: it sits at the top of the cog's settings panel, at every width.
+      r.densityOutsidePanel = await page.locator('[data-test=monitor-density-calm]').count();
+      await page.locator('[data-test=monitor-layout-toggle]').click();
+      await expect(page.locator('[data-test=monitor-density-calm]')).toBeVisible();
       if (w < 700) {
-        r.densityOutsidePanel = await page.locator('[data-test=monitor-density-calm]').count();
-        await page.locator('[data-test=monitor-layout-toggle]').click();
-        await expect(page.locator('[data-test=monitor-density-calm]')).toBeVisible();
         const b = (await page.locator('[data-test=monitor-density-calm]').boundingBox())!;
         r.phoneDensityButton = { w: b.width, h: b.height, right: b.x + b.width };
         expect(b.x + b.width).toBeLessThanOrEqual(w);
@@ -1552,10 +1566,14 @@ for (const theme of ['light', 'dark'] as const)
       }
       for (const level of ['calm', 'normal', 'lively']) {
         await page.locator(`[data-test=monitor-density-${level}]`).first().click();
+        await expect(page.locator(`[data-test=monitor-density-${level}]`).first()).toHaveAttribute('aria-pressed', 'true');
+        // The panel is closed for the picture of the wall: Escape on the phone, its Close at a desktop width.
         if (w < 700) await page.keyboard.press('Escape');
+        else await page.locator('[data-test=monitor-layout-close]').click();
+        await expect(page.locator('[data-test=monitor-layout]')).toHaveCount(0);
         await still(page); // the wall redrawn at the new density
         await shot(page, `${tag}-density-${level}`);
-        if (w < 700 && level !== 'lively') await page.locator('[data-test=monitor-layout-toggle]').click();
+        if (level !== 'lively') await page.locator('[data-test=monitor-layout-toggle]').click();
       }
       clearInterval(load);
       result[`screens-${tag}`] = r;
