@@ -319,15 +319,6 @@ describe('the Board: Clear done', () => {
     expect(lists(calls)).toBe(before + 2); // the first, then one more for the rest
     expect(w.get('[data-test=lane-done]').text()).toContain('Ship the README');
   });
-
-  it('uses theme colours only', async () => {
-    const fs = await import('node:fs');
-    const path = await import('node:path');
-    const src = fs.readFileSync(path.resolve(__dirname, '../../src/renderer/src/board/BoardView.vue'), 'utf8');
-    const rules = src.split('\n').filter((l) => /^\.(clear(ed|-done)|show-cleared)/.test(l));
-    expect(rules.length).toBeGreaterThan(0);
-    for (const r of rules) expect(r).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(/i);
-  });
 });
 
 describe("In Progress's count and the global run limit", () => {

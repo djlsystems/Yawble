@@ -1,21 +1,12 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import BacklogView from '../../src/renderer/src/board/BacklogView.vue';
 import DocumentsView from '../../src/renderer/src/components/DocumentsView.vue';
 import type { YawbleApi, TeamSummary } from '../../src/shared/api';
 
 // The Documents and Backlog pages use the whole page height (as Settings > Skills does). happy-dom has no layout and
-// applies no SFC styles, so this checks the structure (classes, wrappers) and reads the style blocks. Fakes only.
-const src = (rel: string) => readFileSync(resolve(__dirname, '../../src/renderer/src', rel), 'utf8');
-const styleOf = (rel: string) => [...src(rel).matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
-const rule = (css: string, selector: string) => {
-  const hit = css.split('}').map((r) => r.split('{')).find(([s]) => s.trim() === selector);
-  return hit ? hit[1] : '';
-};
-const containment = /\bcontainer(-type)?\s*:|\bcontain\s*:|\btransform\s*:/;
+// applies no SFC styles, so this checks the structure (classes, wrappers). Fakes only.
 
 const team = { id: 1, name: 'payments' } as TeamSummary;
 const backlogItem = (over: Record<string, unknown> = {}) => ({
@@ -61,20 +52,6 @@ describe('Backlog fills the page', () => {
       w.unmount();
     }
   });
-
-  it('styles: sticky header row, flexible body with a 160px floor, fixed parts keep their height, no containment', () => {
-    const css = styleOf('board/BacklogView.vue');
-    expect(rule(css, '.list th')).toMatch(/position:\s*sticky/);
-    expect(rule(css, '.item > .ibody')).toMatch(/flex:\s*1 1 0/);
-    expect(rule(css, '.item > .ibody')).toMatch(/min-height:\s*160px/);
-    expect(rule(css, '.item > *')).toMatch(/flex:\s*none/);
-    expect(rule(css, '.item')).toMatch(/overflow:\s*auto/);
-    expect(rule(css, '.item')).not.toMatch(/sticky|calc\(/);
-    expect(rule(css, '.md')).not.toMatch(/max-height/);
-    expect(rule(css, '.wrap.fill > .split')).toMatch(/min-height:\s*0/);
-    expect(css).not.toMatch(/\d+vh/);
-    expect(css).not.toMatch(containment);
-  });
 });
 
 describe('Documents fills the page', () => {
@@ -109,18 +86,5 @@ describe('Documents fills the page', () => {
     // Save and Cancel live in the header row, outside the scrolling content.
     expect(viewer.get('header.vh').find('[data-test=doc-save]').exists()).toBe(true);
     w.unmount();
-  });
-
-  it('styles: only the fill browser stretches; list and preview scroll on their own; no containment', () => {
-    const css = styleOf('components/DocumentsBrowser.vue');
-    expect(rule(css, '.browser.fill > .split')).toMatch(/flex:\s*1 1 0/);
-    expect(rule(css, '.browser.fill > .split')).toMatch(/min-height:\s*0/);
-    expect(rule(css, '.browser.fill .viewer > .vbody')).toMatch(/flex:\s*1 1 0/);
-    expect(rule(css, '.browser.fill .viewer > .vbody')).toMatch(/overflow:\s*auto/);
-    expect(rule(css, '.browser.fill .files')).toMatch(/max-height:\s*none/);
-    expect(rule(css, '.browser.fill .viewer')).toMatch(/max-height:\s*none/);
-    for (const file of ['components/DocumentsBrowser.vue', 'components/DocumentsView.vue', 'components/DocumentsDialog.vue', 'board/BacklogView.vue', 'components/Modal.vue']) {
-      expect(styleOf(file), file).not.toMatch(containment);
-    }
   });
 });

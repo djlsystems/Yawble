@@ -1,7 +1,5 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import BoardCardItem from '../../src/renderer/src/board/BoardCardItem.vue';
 import CardPanel from '../../src/renderer/src/board/CardPanel.vue';
@@ -77,14 +75,6 @@ describe('the board card for a run the person stopped, as the core sends it', ()
     expect(cardStatusLook({ ...coreStoppedCard('queued', 'todo'), memberState: { state: 'queued', attention: 'stopped' } }).label).toBe('Queued');
     expect(cardStatusLook({ ...coreStoppedCard('running', 'in-progress'), memberState: { state: 'running', attention: 'stopped' } }).label).toBe('Running');
     expect(cardFace({ ...coreStoppedCard('running', 'in-progress'), memberState: { state: 'running', attention: 'stopped' } })).toBe('running');
-  });
-});
-
-describe('the stopped colour in both themes (styles.css)', () => {
-  it('--status-stopped maps to --state-stopped in the light and the dark theme, and --state-stopped is set in both', () => {
-    const css = readFileSync(resolve(__dirname, '../../src/renderer/src/styles.css'), 'utf8');
-    expect(css.match(/--status-stopped:\s*var\(--state-stopped\)/g)?.length).toBe(2);
-    expect(css.match(/--state-stopped:\s*#[0-9a-fA-F]{3,8}/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 });
 

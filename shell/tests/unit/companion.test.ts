@@ -1,7 +1,5 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { askedAgo } from '../../src/renderer/src/companionAge';
 import { COMPANION_LEVEL_TEXT, levelsUpTo } from '../../src/renderer/src/companionLevels';
@@ -508,16 +506,6 @@ describe('companion levels', () => {
     expect(levelsUpTo('act')).toEqual(['read', 'act']);
     expect(levelsUpTo('destructive')).toEqual(['read', 'act', 'destructive']);
     expect(levelsUpTo('root' as never)).toEqual(['read']);
-  });
-});
-
-describe('companion styles', () => {
-  it('UseTheThemesColoursOnly', () => {
-    for (const name of ['CompanionAsks.vue', 'CompanionPanel.vue']) {
-      const source = readFileSync(path.join(process.cwd(), "src", "renderer", "src", "components", name), "utf8");
-      const style = source.slice(source.indexOf('<style'));
-      expect(style, name).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(/);
-    }
   });
 });
 

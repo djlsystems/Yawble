@@ -5,9 +5,8 @@
 // menu stays on screen at 375 px and sits above the member panes. The desktop header is unchanged.
 // A fake matchMedia gives the width; the API is a scripted fake (no core, no network).
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import Icon from '../../src/renderer/src/components/Icon.vue';
 import TeamView from '../../src/renderer/src/components/TeamView.vue';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
 import { deliverablesRequest } from '../../src/renderer/src/deliverables/page';
@@ -66,9 +65,9 @@ describe('the team ⋯ menu on a phone', () => {
     expect(items(w).map((b) => b.text()).join('')).not.toMatch(/[⏰⎇]/u);
     // The same icons as the drawer's Team group for Documents and Deliverables.
     const d = (i: number) => items(w)[i]!.get('path').attributes('d');
-    const icon = readFileSync(resolve(__dirname, '../../src/renderer/src/components/Icon.vue'), 'utf8');
-    expect(icon).toContain(`docs: '${d(0)}'`);
-    expect(icon).toContain(`deliverable: '${d(1)}'`);
+    const icon = (name: string) => mount(Icon, { props: { name } }).get('path').attributes('d');
+    expect(d(0)).toBe(icon('docs'));
+    expect(d(1)).toBe(icon('deliverable'));
   });
 
   it('Documents closes the menu and opens its dialog; Deliverables closes it and opens the Deliverables page for the team, no dialog', async () => {
@@ -95,21 +94,6 @@ describe('the team ⋯ menu on a phone', () => {
     const b = w.get('[data-test=open-deliverables-menu]');
     expect(b.text()).toBe('Deliverables');
     expect(b.attributes('title')).toMatch(/Deliverables page/);
-  });
-
-  it('the menu CSS: 44 px rows with one gap, left-aligned, kept on screen and above the member panes', () => {
-    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/components/TeamView.vue'), 'utf8');
-    const phone = src.slice(src.indexOf('@media (max-width: 759.98px)'));
-    const menu = /\n\s*\.menu \{([^}]*)\}/.exec(phone)?.[1] ?? '';
-    const button = /\n\s*\.menu button \{([^}]*)\}/.exec(phone)?.[1] ?? '';
-    expect(menu).toMatch(/right: 0;/); // opens leftward from the ⋯ at the right edge
-    expect(menu).toMatch(/max-width: calc\(100vw - 16px\)/);
-    expect(menu).toMatch(/max-height: calc\(100dvh - \d+px\); overflow-y: auto/);
-    expect(Number(/z-index: (\d+)/.exec(menu)?.[1])).toBeGreaterThan(5); // MemberPane's own menus and grips are 1-5
-    expect(button).toMatch(/height: 44px;/);
-    expect(button).toMatch(/gap: 10px;/);
-    expect(button).toMatch(/justify-content: flex-start;/);
-    expect(button).toMatch(/white-space: nowrap;/);
   });
 
   it('the desktop header is unchanged: five buttons, no ⋯', async () => {

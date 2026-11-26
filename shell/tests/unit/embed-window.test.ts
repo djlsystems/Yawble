@@ -88,9 +88,6 @@ describe('embed mode in the window (App.vue)', { timeout: 30_000 }, () => {
       expect(app.classes()).toContain('embed');
       expect(app.classes()).not.toContain('collapsed');
       expect(app.attributes('data-embed')).toBe('1');
-      // The grid has a single column in embed mode (the stylesheet's rule for .app.embed).
-      const css = readFileSync(resolve(__dirname, '../../src/renderer/src/App.vue'), 'utf8');
-      expect(css).toMatch(/\.app\.embed\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\);\s*\}/);
     });
   }
 

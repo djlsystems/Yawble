@@ -361,8 +361,8 @@ describe('no CSS containment on what hosts a Modal', () => {
   };
   const containment = /\bcontainer(-type)?\s*:|\bcontain\s*:|\btransform\s*:/;
 
-  it('the Settings page, its tab pane and the inline panel carry none', () => {
-    for (const file of ['SettingsView.vue', 'Modal.vue', 'SkillsDialog.vue', 'ListEditor.vue']) {
+  it('the Settings page, its tab pane and the inline panel carry none; nor do the Documents and Backlog pages, which fill the page and open dialogs', () => {
+    for (const file of ['SettingsView.vue', 'Modal.vue', 'SkillsDialog.vue', 'ListEditor.vue', 'DocumentsBrowser.vue', 'DocumentsView.vue', 'DocumentsDialog.vue', '../board/BacklogView.vue']) {
       expect(styleOf(file), file).not.toMatch(containment);
     }
   });

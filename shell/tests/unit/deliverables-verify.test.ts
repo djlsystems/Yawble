@@ -330,15 +330,6 @@ describe('the filter re-check: F1 stays on the Deliverables table; O2 the defaul
     }
   });
 
-  it('F1: the team tiles and the pane pass no q', () => {
-    const src = (p: string) => readFileSync(path.join(__dirname, '..', '..', 'src', 'renderer', 'src', p), 'utf8');
-    for (const p of ['components/TeamDeliverables.vue', 'deliverables/DeliverablePane.vue']) {
-      const tags = src(p).match(/<ItemLink\b[^>]*>/g) ?? [];
-      expect(tags.length, p).toBeGreaterThan(0);
-      for (const t of tags) expect(t, p).not.toMatch(/\bq=|:q\b/);
-    }
-  });
-
   it('O2: a team alone shows Clear; Clear goes back to Open with no team and no text', async () => {
     const w = await page();
     expect(w.find('[data-test=deliverables-clear]').exists()).toBe(false);

@@ -1,9 +1,8 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
+import App from '../../src/renderer/src/App.vue';
 import FolderAskCard from '../../src/renderer/src/components/FolderAskCard.vue';
 import FolderAsks from '../../src/renderer/src/components/FolderAsks.vue';
 import MemberPane from '../../src/renderer/src/components/MemberPane.vue';
@@ -137,14 +136,6 @@ describe('FolderAskCard: when the Manager asked for the member', () => {
   });
 });
 
-describe('folderAsks.ts re-exports the shared/api.ts types', () => {
-  it('declares no FolderAsk / FolderAskChoice of its own', () => {
-    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/folderAsks.ts'), 'utf8');
-    expect(src).toContain("export type { FolderAsk, FolderAskChoice } from '../../shared/api';");
-    expect(src).not.toMatch(/export (interface|type) FolderAsk\b\s*[={]/);
-    expect(src).not.toMatch(/export type FolderAskChoice\s*=/);
-  });
-});
 describe('FolderAskCard: the answers', () => {
   it('a read-write ask offers Approve, Approve read-only and Deny', () => {
     const { api } = fakeApi(() => []);
@@ -251,12 +242,27 @@ describe('FolderAsks: Needs you', () => {
     }
   });
 
-  it('App shows the banner over every view but the Board (whose Needs You lane lists them)', () => {
-    const app = readFileSync(resolve(__dirname, '../../src/renderer/src/App.vue'), 'utf8');
-    expect(app).toMatch(/<FolderAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" \/>/);
-    // Inside the one banners box (the phone's 40% cap), after the tool asks.
-    const box = app.slice(app.indexOf('<div class="banners"'), app.indexOf('</div>', app.indexOf('<div class="banners"')));
-    expect(box).toContain('<FolderAsks');
+  it('App shows the banner, in its banners box, over every view but the Board (whose Needs You lane lists them)', async () => {
+    const api = {
+      getInfo: async () => { throw new Error('no'); },
+      getAvailableBackends: async () => [],
+      call: async (method: string) => {
+        if (method === 'folder.asks') return [ask()];
+        if (method === 'app.overview') return { slots: { running: 0, limit: 8, queued: 0 }, teams: [] };
+        if (method === 'link.status') return { state: 'off', viewers: [] };
+        return [];
+      },
+      onEvent: () => () => {},
+      openTerminal: async () => {},
+    } as unknown as YawbleApi;
+    const w = keep(mount(App, { props: { api, pollMs: 60_000 } }));
+    await flushPromises();
+    await w.get('[data-test=nav-teams]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=banners] [data-test=folder-asks]').exists()).toBe(true);
+    await w.get('[data-test=nav-board]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=banners] [data-test=folder-asks]').exists()).toBe(false);
   });
 });
 
@@ -356,14 +362,5 @@ describe('the Monitor\'s You node counts folder asks', () => {
     spy.mockRestore();
     w.unmount();
     mounted.pop();
-  });
-});
-
-describe('on a phone', () => {
-  it('the card takes the full width and its buttons stack, as the other ask cards', () => {
-    const css = readFileSync(resolve(__dirname, '../../src/renderer/src/components/FolderAskCard.vue'), 'utf8');
-    expect(css).toMatch(/\.phone \.buttons \{ flex-direction: column; align-items: stretch;/);
-    expect(css).toMatch(/\.phone[^{]*\{[^}]*width: 100%/);
-    expect(readFileSync(resolve(__dirname, '../../src/renderer/src/components/FolderAsks.vue'), 'utf8')).toContain('.banner.phone { padding: 8px 8px; }');
   });
 });

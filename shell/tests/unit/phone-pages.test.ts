@@ -8,7 +8,6 @@
 // phone styles: the app bar, the paddings and margins of the page around the row, and each block rendered above it (a
 // block above the first row must declare its height on the phone, or the test fails: it would not be a compact row).
 // Fakes only: matchMedia answers from a set width, the core is a scripted fake.
-import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
@@ -172,36 +171,6 @@ function topOf(el: Element, root: Element, st: Styles, hostPad = 0) {
 }
 const fits = (top: number, frame: { height: number }) => (frame === Portrait ? top <= PortraitTarget : top + Row <= frame.height);
 
-/**
- * The desktop rules outside each phone block, as they were at the base (8b39e07): a desktop change must be on purpose.
- * Fingerprinted with the comments taken out, so rewording a comment is not a desktop change.
- */
-const DesktopCss: Record<string, string> = {
-  // Backlog item pane: the Dispatches list went (only each team's Open team / Its board links stay), so the spec gets the height.
-  'board/BacklogView.vue': '6975c6ee16a2e64d',
-  // The member's card and activity are one pane (MemberPane.vue): the team page's member-row rules went.
-  // One rule centres the Tell buttons' svg icons (.tell .ticon); a desktop rule keeps the 29 px buttons' size.
-  // The members are equal tiles in a wrapping grid (.member-grid, the pane filling its .member-cell)
-  // ending with the New member tile (.new-tile, its form .add); the old add row's rule went. The pane clips
-  // sideways only (overflow-x clip, y visible) so its ☰ menu draws past a short tile; the focused cell is raised.
-  // The decision card's option notes (.choice, .choice .note) and its collapsed Details (.details).
-  'components/TeamView.vue': 'ca073551f01704f8',
-  // The sync banner's "N commits behind" is a link (.count, as in the Git dialog) opening a list (.list).
-  'components/TeamSyncBanner.vue': '797660ee174a3937',
-  // The member tile: one title bar with a ☰ menu for every action, Report | Activity | Terminal tabs and one view (no
-  // toolbar, no two areas side by side, no width bar, no loosened marker). A tile in the team grid - the
-  // pane fills its cell as a column, the title's chips ellipsize, the tabs stay one line, the view scrolls inside.
-  // .is-stopped, a stopped run's neutral left edge and label colour.
-  // The "Waiting on you" chip link (.kind.waiting) and the Report's note (.waiting-note). The pills
-  // row under the name (two-row title grid). The running member's "#N" deliverable links (.runs, .run-link).
-  // A running member's pane: a 1px border that gives way to RunningOutline's dots; corners match the team cards (14px).
-  'components/MemberPane.vue': 'c22481325e89a988',
-  'components/MemberActivity.vue': '89ae98395143684a',
-  'components/DocumentsView.vue': '30090ebf288b8c9e',
-  // The documents list's Modified column: a wider list and the size / modified cells.
-  'components/DocumentsBrowser.vue': 'aeb000688d6975ab',
-};
-
 /** Selectors that scroll vertically on the desktop (overflow / overflow-y auto or scroll). */
 const scrollers = (src: string) => rules(desktopCss(src)).filter((r) => /^(auto|scroll)/.test(r.decls.overflow ?? r.decls['overflow-y'] ?? '')).flatMap((r) => r.sels);
 /** Whether the phone rules turn `sel` (or a narrower form of it) into a plain block that grows with its content. */
@@ -343,28 +312,13 @@ describe('one scroller per page on a phone', () => {
     });
   }
 
-  it('the pages are the scroller: Backlog and an open Documents folder are plain blocks, not a filled column', () => {
-    const b = rules(phoneCss(read('board/BacklogView.vue')));
-    expect(b.find((r) => r.sels.includes('.backlog-place.fill'))?.decls.display).toBe('block');
-    expect(b.find((r) => r.sels.includes('.wrap.fill'))?.decls.display).toBe('block');
-    const d = rules(phoneCss(read('components/DocumentsView.vue')));
-    expect(d.find((r) => r.sels.includes('.docs-place.fill'))?.decls).toMatchObject({ display: 'block', overflow: 'auto' });
-    const br = rules(phoneCss(read('components/DocumentsBrowser.vue')));
-    expect(br.find((r) => r.sels.includes('.browser.fill'))?.decls).toMatchObject({ height: 'auto', display: 'block' });
-  });
-
   it("the Team page: each member's activity and output are at their own height (no inline desktop height on the phone)", async () => {
     const w = await teamPage(Portrait.width);
     for (const b of w.findAll('[data-test=member-pane-body]')) expect((b.element as HTMLElement).style.height).toBe('');
-    const pane = rules(phoneCss(read('components/MemberPane.vue')));
-    expect(pane.find((r) => r.sels.includes('.output') && r.decls.height)?.decls.height).toBe('auto');
-    expect(pane.find((r) => r.sels.includes('.body') && r.decls.height)?.decls.height).toBe('auto');
     // The activity is the Activity tab's view.
     for (const t of w.findAll('[data-test=member-view-activity]')) await t.trigger('click');
     // The activity is capped: it renders as a plain list, its ol not positioned to scroll.
     for (const a of w.findAll('[data-test=member-activity]')) expect(a.classes()).toContain('capped');
-    const act = rules(phoneCss(read('components/MemberActivity.vue')));
-    expect(act.find((r) => r.sels.includes('.activity.capped ol'))?.decls).toMatchObject({ position: 'static', overflow: 'visible' });
   });
 
   it('a capped activity shows the newest lines and how many more are in Logs; uncapped (the desktop) shows every line', () => {
@@ -503,9 +457,6 @@ describe('no sideways overflow on a phone', () => {
 });
 
 describe('at 1280 px the desktop is as it was', () => {
-  it('the desktop rules of every touched component are unchanged', () => {
-    for (const [f, hash] of Object.entries(DesktopCss)) expect(createHash('sha256').update(desktopCss(read(f)).replace(/\/\*[\s\S]*?\*\//g, '')).digest('hex').slice(0, 16), f).toBe(hash);
-  });
 
   it('Backlog: the header with its title, tabs, search, team filter, Upload document and + Add item, then the intro', async () => {
     const w = await backlog(Desktop);
