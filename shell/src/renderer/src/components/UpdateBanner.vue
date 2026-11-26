@@ -6,13 +6,10 @@ import { errorText } from '../api';
 import BusyLabel from './BusyLabel.vue';
 
 /**
- * The line at the top of the window about an update to the app itself (updates.status): downloading it, ready to
- * install (Restart to update), or available to download. Restart to update asks first while agents are working, or
- * while other people signed in to this computer have the app open (an all-users install is replaced for everyone),
- * since the app quits to install. An all-users install needs an administrator: Windows asks for permission, and a
- * person who is not one is told their administrator installs updates. "Later" hides it until a newer version. Nothing
- * shows when the organization manages updates, or in a development run of the source. A cloud viewer is told; installing
- * is on the computer.
+ * The line at the top of the window about an update to the app itself (updates.status): downloading, ready to install
+ * (Restart to update) or available. Restart asks first while agents are working or other people on this computer have
+ * the app open. An all-users install needs an administrator. "Later" hides it until a newer version. Nothing shows
+ * when the organization manages updates or in a development run; a cloud viewer is told to install on the computer.
  */
 const props = defineProps<{ api: YawbleApi; pollMs?: number }>();
 

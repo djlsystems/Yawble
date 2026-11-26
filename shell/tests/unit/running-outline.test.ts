@@ -55,7 +55,7 @@ describe('a running card has a dotted outline whose dots move clockwise', () => 
     expect(cards.map((c) => c.find('[data-test=running-outline]').exists())).toEqual([true, false, false]);
   });
 
-  it('on the team page, only a running member card has it, and the old breathing is gone', async () => {
+  it('on the team page, only a running member card has it', async () => {
     const w = mount(MemberPane, { props: { card: card({ state: 'running', runId: 7, runStartedAt: '2026-11-25T10:00:00Z' }) }, global: { stubs: { FolderAsks: true } } });
     expect(w.find('[data-test=running-outline]').exists()).toBe(true);
     await w.setProps({ card: card() });

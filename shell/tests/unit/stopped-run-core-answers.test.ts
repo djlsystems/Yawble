@@ -9,10 +9,9 @@ import { feedKindOf, MonitorModel, type FeedRow } from '../../src/renderer/src/m
 import type { BoardCard, YawbleApi } from '../../src/shared/api';
 
 /**
- * The window fed exactly what the core sends, not the shapes the
- * window's own tests assumed. The core's side is pinned in the core's stopped-run verify tests:
- * - board.list for a stopped run: at first the card KEPT its status ("running" / "queued"); now its status is
- *   "stopped" in the lane it had; memberState is { state: 'idle', attention: 'stopped' } (no lastRunFailureClass); the trail line kind is "stopped".
+ * The window fed exactly what the core sends for a stopped run (the core's side is in
+ * core/tests/Yawble.Core.Tests/Ui/StoppedRunTests.cs):
+ * - board.list for a stopped run: the card's status is "stopped" in the lane it had; memberState is { state: 'idle', attention: 'stopped' } (no lastRunFailureClass); the trail line kind is "stopped".
  * - the feed row: kind "stopped", failureClass "stopped"; a timeout: kind "failed", failureClass "timeout".
  */
 
@@ -48,7 +47,7 @@ describe('the board card for a run the person stopped, as the core sends it', ()
     expect(w.get('[data-test=card-status]').text()).not.toMatch(/Running|Queued/);
   });
 
-  // Round 2: the member's attention says "stopped" on every card of that member; only the stopped run's card is marked.
+  // The member's attention says "stopped" on every card of that member; only the stopped run's card is marked.
   it.each([['running', 'in-progress', 'Running'], ['queued', 'todo', 'Queued'], ['handback', 'done', 'Handed back'], ['completed', 'done', 'Run finished']] as const)(
     "the member's older card (status %s) is not marked Stopped", (status, lane, label) => {
       const older = { ...coreStoppedCard(status, lane), id: 40, deliverable: 4 };

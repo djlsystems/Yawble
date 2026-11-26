@@ -2,7 +2,7 @@
 // The phone layout (a window below 760 px wide) of Teams, the Kanban board, Backlog, Monitor, Logs, Documents
 // and the Code browser. matchMedia is a fake whose width the tests set: below 760 px the screens change what CSS
 // cannot (one board lane at a time with tabs and swipe, the list or the file, entries as cards, menus); at 760 px
-// and wider each screen is as it was. The scoped styles carry the same width as @media (max-width: 759.98px).
+// and wider each screen has its desktop layout. The scoped styles carry the same width as @media (max-width: 759.98px).
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
@@ -552,7 +552,7 @@ describe('Documents on a phone', () => {
     expect(w.find('[data-test=docs-back]').exists()).toBe(false);
   });
 
-  it('every breadcrumb (the Documents link up and each folder) is at least 44x44 at phone width only (F6)', async () => {
+  it('every breadcrumb (the Documents link up and each folder) is at least 44x44 at phone width only', async () => {
     screen(Phone);
     const { api } = docsApi();
     const w = keep(mount(DocumentsBrowser, { props: { api, team: team as any, fill: true, above: 'Documents' } }));

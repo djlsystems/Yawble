@@ -11,14 +11,10 @@ import { discussWithConcierge, networkAskPrompt } from '../conciergeDiscuss';
 import { usePhone } from '../phone';
 
 /**
- * One network ask in Needs you: a host a member's run was refused (or asked for with request_host), with who asked, the
- * agent's reason or what was refused (method and a short path), how often, and what a package registry is for. The four
- * answers call network.answer, effective from the member's next run. `group`: one member's waiting asks with one
- * registrable domain, shown as one item ("crl3.digicert.com, ocsp.digicert.com (2 hosts)"); an answer answers every
- * listed host (ids). When the core offers a domain allow (domainPattern), "This host / All of *.digicert.com" picks what
- * an allow adds; the domain allow closes every waiting ask it covers at the chosen scope. Everything shown is
- * agent-influenced text: always plain text ({{ }}), never HTML. A remote view whose policy changes are refused says to
- * answer it in the window.
+ * One network ask in Needs you: a host a member's run was refused or asked for, with who asked, why, and how often.
+ * The answers call network.answer, effective from the member's next run. group: one member's asks for one registrable
+ * domain, shown and answered as one item; when the core offers a domain allow, the person picks the host or the whole
+ * domain. Everything shown is agent-influenced text: always plain text ({{ }}), never HTML.
  */
 const props = defineProps<{ ask: NetworkAsk; api: YawbleApi; group?: NetworkAsk[] }>();
 const emit = defineEmits<{ answered: [answer: NetworkAnswer] }>();

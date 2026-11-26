@@ -323,7 +323,7 @@ describe('New Team dialog defaults', () => {
     expect(sent.members[1]).toEqual({ name: 'Tester Ada', cli: 'claude' });
   });
 
-  it('with nothing saved (or an older core) it starts as before: Manager on Claude, no members, no offers', async () => {
+  it('with nothing saved (or an older core) it starts with Manager on Claude, no members, no offers', async () => {
     for (const answers of [{ 'teams.defaults': () => defaults({ manager: { name: 'Manager', cli: 'claude' }, members: [] }) }, {}] as Record<string, Answer>[]) {
       await dialog(answers);
       expect(q('manager-name')!.value).toBe('Manager');

@@ -205,7 +205,7 @@ describe('the shell on a phone: the drawer', () => {
     await nextTick();
     expect(w.find('[data-test=menubar]').exists()).toBe(false);
     await w.get('[data-test=drawer-toggle]').trigger('click');
-    // Folded at first (F2): one row, Theme, terminal and help; a tap opens it.
+    // Folded at first: one row, Theme, terminal and help; a tap opens it.
     const more = w.get('[data-test=drawer-more]');
     expect(more.attributes('aria-expanded')).toBe('false');
     expect((w.get('[data-test=drawer-menu-items]').element as HTMLElement).style.display).toBe('none');
@@ -239,7 +239,7 @@ describe('the shell on a phone: the drawer', () => {
     expect(w.find('[data-test=drawer-menu]').exists()).toBe(false);
     expect(w.get('[data-test=sidebar]').attributes('inert')).toBeUndefined();
     await w.get('[data-test=sidebar-collapse]').trigger('click');
-    expect(w.get('.app').classes()).toContain('collapsed'); // the desktop's fold to a rail, as before
+    expect(w.get('.app').classes()).toContain('collapsed'); // the desktop's fold to a rail
     expect(w.find('[data-test=sidebar-rail]').exists()).toBe(true);
   });
 });
@@ -266,7 +266,7 @@ describe('dialogs on a phone: a full-screen sheet', () => {
     expect(w.get('[data-test=modal-close]').attributes('aria-label')).toBe('Close');
   });
 
-  it('is the centred dialog at 760 px and wider, as before', () => {
+  it('is the centred dialog at 760 px and wider', () => {
     setWidth(760);
     const w = keep(mount(host('New team'), { attachTo: document.body }));
     expect(w.get('.modal').classes()).not.toContain('sheet');
@@ -406,7 +406,7 @@ describe('Settings on a phone: one section per screen', () => {
     expect(w.get('[data-test=settings-section-title]').text()).toBe('Agents');
   });
 
-  it('on the desktop: the tabs and the pane together, as before', async () => {
+  it('on the desktop: the tabs and the pane together', async () => {
     setWidth(1280);
     const f = fakeApi(answers);
     const w = keep(mount(SettingsView, { props: { api: f.api, tab: 'general', teams: [], landing: true } }));
@@ -475,8 +475,8 @@ describe('tooltips by tap (no hover on a phone)', () => {
   });
 });
 
-// The faults F1 to F4 the phone e2e run found. happy-dom has no layout, so the sizes are the CSS rules.
-describe('phone e2e faults F1 to F4', () => {
+// What a phone shows around the view: the banners' box, the drawer's menu, the composer's Attach, the Visitor chip's room.
+describe('the phone shell around the view', () => {
   const asks = {
     ...core,
     'network.asks': () => [{ id: 7, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'payments', member: 'payments/DeveloperInes', memberName: 'DeveloperInes',
@@ -496,7 +496,7 @@ describe('phone e2e faults F1 to F4', () => {
     return w;
   }
 
-  it('F1: on a phone every banner is in one box above the view; the view and the composer stay outside it', async () => {
+  it('on a phone every banner is in one box above the view; the view and the composer stay outside it', async () => {
     const w = await mountWithAsks(390);
     const box = w.get('[data-test=banners]');
     expect(box.find('[data-test=network-asks]').exists()).toBe(true);
@@ -521,7 +521,7 @@ describe('phone e2e faults F1 to F4', () => {
     menu: [{ id: 'terminal', label: 'Terminal' }, { id: 'theme:dark', label: 'Dark', radio: true, checked: true }, { id: 'about', label: 'About' }] as any,
   };
 
-  it('F2: the drawer\'s menu is one folded row; a tap shows its items and a second tap folds it again', async () => {
+  it('the drawer\'s menu is one folded row; a tap shows its items and a second tap folds it again', async () => {
     setWidth(390);
     const w = keep(mount(Sidebar, { props: { ...sidebarProps, drawer: true, open: true } }));
     const items = () => w.get('[data-test=drawer-menu-items]').element as HTMLElement;
@@ -539,7 +539,7 @@ describe('phone e2e faults F1 to F4', () => {
     expect(w.get('[data-test=slots]').text()).toContain('Run slots');
   });
 
-  it('F3: the Attach button carries both classes, in a phone composer and for a Visitor', async () => {
+  it('the Attach button carries both classes, in a phone composer and for a Visitor', async () => {
     setWidth(390);
     applyRemoteAccess('read');
     const w = keep(mount(Composer, { props: { teams: [], agents: [], cli: 'claude', teamId: null, running: false } }));
@@ -547,7 +547,7 @@ describe('phone e2e faults F1 to F4', () => {
     expect(w.get('[data-test=composer-attach]').classes()).toEqual(expect.arrayContaining(['pick', 'attach']));
   });
 
-  it('F7: the Visitor chip\'s 150 px room is kept in the top bar only, never in the Composer\'s bar', async () => {
+  it('the Visitor chip\'s 150 px room is kept in the top bar only, never in the Composer\'s bar', async () => {
     const css = readFileSync(resolve(__dirname, '../../src/renderer/src/styles.css'), 'utf8');
     const rule = /(:root\[data-remote-access="read"\][^{]*)\{ padding-right: calc\(150px/.exec(css);
     expect(rule).not.toBeNull();
@@ -562,7 +562,7 @@ describe('phone e2e faults F1 to F4', () => {
     expect(bar.matches(selector)).toBe(false);
   });
 
-  it('F8: a sheet\'s header keeps the Visitor chip\'s 150 px room too; no bar in its body, nothing on the desktop', async () => {
+  it('a sheet\'s header keeps the Visitor chip\'s 150 px room too; no bar in its body, nothing on the desktop', async () => {
     const css = readFileSync(resolve(__dirname, '../../src/renderer/src/styles.css'), 'utf8');
     const at = css.indexOf('@media (max-width: 759.98px) {');
     const m = /(:root\[data-remote-access="read"\][^{]*\.modal\.sheet[^{]*)\{ padding-right: calc\(150px/.exec(css);
@@ -578,7 +578,7 @@ describe('phone e2e faults F1 to F4', () => {
     w.unmount();
     setWidth(760);
     const d = keep(mount(host, { attachTo: document.body }));
-    expect(d.get('.modal > header.row').element.matches(selector)).toBe(false); // no sheet: the dialog as before
+    expect(d.get('.modal > header.row').element.matches(selector)).toBe(false); // no sheet: the centred dialog
     applyRemoteAccess('full');
     setWidth(390);
     const f = keep(mount(host, { attachTo: document.body }));

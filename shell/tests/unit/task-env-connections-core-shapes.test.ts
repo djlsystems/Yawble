@@ -104,7 +104,7 @@ describe('task env connections: a run refused for a binding (spec point 3)', () 
   });
 });
 
-// The fixes F2-F4: the exact wording and the cases next to them.
+// The exact wording, and the cases next to each.
 const runOf = (over: Partial<TaskRun>): TaskRun => ({
   id: 21, task: 'linux-release', teamId: 3, state: 'done', startedAt: '2026-11-14T10:00:00Z', endedAt: '2026-11-14T10:01:00Z', commit: 'abcdef1234567890', headAfter: null,
   definitionHash: 'aaaa', filesHash: 'bbbb', program: '/usr/bin/bash', exitCode: 0, timedOut: false, killedBy: null, outputBytes: 10, truncated: false,
@@ -118,7 +118,7 @@ async function openRun(run: TaskRun) {
   return w;
 }
 
-describe('task env connections F4: the missing-environment line', () => {
+describe('task env connections: the missing-environment line', () => {
   it('a run refused for a binding reads "Could not read from a Connection: <problem>"', async () => {
     const problem = "GH_TOKEN ← Connection 'GitHub release (Yawble)' (token): the Connection was removed";
     const w = await openRun(runOf({ state: 'refused', exitCode: null, outputBytes: null, endedAt: '2026-11-14T10:00:00Z', missingEnv: problem }));
@@ -138,7 +138,7 @@ describe('task env connections F4: the missing-environment line', () => {
   });
 });
 
-describe('task env connections F3: each binding line on the ask', () => {
+describe('task env connections: each binding line on the ask', () => {
   it('two env_from_connections lines give two binding lines, in order; none when the list is empty or absent', () => {
     const second = "NUGET_KEY ← Connection 'NuGet' (apiKey)";
     const detail = {
@@ -156,7 +156,7 @@ describe('task env connections F3: each binding line on the ask', () => {
   });
 });
 
-describe('task env connections F2: the stored binding in the editor', () => {
+describe('task env connections: the stored binding in the editor', () => {
   it('the Connection select has the stored Connection selected and the save sends the same binding back', async () => {
     const { api, calls } = fakeApi({
       'tasks.list': () => ({ tasks: [coreTask], repos: ['main'] }), 'tasks.runs': () => [], 'tasks.preview': preview,

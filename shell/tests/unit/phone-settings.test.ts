@@ -195,7 +195,7 @@ describe.each(Phones)('Settings on a phone, $name', ({ width, height }) => {
     });
   });
 
-  it('Guardrails has its fields, and they are no longer the 12 px "Files and folders" inputs', async () => {
+  it('Guardrails has its fields, and they are not the 12 px "Files and folders" inputs', async () => {
     const w = await openSection('globalPolicy');
     const inputs = w.findAll('[data-test=global-section-files] input');
     expect(inputs.length).toBeGreaterThan(0);
@@ -383,7 +383,7 @@ describe('a growing field keeps a floor and its row wraps (the decline notes bes
     setScreen(width, height);
     const { note, row } = build('TeamView.vue', integrationAsk);
     const s = getComputedStyle(note);
-    expect(s.minWidth).not.toBe('0px'); // was 0: 15 px at 390 x 844, 30 px at 667 x 263 (re-verify 284)
+    expect(s.minWidth).not.toBe('0px'); // at 0 the note is 15 px wide at 390 x 844 and 30 px at 667 x 263
     expect(floorOf(s.minWidth, width - 24 - 20), s.minWidth).toBeGreaterThanOrEqual(120); // page and card padding
     expect(s.maxWidth).toBe('100%');
     expect(s.fontSize).toBe('16px');
@@ -431,7 +431,7 @@ describe('a growing field keeps a floor and its row wraps (the decline notes bes
   });
 });
 
-describe('Settings at 1280 px: the desktop layout as before', () => {
+describe('Settings at 1280 px: the desktop layout', () => {
   beforeEach(() => setScreen(1280, 800));
 
   it('tabs and pane together, no back bar, Skills fills the page with the list beside the skill', async () => {

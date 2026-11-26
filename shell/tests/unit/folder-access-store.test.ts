@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Folder access verify: Member settings > Policy against a FAKE core that behaves like the real store and
+// Folder access: Member settings > Policy against a FAKE core that behaves like the real store and
 // merger where folder access depends on it (no real program runs):
 //  - the stored row is what PolicyStore writes: override_json / loosen_json are null when the patch is empty, else JSON;
 //  - paths are resolved as PolicyPaths does on Windows ("/" -> "\", drive upper case, "." and ".." folded, no trailing "\");
@@ -215,9 +215,7 @@ describe('folder access against a core-like fake', () => {
     expect(core.row.loosen_json).toBeNull();
   });
 
-  // FAULT (found by the verify, now fixed): samePath did not fold "." / ".." as the core does, so a folder typed with ".." is
-  // listed twice (resolved, and again as "already covered, not added") and Remove on the resolved row saves the same block
-  // back ("Nothing changed.") instead of taking it out. Now a plain it().
+  // samePath folds "." / ".." as the core does: a folder typed with ".." matches its resolved row.
   it('a folder typed with ".." is listed once and Remove on it takes it out', async () => {
     const core = realishCore();
     const w = await open(core.api);
@@ -231,7 +229,7 @@ describe('folder access against a core-like fake', () => {
     expect(core.row.loosen_json).toBeNull();
   });
 
-  it('Save override with no change: "Nothing changed.", never "saved"; the stored row is as before', async () => {
+  it('Save override with no change: "Nothing changed.", never "saved"; the stored row is not rewritten', async () => {
     const core = realishCore();
     const w = await open(core.api);
     expect(w.get('[data-test=policy-advanced]').attributes('open')).toBeUndefined(); // collapsed with no override
@@ -303,8 +301,7 @@ describe('folder access against a core-like fake', () => {
     w.unmount();
   });
 
-  // FAULT (found by the verify, now fixed): the Policy tab was v-if, so FolderAccess is unmounted by a tab switch: the typed path
-  // (and a pending confirm) is gone with no word, and closing then closed without "Discard?". Now a plain it().
+  // The Policy tab stays mounted through a tab switch: a typed path and a pending confirm are kept, and closing asks.
   it('a folder path typed then the General tab and back: the path is kept and closing still asks (nothing dropped silently)', async () => {
     const core = realishCore();
     const w = await open(core.api);
@@ -315,7 +312,6 @@ describe('folder access against a core-like fake', () => {
     await flushPromises();
     const kept = (w.get('[data-test=folder-add-path]').element as HTMLInputElement).value;
     const asks = await closeAsks(w);
-    // Either the typed path is still there (and closing asks), or it is gone and closing does not pretend otherwise.
     expect({ kept, asks }).toEqual({ kept: 'C:\\work\\shared', asks: 'Policy has unsaved changes. Discard?' });
   });
 
@@ -380,7 +376,7 @@ describe('folder access against a core-like fake', () => {
   });
 });
 
-// The re-check after the fix: the two faults in the real dialog, the fallback and the root rule.
+// The tab round trip in the real dialog, the fallback and the root rule.
 const toGeneralAndBack = async (w: any) => {
   await w.get('[data-test=tab-general]').trigger('click');
   await flushPromises();
@@ -397,7 +393,7 @@ const removeRow = async (w: any, list: string, path: string) => {
   await flushPromises();
 };
 
-describe('folder access re-check after the fix', () => {
+describe('folder access through a tab round trip', () => {
   it('tab round trip with a typed path, read-only mode and a pending add: all kept; Close asks; Confirm saves what it showed', async () => {
     const core = realishCore();
     const w = await open(core.api);

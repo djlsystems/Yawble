@@ -234,7 +234,7 @@ for (const [label, size] of [['desktop-1280', DESKTOP], ['phone-375', PHONE]] as
 
 // The window's New chat starts on the saved Concierge default when it is ready.
 // Agents here: claude and grok signed in, codex installed but signed out, gemini not installed.
-test.describe('F1: a new chat starts on the saved Concierge default', () => {
+test.describe('a new chat starts on the saved Concierge default', () => {
   const detect = answers['agents.detect'];
   test.afterEach(() => { answers['agents.detect'] = detect; });
   const agents = () => [

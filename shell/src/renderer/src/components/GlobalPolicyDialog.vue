@@ -14,7 +14,7 @@ import BusyLabel from './BusyLabel.vue';
 
 // The global policy editor, including the one global run limit (app.maxConcurrentAgents).
 // One column of section cards (Limits, Network, Files and folders, Desktop, Sandbox, Guardrail check) and a footer
-// that stays in view with Save. Every field is saved as before (policy.saveGlobal). The memory, CPU and process caps
+// that stays in view with Save. Every field is saved with policy.saveGlobal. The memory, CPU and process caps
 // are not enforced, so they are not shown: the values already stored are sent back exactly as loaded.
 const props = defineProps<{ api?: YawbleApi; pollMs?: number; inline?: boolean }>();
 const emit = defineEmits<{ close: []; changed: [] }>();

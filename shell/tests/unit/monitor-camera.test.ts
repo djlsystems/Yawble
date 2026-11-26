@@ -108,7 +108,7 @@ describe('the camera settles with two teams\' code maps', () => {
       const o = wall(w, h);
       o.run(12_000);
       expect(o.S.mapNodes.length, 'both maps are on the wall').toBeGreaterThan(10);
-      // Before the fix the zoom swung 0.30-0.51 and the hub moved 50-100 px per 100 ms, for ever.
+      // The camera comes to rest: no swing of the zoom, no drift of the hub.
       const d = drift(o, 4_000);
       expect(d.dk, 'zoom').toBeLessThan(0.002);
       expect(d.dc, 'camera centre, px').toBeLessThan(1);

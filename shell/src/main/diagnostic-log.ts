@@ -4,12 +4,10 @@ import { format } from 'node:util';
 import { PRIVATE_DIR, PRIVATE_FILE } from './private-files';
 
 /**
- * The window process's diagnostic log, the same on every OS: <data>/logs/shell-<yyyy-mm-dd>.log (the UTC day), one
- * "time<TAB>shell<TAB>text" line per message, the format of the core's own diagnostic log beside it. The core lists
- * every .log in that folder in the Logs dialog's Diagnostics and keeps it to the same retention (a day past it goes
- * whole). Launched from Finder or `open` on macOS (or a desktop entry on Linux) the process's own output goes nowhere,
- * so this file is the only record: {@link captureMainOutput} copies console errors and warnings and uncaught errors
- * into it too. A write that fails is skipped; it never throws.
+ * The window process's diagnostic log: <data>/logs/shell-<yyyy-mm-dd>.log (the UTC day), one
+ * "time<TAB>shell<TAB>text" line per message, as the core's own log beside it; the Logs dialog's Diagnostics lists
+ * both. Started from a desktop icon the process's output goes nowhere, so {@link captureMainOutput} copies console
+ * errors, warnings and uncaught errors here too. A write that fails is skipped; it never throws.
  */
 export interface ShellLog {
   /** Writes a message to standard error and to the file. */

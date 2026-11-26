@@ -26,12 +26,9 @@ import {
 } from './page';
 
 /**
- * THE DELIVERABLES PAGE - every team's deliverables in one table, like the Backlog page: what runs, what waits on the
- * person, how long things took, and the way to the spec, the board and the Timeline. Read with deliverables.list (the
- * core's deliverables contract); the core filters by team, text and state and counts the chips, and the
- * page applies the same filters to what it has while an answer is on its way, so typing filters at once. The filters
- * are remembered (localStorage) and kept in the hash (#deliverables?t=3&q=..&s=open&sel=12), so a link opens it filtered.
- * No tokens or cost anywhere (cost metrics are on hold).
+ * The Deliverables page: every team's deliverables in one table. Read with deliverables.list; the core filters by
+ * team, text and state and counts the chips, and the page applies the same filters to what it has while an answer is
+ * on its way. The filters are remembered and kept in the hash (#deliverables?t=3&q=..&s=open&sel=12).
  */
 const props = defineProps<{ teams: TeamSummary[]; api?: YawbleApi; pollMs?: number; request?: DeliverablesRequest | null }>();
 const emit = defineEmits<{ openTeam: [teamId: number]; board: [teamId: number | null]; backlog: [] }>();

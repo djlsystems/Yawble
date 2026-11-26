@@ -253,7 +253,7 @@ describe('New team: role picker and who the Manager may hire', () => {
     expect(of('teams.create')[0].params.hireList).toEqual([]);
   });
 
-  it('an older core without roles: no role picker, members sent as before', async () => {
+  it('an older core without roles: no role picker, members sent without a role', async () => {
     const { w, of } = await dialog({ 'roles.list': () => { throw new Error('unknown method'); } });
     await w.get('[data-test=add-member-row]').trigger('click');
     await flushPromises();

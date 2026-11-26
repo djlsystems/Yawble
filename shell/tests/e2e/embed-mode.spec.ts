@@ -209,7 +209,7 @@ for (const [w, h] of [[1280, 800], [375, 740]] as const) {
     await expect(page.locator('.app')).not.toHaveClass(/\bembed\b/);
     await expect(page.locator('[data-test=theme-toggle]')).toBeVisible();
     await expect(page.getByTestId('settings-gear')).toBeVisible();
-    // ?theme= alone (no embed=1) changes nothing: the light OS; the switch keeps the viewer's choice as before.
+    // ?theme= alone (no embed=1) changes nothing: the light OS; the switch keeps the viewer's choice.
     expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe('light');
     await page.locator('[data-test=theme-toggle]').click();
     await expect.poll(() => page.evaluate(() => localStorage.getItem('yawble.remoteTheme'))).toBe('dark');

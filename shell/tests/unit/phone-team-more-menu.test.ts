@@ -2,7 +2,7 @@
 // On a phone the team page's ⋯ menu lists Documents, Deliverables, Triggers, Git and Settings, in that order,
 // each with an icon of the same size (no emoji); Documents opens its dialog, Deliverables the Deliverables page filtered to the team,
 // and both close the menu. The
-// menu stays on screen at 375 px and sits above the member panes. The desktop header is unchanged.
+// menu stays on screen at 375 px and sits above the member panes. The desktop header has its five buttons.
 // A fake matchMedia gives the width; the API is a scripted fake (no core, no network).
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -96,7 +96,7 @@ describe('the team ⋯ menu on a phone', () => {
     expect(b.attributes('title')).toMatch(/Deliverables page/);
   });
 
-  it('the desktop header is unchanged: five buttons, no ⋯', async () => {
+  it('the desktop header: five buttons, no ⋯', async () => {
     width = 1280;
     const w = await mountTeam();
     expect(w.find('[data-test=team-more]').exists()).toBe(false);

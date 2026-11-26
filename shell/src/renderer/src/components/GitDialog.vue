@@ -193,7 +193,7 @@ async function openRange(kind: CountKind, branch?: string, source: string = kind
   }
 }
 
-// ---- Merge to <base>… reads git.mergePreview first; Merge is offered under it (an older core: no preview, as before).
+// ---- Merge to <base>… reads git.mergePreview first; Merge is offered under it (an older core: no preview).
 const preview = ref<{ data: MergePreview | null; error: string | null } | null>(null);
 const previewView = computed(() => (preview.value?.data ? mergePreviewView(preview.value.data) : null));
 function startMerge() {
@@ -261,7 +261,7 @@ async function askTeam() {
 // confirmed. A stale answer (the branches changed since the plan) is shown and planned again.
 interface DeleteTarget { branch: string; remote: boolean; unmerged: boolean; mergeUnknown?: boolean }
 // Beside the plan, git.deletePreview lists the branch's commits not in the base, each "already in main" or "work of
-// its own", so the person sees what is lost (an older core: the plan alone, as before).
+// its own", so the person sees what is lost (an older core: the plan alone).
 const deleting = ref<(DeleteTarget & {
   unmergedOk: boolean; plan: GitDeletePlan | null; note: string | null; error: string | null;
   preview: DeletePreview | null; previewError: string | null;

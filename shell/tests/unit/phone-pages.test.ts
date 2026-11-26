@@ -456,7 +456,7 @@ describe('no sideways overflow on a phone', () => {
   });
 });
 
-describe('at 1280 px the desktop is as it was', () => {
+describe('at 1280 px: the desktop layout', () => {
 
   it('Backlog: the header with its title, tabs, search, team filter, Upload document and + Add item, then the intro', async () => {
     const w = await backlog(Desktop);

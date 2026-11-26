@@ -88,7 +88,7 @@ describe('team page: the member tiles grid (desktop)', () => {
     expect(w.find('[data-test=member-handle-h]').exists()).toBe(false);
     expect(w.find('[data-test=member-tile-grip]').exists()).toBe(false);
     expect(w.get('[data-test=member-tile-handle-w]').attributes('aria-label')).toBe('Resize all member tiles: width');
-    // The old add row is gone.
+    // No add row under the grid: the New member tile holds the form.
     expect(w.find('.add.row').exists()).toBe(false);
     expect(w.find('[data-test=add-agent-name]').exists()).toBe(false);
   });

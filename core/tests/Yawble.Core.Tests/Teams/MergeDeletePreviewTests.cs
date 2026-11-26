@@ -200,7 +200,7 @@ public class MergeDeletePreviewTests
         Assert.Equal(r.Root, Rev(r.Repo, "refs/heads/trunk"));
         Assert.Equal("one\nedited, not committed\nthree\n", File.ReadAllText(Path.Combine(r.Repo, "a.txt")));
         Assert.Equal(before, Snapshot(r.Repo));
-        Emit("f1-merge-dirty", MergeJson(p));
+        Emit("merge-dirty", MergeJson(p));
 
         // Clean again: the preview and Merge agree on fast-forward. An untracked file never blocks (the merge ignores those too).
         AgentGit.Host(r.Repo, "checkout", "--", "a.txt");

@@ -1,7 +1,7 @@
-// What embed-mode.spec.ts and settings-gear.spec.ts leave out, in headless
+// The embedded remote view and the messages it trades with its parent page, in headless
 // Chrome against the FAKE core of phone-remote.spec.ts (no cloud, no real core, no agent). A test parent page on the
 // same origin frames remote.html?embed=1&theme=..., as the cloud page will.
-//  - embedded at 1280 and 375 in light and dark (?theme=light too, not only dark), screenshots to $YAWBLE_TEAM_DOCS/embed-mode;
+//  - embedded at 1280 and 375 in light and dark (?theme=light too, not only dark); with YAWBLE_TEAM_DOCS set, screenshots go to its embed-mode folder;
 //  - yawble.nav is posted again after a change in the app's state: a new chat, a team's state (dot and badge);
 //  - chatAction delete: OK deletes (concierge.delete), the chat leaves the nav; rename: the in-frame EmbedRenameDialog,
 //    Enter renames (concierge.rename with the trimmed title), Escape cancels (no call);
@@ -10,7 +10,7 @@
 //  - a parent on ANOTHER origin: the frame posts nothing it can read, and its navigate / theme messages are ignored;
 //  - File > Settings (the menu entry) opens Settings, plain and embedded, and an embedded phone offers no drawer menu.
 //
-//   npx playwright test embed-mode-verify --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+//   npx playwright test embed-mode-messages --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { answers } from './phone/fake-core';
@@ -94,7 +94,7 @@ for (const [w, h] of [[1280, 800], [375, 740]] as const) {
         await expect(frame.locator('[data-test=menubar]')).toHaveCount(0);
         await expect(frame.locator('#app-drawer')).toHaveCount(0);
       }
-      if (shots) await page.screenshot({ path: path.join(shots, `verify-embed-${w}-${theme}.png`) });
+      if (shots) await page.screenshot({ path: path.join(shots, `embed-messages-${w}-${theme}.png`) });
       expect(errors).toEqual([]);
     });
   }
@@ -147,7 +147,7 @@ test('embedded: chatAction delete (OK) deletes; rename asks in the frame, Enter 
   await send(page, { type: 'yawble.navigate', to: { kind: 'chatAction', id: 'c1', action: 'rename' } });
   await expect(frame.locator('[data-test=embed-rename]')).toBeVisible();
   await expect(frame.locator('[data-test=embed-rename-input]')).toHaveValue('Payments today');
-  if (shots) await page.screenshot({ path: path.join(shots, 'verify-embed-rename-1280.png') });
+  if (shots) await page.screenshot({ path: path.join(shots, 'embed-messages-rename-1280.png') });
   await frame.locator('[data-test=embed-rename-input]').press('Escape');
   await expect(frame.locator('[data-test=embed-rename]')).toHaveCount(0);
   expect(renamed).toEqual([]);
@@ -162,7 +162,7 @@ test('embedded: chatAction delete (OK) deletes; rename asks in the frame, Enter 
   // Delete: the in-frame confirm; OK deletes c1 and it leaves the nav.
   await send(page, { type: 'yawble.navigate', to: { kind: 'chatAction', id: 'c1', action: 'delete' } });
   await expect(frame.locator('[data-test=confirm-message]')).toHaveText('Delete this chat?');
-  if (shots) await page.screenshot({ path: path.join(shots, 'verify-embed-delete-1280.png') });
+  if (shots) await page.screenshot({ path: path.join(shots, 'embed-messages-delete-1280.png') });
   await frame.locator('[data-test=confirm-ok]').click();
   await expect.poll(() => deleted).toEqual([{ id: 'c1' }]);
   await expect.poll(async () => (await lastNav(page)).chats.map((c: any) => c.id), { timeout: 15_000 }).not.toContain('c1');
@@ -176,7 +176,7 @@ test('embedded at 375px: rename and delete dialogs fit the phone frame', async (
   const box = await frame.locator('[data-test=embed-rename]').boundingBox();
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(375);
-  if (shots) await page.screenshot({ path: path.join(shots, 'verify-embed-rename-375-light.png') });
+  if (shots) await page.screenshot({ path: path.join(shots, 'embed-messages-rename-375-light.png') });
   await frame.locator('[data-test=embed-rename-cancel]').click();
   await expect(frame.locator('[data-test=embed-rename]')).toHaveCount(0);
 });

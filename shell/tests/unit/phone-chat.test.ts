@@ -199,7 +199,7 @@ describe.each(Phones)('a chat on a phone, $name', ({ width, height, portrait }) 
       else expect(css(select.closest('.row-pick')!).flexGrow, sel).toBe('1'); // half the row each
       expect(select.closest('.bar'), sel).toBeNull(); // not squeezed into the bar beside the text
     }
-    // The long team name is the picked option, whole, in a select that is no longer capped at a third of the screen.
+    // The long team name is the picked option, whole, in a select that is not capped at a third of the screen.
     const team = panel.get('[data-test=composer-team]').element as HTMLSelectElement;
     expect(team.value).toBe('1');
     expect(team.selectedOptions[0].textContent).toBe(longTeam);
@@ -231,9 +231,9 @@ describe.each(Phones)('a chat on a phone, $name', ({ width, height, portrait }) 
   });
 });
 
-// At 667 x 263 a chat with a watch and the pickers open used to push the text row (pickers'
-// button, text, Attach, Send) below the screen. Now the watch row folds away while the pickers are open, the pickers sit
-// side by side and their panel is capped (it scrolls), so the text row's bottom stays within the frame.
+// At 667 x 263, in a chat with a watch and the pickers open, the text row (pickers' button, text, Attach, Send) stays on
+// the screen: the watch row folds away while the pickers are open, the pickers sit side by side and their panel is
+// capped (it scrolls).
 describe('a chat with a watch on a phone in landscape, 667 x 263', () => {
   const height = 263;
   beforeEach(() => setScreen(667, height));

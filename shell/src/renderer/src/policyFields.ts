@@ -221,7 +221,7 @@ export function addedFolders(before: MemberPolicyView, after: MemberPolicyView, 
 
 /**
  * What a save changed, in words: one line per changed field ("Read/write now: C:\a, Z:\b"), or "Nothing changed" when the
- * stored override and loosening and the effective policy are all as before. Never "saved" for a no-op.
+ * stored override and loosening and the effective policy are all unchanged. Never "saved" for a no-op.
  */
 export function describeChange(before: MemberPolicyView, after: MemberPolicyView): { changed: boolean; text: string } {
   const fields = changedFields(before, after);

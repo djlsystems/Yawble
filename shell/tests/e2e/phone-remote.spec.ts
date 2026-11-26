@@ -107,7 +107,7 @@ for (const size of PHONES) {
       expect.soft(thread && thread.height, 'the chat thread has room on screen with asks pending').toBeGreaterThan(80);
       expect.soft(composer && composer.y + composer.height, 'the composer is on screen with asks pending').toBeLessThanOrEqual(size.h + 1);
       expect.soft(composer && composer.height, 'the composer is not squeezed').toBeGreaterThan(40);
-      // F1 re-verify: both banners together take at most 40% of the height (one box, data-test=banners) and scroll.
+      // Both banners together take at most 40% of the height (one box, data-test=banners) and scroll.
       const banners = async (name: string) => {
         const bb = await page.locator('[data-test=banners]').boundingBox();
         results.push({ screen: `${name}-banners-px`, size: tag(size), audit: { bannersH: bb?.height ?? -1 } as unknown as Audit });
@@ -322,8 +322,8 @@ for (const size of PHONES) {
       await check(page, 'visitor-board', size);
     });
 
-    // F7 re-verify: the Visitor's 150 px top-bar padding is kept in the shell's top bar only.
-    test('Visitor (read-only) F7: the composer matches full access, the chip clears the top bar, Documents and Logs bars', async ({ browser }) => {
+    // The Visitor's 150 px top-bar padding is kept in the shell's top bar only.
+    test('Visitor (read-only): the composer matches full access, the chip clears the top bar, Documents and Logs bars', async ({ browser }) => {
       // On a phone the team and agent pickers fold out above the bar (one button opens them).
       const composerBar = async (page: Page) => { await page.locator('[data-test=composer-pickers-toggle]').click(); return page.locator('[data-test=composer] .bar').evaluate((bar) => {
         const r = (sel: string) => { const e = bar.closest('[data-test=composer]')!.querySelector(sel); const b = e ? (e.closest('.pick') ?? e).getBoundingClientRect() : null; return b ? { x: b.x, w: b.width, h: b.height, right: b.right } : null; };
@@ -336,7 +336,7 @@ for (const size of PHONES) {
       const { page, errors } = await open(browser, size, { access: 'read', asks: false });
       await expect(page.locator('[data-test=remote-access-chip]')).toBeVisible();
       const v = await composerBar(page);
-      results.push({ screen: 'f7-composer', size: tag(size), audit: { full: f, visitor: v } as unknown as Audit });
+      results.push({ screen: 'visitor-composer', size: tag(size), audit: { full: f, visitor: v } as unknown as Audit });
       expect.soft(Math.round(v.team!.w), 'Visitor team picker width = full access').toBe(Math.round(f.team!.w));
       expect.soft(Math.round(v.agent!.w), 'Visitor agent picker width = full access').toBe(Math.round(f.agent!.w));
       expect.soft(v.team!.w, 'team picker >= 44').toBeGreaterThanOrEqual(44);
@@ -345,7 +345,7 @@ for (const size of PHONES) {
       expect.soft(Math.abs(v.send!.right - v.barRight), `Send at the bar's right end (send ${v.send!.right}, bar ${v.barRight})`).toBeLessThanOrEqual(2);
       expect.soft(v.padR, "the Composer's bar has no 150 px padding").not.toBe(`150px`);
       expect.soft(v.sw, 'no sideways scroll').toBeLessThanOrEqual(v.iw);
-      await check(page, 'reverify2-visitor-concierge', size);
+      await check(page, 'visitor-concierge', size);
       // The chip clears the top bar's title and menu button.
       const overlap = await page.evaluate(() => {
         const chip = document.querySelector('[data-test=remote-access-chip]')!.getBoundingClientRect();
@@ -374,7 +374,7 @@ for (const size of PHONES) {
       expect.soft(parseFloat(d.padR), 'Documents bar padding-right under 150').toBeLessThan(150);
       expect.soft(d.sw, 'Documents bar does not overflow').toBeLessThanOrEqual(d.cw + 1);
       expect.soft(d.maxRight, 'Documents bar controls inside the bar').toBeLessThanOrEqual(d.barRight + 1);
-      await check(page, 'reverify2-visitor-documents', size);
+      await check(page, 'visitor-documents', size);
       await nav(page, 'nav-logs');
       await expect(page.locator('[data-test=logs] .bar').first()).toBeVisible();
       await settled(page);
@@ -383,14 +383,14 @@ for (const size of PHONES) {
       expect.soft(parseFloat(l.padR), 'Logs bar padding-right under 150').toBeLessThan(150);
       expect.soft(l.sw, 'Logs bar does not overflow').toBeLessThanOrEqual(l.cw + 1);
       expect.soft(l.maxRight, 'Logs bar controls inside the bar').toBeLessThanOrEqual(l.barRight + 1);
-      await check(page, 'reverify2-visitor-logs', size);
+      await check(page, 'visitor-logs', size);
       // Logs is a page (no sheet, so no Close for the Visitor chip to cover).
       expect(errors).toEqual([]);
     });
 
-    // F8 re-verify: every phone sheet a Visitor can open keeps Close and its title clear of the chip; with
-    // full access the sheet header is as before (6 px right padding, Close at the right edge).
-    test('F8: every sheet - Close and title clear of the Visitor chip; full-access header unchanged', async ({ browser }) => {
+    // Every phone sheet a Visitor can open keeps Close and its title clear of the chip; with full access the sheet
+    // header has 6 px right padding and Close at the right edge.
+    test('every sheet - Close and title clear of the Visitor chip; with full access Close is at the right edge', async ({ browser }) => {
       test.setTimeout(240_000);
       const sheetInfo = (page: Page) => page.evaluate(() => {
         const sheets = [...document.querySelectorAll<HTMLElement>('.modal.sheet')];
@@ -446,7 +446,7 @@ for (const size of PHONES) {
           const info = await sheetInfo(page);
           (seen[o.name] ??= {})[access] = info ?? 'not a sheet';
           if (!info) continue;
-          results.push({ screen: `f8-sheet-${o.name}-${access}`, size: tag(size), audit: info as unknown as Audit });
+          results.push({ screen: `sheet-${o.name}-${access}`, size: tag(size), audit: info as unknown as Audit });
           const where = `${o.name} sheet (${access}) @${tag(size)}`;
           expect.soft(info.sw, `${where}: sideways scroll`).toBeLessThanOrEqual(info.iw);
           expect.soft(info.close[2] + 'x' + info.close[3], `${where}: Close 44x44`).toBe('44x44');
@@ -507,7 +507,7 @@ async function luminance(page: Page, sel: string): Promise<number> {
   });
 }
 
-test.describe('break tests: the 759 / 760 px edges and rotation', () => {
+test.describe('the 759 / 760 px edges and rotation', () => {
   for (const w of [759, 760]) {
     test(`${w} px wide: ${w < 760 ? 'the phone layout' : 'the desktop layout'}, no sideways scroll`, async ({ browser }) => {
       const size = { w, h: 900 };

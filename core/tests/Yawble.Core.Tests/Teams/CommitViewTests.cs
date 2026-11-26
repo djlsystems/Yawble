@@ -772,7 +772,7 @@ public class CommitViewTests
         var m = await Show(r, merge);
         Assert.Equal("feature/login", m.Merge!.FromBranch);
         Assert.Equal("main", m.Merge.IntoBranch);
-        Emit("f1-merge-on-main", m.ToJson());
+        Emit("merge-on-main", m.ToJson());
 
         // The team branch moved past main by its own commit still has the merge only by containing it: still main.
         AgentGit.Host(r.Repo, "switch", "-q", "team/alpha");
@@ -806,7 +806,7 @@ public class CommitViewTests
         Assert.Equal(["feature/x"], c.Where.OtherBranches);
         var cj = c.ToJson();
         Assert.Equal(["feature/x"], cj["where"]!["otherBranches"]!.AsArray().Select(n => n!.GetValue<string>()));
-        Emit("f2-own-branch", cj);
+        Emit("own-branch", cj);
 
         // A deleted member branch's commit: branches and otherBranches both empty (and otherBranches still present).
         AgentGit.Host(r.Repo, "switch", "-q", "-c", "members/alpha/ben", "main");

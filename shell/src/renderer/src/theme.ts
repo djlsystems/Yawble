@@ -1,15 +1,11 @@
 import { reactive } from 'vue';
 
 /**
- * The window's light and dark themes. The mode is the person's choice: "system" (nothing chosen yet, or "Use system
- * setting" picked again) follows the OS (prefers-color-scheme) live; "light" or "dark" is kept in localStorage and the
- * OS no longer applies. The theme shown is set as data-theme="light"|"dark" on <html>, which styles.css keys its
- * colours on. The desktop window also tells Electron main (setTheme), which colours the title-bar overlay controls.
- * A remote view (Cloud Link) keeps its own choice under its own key.
- *
- * public/theme-boot.js (a classic workflow in each page's <head>) sets data-theme by the same rule before the stylesheet
- * paints; main.ts imports this module first, so it takes over before anything is mounted. A switch made in another
- * window of the app (same key in localStorage) arrives as a 'storage' event and is followed here.
+ * The window's light and dark themes. The mode is the person's choice: "system" follows the OS live; "light" or "dark"
+ * is kept in localStorage. The theme shown is data-theme="light"|"dark" on <html>, which styles.css keys its colours
+ * on; the desktop window also tells Electron main (setTheme) for the title-bar controls. A remote view keeps its own
+ * choice under its own key. public/theme-boot.js (a classic script in each page's <head>) sets data-theme by the same
+ * rule before the stylesheet paints; a switch made in another window arrives as a 'storage' event.
  */
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type Theme = 'light' | 'dark';

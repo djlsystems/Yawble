@@ -1,6 +1,5 @@
 // Team Settings on a phone (a list of sections, one section under a sticky
 // Back + title) and the phone sheet's Close, in headless Chrome against the FAKE core of phone-remote.spec.ts.
-// (The sideways-scrolling tab row an older spec tested is gone.)
 //  - 360x740 and 390x844: the list's nine rows are one line, >= 44 px, full width, label not cut; every section opens
 //    alone under the head with its title; in the list and in every section nothing in the dialog is wider than the
 //    screen, neither the page nor the sheet's body scrolls sideways (long env names/values, long repository paths).
@@ -252,7 +251,7 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
         await expect(page.locator('.modal.sheet'), `${where}: Close closes the sheet`).toHaveCount(before - 1);
         while (await page.locator('.modal.sheet').count()) await page.locator('.modal.sheet [data-test=modal-close]').last().click();
       }
-      console.log(`C347 sheets @${w}x${h}: ${JSON.stringify(seen)}`);
+      console.log(`sheets @${w}x${h}: ${JSON.stringify(seen)}`);
       for (const id of ['open-manage', 'open-triggers', 'open-git']) expect.soft(typeof seen[id], `${id} opened a sheet`).toBe('object');
       expect(errors).toEqual([]);
       await ctx.close();

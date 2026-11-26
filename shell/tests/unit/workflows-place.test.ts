@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // The Workflows place. The nav entry, the Workflows dialog's three tabs, the editor's check problems
-// and the jump to a step, the outline, Delete only for an unused workflow (workflows.delete, faked: DeveloperNoah's core
-// card adds it), schemas (built-ins read-only, schema_breaks), the test-run form (dry run by default, the first live run
+// and the jump to a step, the outline, Delete only for an unused workflow (workflows.delete, faked),
+// schemas (built-ins read-only, schema_breaks), the test-run form (dry run by default, the first live run
 // asks once per workflow), the run view, and a Visitor's read-only view. Fakes only: no core; placeholder values only.
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';

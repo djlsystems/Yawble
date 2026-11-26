@@ -257,7 +257,7 @@ describe('theme.ts in embed mode (pageThemeEnv)', () => {
     for (const s of spies) s.mockRestore();
   });
 
-  it('not embedded: storage, storage events and the remote key, as before (embed=0, theme= alone change nothing)', () => {
+  it('not embedded: storage, storage events and the remote key (embed=0, theme= alone change nothing)', () => {
     for (const s of ['', '?embed=0&theme=dark', '?theme=dark']) {
       const env = pageThemeEnv(win(s));
       expect(typeof env.storage, s).toBe('function');
@@ -291,7 +291,7 @@ describe('theme-boot.js in embed mode', () => {
     expect(boot('?embed=1&theme=purple', { [REMOTE_THEME_KEY]: 'dark' }, false)).toEqual({ theme: 'light', reads: [] });
   });
 
-  it('not embedded: the kept choice as before (also with no location at all)', () => {
+  it('not embedded: the kept choice (also with no location at all)', () => {
     expect(boot('?theme=dark', { [REMOTE_THEME_KEY]: 'light' })).toEqual({ theme: 'light', reads: [REMOTE_THEME_KEY] });
     expect(boot('', { [REMOTE_THEME_KEY]: 'dark' })).toEqual({ theme: 'dark', reads: [REMOTE_THEME_KEY] });
     expect(boot(null, { [REMOTE_THEME_KEY]: 'dark' })).toEqual({ theme: 'dark', reads: [REMOTE_THEME_KEY] });

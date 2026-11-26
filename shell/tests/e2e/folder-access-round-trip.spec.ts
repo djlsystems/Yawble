@@ -1,11 +1,11 @@
-// Folder access re-check: Member settings > Policy > Folder access in headless Chrome
+// Folder access through a tab round trip: Member settings > Policy > Folder access in headless Chrome
 // against the phone-remote FAKE core (remote.html), the policy RPCs faked here with a merge that folds "." / ".." as
 // PolicyPaths.Resolve does. No real program runs.
 //  - A typed path, read-only mode and a pending confirm survive General and back; Close asks "Discard?"; Confirm after the
 //    round trip saves what it showed.
 //  - A folder typed with ".." is listed once; Remove takes it out (stored loosen back to empty).
 //
-//   npx playwright test folder-access-recheck --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+//   npx playwright test folder-access-round-trip --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -117,7 +117,7 @@ test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); })
 
 const RUNS = [{ name: '1280-light', size: { width: 1280, height: 800 }, theme: 'light' as const }, { name: '375-dark', size: { width: 375, height: 812 }, theme: 'dark' as const }];
 for (const { name, size, theme } of RUNS) {
-  test(`folder access re-check: tab round trip and ".." at ${name}`, async ({ browser }) => {
+  test(`folder access: tab round trip and ".." at ${name}`, async ({ browser }) => {
     const { page, ctx, errors, sent, state } = await open(browser, size, theme);
     await openPolicy(page);
 

@@ -295,7 +295,7 @@ describe('Git dialog merge preview', () => {
     expect(w.find('[data-test=git-merge-yes]').attributes('disabled')).toBeDefined();
   });
 
-  it('an older core without git.mergePreview: a note, Merge as before, and what landed read with git.commitRange', async () => {
+  it('an older core without git.mergePreview: a note, Merge offered, and what landed read with git.commitRange', async () => {
     const { api, calls } = fakeApi({
       'git.status': () => status, 'git.commitRange': range,
       'git.merge': () => ({ outcome: 'merge', message: 'Merged.', changed: true, sha: B, files: null, status: { ...status, baseSha: B } }),
@@ -541,7 +541,7 @@ describe('the team page sync banner (teams.syncToBase behind.from / to, git.sync
     w.unmount();
   });
 
-  it('F4b: the commits that came in carry the not-pushed mark only in a repository with an origin (git.status origin)', async () => {
+  it('the commits that came in carry the not-pushed mark only in a repository with an origin (git.status origin)', async () => {
     const marked = async (st: (() => unknown) | null) => {
       const { api, calls } = fakeApi({
         'teams.syncToBase': sync({ teamBranch: 'team/ops', count: 2, text: '2 commits behind main', from: B, to: D }),

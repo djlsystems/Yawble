@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
-// The team page's TeamSyncBanner, fed the REAL core's
-// answers. synctobase-*.json were written by the core's git previews verify tests, SyncToBase_* (GIT_PREVIEWS_FIXTURE_OUT set) through
-// UiRpc's RpcDispatcher, exactly as a window gets them: behind.from = the team tip, behind.to = the base it is behind; with the
+// The team page's TeamSyncBanner, fed the core's own answers. synctobase-*.json are written by the SyncToBase_* tests of
+// core/tests/Yawble.Core.Tests/Teams/MergeDeletePreviewTests.cs (GIT_PREVIEWS_FIXTURE_OUT set) through UiRpc's RpcDispatcher, exactly as a window gets them: behind.from = the team tip, behind.to = the base it is behind; with the
 // branches level the core sends behind: null (never a behind with from / to null).
 import { flushPromises, mount } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
@@ -98,7 +97,7 @@ describe('TeamSyncBanner on the real core\'s teams.syncToBase', () => {
     expect(w.find('[data-test=team-behind-count]').exists()).toBe(false);
   });
 
-  // F4b (fixed, Ines 82de5bb): the banner asks git.status and marks the rows only when the repository has an origin.
+  // The banner asks git.status and marks the rows only when the repository has an origin.
   const marks = (w: any) => w.findAll('[data-test=team-sync-came-in] [data-test=commit-list-row]')
     .map((r: any) => r.find('[data-test=local-mark]').exists());
   async function syncWith(status: (() => unknown) | null, synced = real('sync-ff')) {
@@ -110,7 +109,7 @@ describe('TeamSyncBanner on the real core\'s teams.syncToBase', () => {
     return b;
   }
 
-  it('F4b, origin (real git.status status-ff-origin): every not-pushed row that came in carries the mark', async () => {
+  it('origin (real git.status status-ff-origin): every not-pushed row that came in carries the mark', async () => {
     const status = real('status-ff-origin');
     expect(status.origin).toBeTruthy();
     const synced = real('sync-ff');
@@ -121,20 +120,20 @@ describe('TeamSyncBanner on the real core\'s teams.syncToBase', () => {
     expect(w.find('[data-test=team-sync-came-in]').text()).toContain(LOCAL_MARK.short);
   });
 
-  it('F4b, origin, one row pushed: the mark is on the not-pushed row only', async () => {
+  it('origin, one row pushed: the mark is on the not-pushed row only', async () => {
     const synced = real('sync-ff');
     synced.incoming[1].notPushed = false;
     const { w } = await syncWith(() => real('status-ff-origin'), synced);
     expect(marks(w)).toEqual([true, false]);
   });
 
-  it('F4b, origin null: no mark on any row', async () => {
+  it('origin null: no mark on any row', async () => {
     const { w } = await syncWith(() => ({ ...real<any>('status-ff-origin'), origin: null }));
     expect(marks(w)).toEqual([false, false]);
     expect(w.find('[data-test=team-sync-came-in] [data-test=local-mark]').exists()).toBe(false);
   });
 
-  it('F4b, git.status fails: the list shows with no mark', async () => {
+  it('git.status fails: the list shows with no mark', async () => {
     const { w } = await syncWith(null);
     expect(marks(w)).toEqual([false, false]);
   });

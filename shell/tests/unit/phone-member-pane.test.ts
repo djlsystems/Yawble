@@ -255,12 +255,10 @@ describe("a member's pane at 1280 px: one frame, one view", () => {
     } finally { spy.mockRestore(); }
   });
 
-  it("is no taller than the card + activity row it replaces, plus the pills' own row, at the default heights", () => {
-    // The old row was the card (AgentCard.vue at 8b39e07): 6 + 8 px padding, 2 px border, the 32 px title bar, the state line
-    // (12.5 px x 1.5 + 4 px padding), 2 px above the output, and the output at the shared height; the Activity beside it was
-    // 9rem (144 px) at least, less than the card.
-    // The pills (role, CLI, state) moved to their own 24 px row under the name so the name has the first row to itself.
-    const before = 6 + 8 + 2 + 32 + Math.ceil(12.5 * 1.5 + 4) + 2 + OUTPUT_DEFAULT + 24;
+  it("is no taller than a card with a state line and the pills' own row, at the default heights", () => {
+    // The budget: 6 + 8 px padding, 2 px border, a 32 px title bar, a state line (12.5 px x 1.5 + 4 px padding), 2 px
+    // above the output, the output at the shared height, and the pills' 24 px row (role, CLI, state) under the name.
+    const budget = 6 + 8 + 2 + 32 + Math.ceil(12.5 * 1.5 + 4) + 2 + OUTPUT_DEFAULT + 24;
     const d = desktopRules('components/MemberPane.vue');
     const decl = (sel: string, prop: string) => d.filter((r) => r.sels.includes(sel)).map((r) => r.decls[prop]).filter(Boolean).pop();
     const [padTop, , padBottom] = decl('.pane', 'padding')!.split(/\s+/).map(px);
@@ -270,7 +268,7 @@ describe("a member's pane at 1280 px: one frame, one view", () => {
     const tabs = px(decl('.tabs', 'min-height')) + (px(decl('.tabs', 'padding-top')) || 0) + (decl('.tabs', 'border-top') ? 1 : 0)
       + (px(decl('.tabs', 'margin-bottom')) || 0);
     const after = padTop! + padBottom! + border + title + tabs + OUTPUT_DEFAULT;
-    expect(after, `pane ${after} px, row ${before} px`).toBeLessThanOrEqual(before);
+    expect(after, `pane ${after} px, budget ${budget} px`).toBeLessThanOrEqual(budget);
     // The body holds the chosen view at the shared height (the activity's own 9rem floor is lifted in it).
     expect(decl('.body > .member-activity', 'min-height')).toBe('0');
   });

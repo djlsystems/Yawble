@@ -104,7 +104,7 @@ export function commitParts(text: string): CommitPart[] {
 
 export const spaced = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
-/** "Merged DeveloperMarlo's branch into team/x, 4 commits". Either branch may be unknown (null): left out, never "null". */
+/** "Merged members/x/ada into team/x, 4 commits". Either branch may be unknown (null): left out, never "null". */
 export function mergeLine(c: CommitFound): string | null {
   if (!c.isMerge) return null;
   const m = c.merge;

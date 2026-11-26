@@ -1,6 +1,6 @@
-// Gap tests for the Git dialog's "Tidy…" against a plan shaped exactly like the
-// CORE's git.tidyPlan answer (UiRpc.TidyPlanJson: repo "main", baseBranch, notes, proof on every class, commits on moved
-// and origin-only rows) instead of fake-core's own plan. The fixture is the card's fixture team: a cherry-picked member
+// The Git dialog's "Tidy…" against a plan shaped exactly like the core's git.tidyPlan answer (UiRpc.TidyPlanJson: repo
+// "main", baseBranch, notes, proof on every class, commits on moved and origin-only rows) instead of fake-core's own
+// plan. The fixture team has a cherry-picked member
 // branch, a member clone reset to main (moved), a scratch/ branch, a merged branch, an origin-only branch, a working one.
 //  - the yes of a Realign is bound to the commits shown (expectOld / expectNew, which the core checks: code "stale")
 //  - a moved row shows the commits a realign drops (the core sends them), and the plan's notes are shown
@@ -179,7 +179,7 @@ test('390 x 844, core-shaped plan: plan, realign and report do not scroll sidewa
   await ctx.close();
 });
 
-// ---- Re-check after DeveloperInes's fix d0347c4 (F2 stale flow, F3 confirm + origin-only/own-work, F4 notes above the list).
+// ---- A stale yes, the confirm with origin-only and own-work rows, and the notes above the list.
 const NEW_TEAM = '6666666666ffffffffff0000000000000000aaaa';
 const NEW_CLONE = '7777777777000000000011111111111111112222';
 /** The core's stale refusal text (TeamRepos.Tidy.cs GitBranchRealignAsync), as the window gets it. */
@@ -192,7 +192,7 @@ function movedTo(team: string, clone: string, cls = 'moved') {
   return p;
 }
 
-test('F2: a stale refusal shows "Refused: <reason>", re-reads the plan and binds a new yes to the new commits', async ({ browser }) => {
+test('a stale refusal shows "Refused: <reason>", re-reads the plan and binds a new yes to the new commits', async ({ browser }) => {
   let plans = 0;
   let moved = false;
   answers['git.tidyPlan'] = () => { plans++; return moved ? movedTo(NEW_TEAM, NEW_CLONE) : corePlan(); };
@@ -219,7 +219,7 @@ test('F2: a stale refusal shows "Refused: <reason>", re-reads the plan and binds
   await ctx.close();
 });
 
-test('F2: a stale refusal where the branch is no longer moved closes the confirm and reports the refusal', async ({ browser }) => {
+test('a stale refusal where the branch is no longer moved closes the confirm and reports the refusal', async ({ browser }) => {
   let moved = false;
   answers['git.tidyPlan'] = () => (moved ? movedTo(CLONE_SHA, CLONE_SHA, 'working') : corePlan());
   answers['git.branchRealign'] = (p) => { seen.push({ method: 'git.branchRealign', p }); moved = true; throw Object.assign(new Error(STALE), { code: 'stale' }); };
@@ -231,7 +231,7 @@ test('F2: a stale refusal where the branch is no longer moved closes the confirm
   await ctx.close();
 });
 
-test('F3: the Realign confirm lists the commits it drops and the core proof', async ({ browser }) => {
+test('the Realign confirm lists the commits it drops and the core proof', async ({ browser }) => {
   const { ctx, tidy } = await tidyAt(browser, 1280, 800);
   const row = tidy.locator('[data-test="tidy-row-members/fixture/developermarlo"]');
   await expect(row.locator('[data-test=tidy-commits]')).toContainText('aa11bb22cc Retry the upload three times');
@@ -245,7 +245,7 @@ test('F3: the Realign confirm lists the commits it drops and the core proof', as
   await ctx.close();
 });
 
-test('F3: origin-only and own-work rows list their commits under "Commits not in <base>:"', async ({ browser }) => {
+test('origin-only and own-work rows list their commits under "Commits not in <base>:"', async ({ browser }) => {
   answers['git.tidyPlan'] = () => {
     const p = corePlan();
     p.repos[0].branches.push({ name: 'members/fixture/old-own', where: ['local', 'origin'], class: 'own-work', teamSha: '8888888888aaaaaaaaaa',
@@ -263,7 +263,7 @@ test('F3: origin-only and own-work rows list their commits under "Commits not in
   await ctx.close();
 });
 
-test('F4: the notes and "Merged and contained are measured against <base>" are shown above the list', async ({ browser }) => {
+test('the notes and "Merged and contained are measured against <base>" are shown above the list', async ({ browser }) => {
   const { ctx, tidy } = await tidyAt(browser, 1280, 800);
   await expect(tidy.locator('[data-test=tidy-note]')).toHaveText(NOTE);
   await expect(tidy.locator('[data-test=tidy-base]')).toHaveText('Merged and contained are measured against main.');

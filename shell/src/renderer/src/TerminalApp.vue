@@ -8,15 +8,11 @@ import { isStoppedRun, type YawbleApi, type TerminalBanner, type TerminalSession
 import { errorText, resolveApi } from './api';
 import TerminalScreen from './components/TerminalScreen.vue';
 
-// An agent's terminal window: one slim bar (what the terminal shows, Open interactive CLI, Stop) over the screen; attaches
-// to a running batch (input off) or shows the last transcript. The effective-policy banner (sandbox, CLI, network,
-// timeouts, anything loosened) is folded behind the bar's "Policy" toggle, closed by default and remembered. Closing
-// only detaches.
-// Embedded: the same, in the main window's terminal pane (the window's title is left alone).
-// inPane: inside the member's pane on the team page: just the screen, always Formatted (the terminal itself, with
-// no input, while an interactive session is open), no bar and no Policy; never interactive - its Open interactive CLI
-// opens this window instead, and Stop is in the pane's menu. Whether a session is live is told to the pane (live). On a
-// phone the full-screen terminal's ⋯ menu holds the state line and Stop.
+// An agent's terminal window: one slim bar (what the terminal shows, Open interactive CLI, Stop) over the screen. It
+// attaches to a running batch (input off) or shows the last transcript; the effective policy is behind the bar's
+// "Policy" toggle. Closing only detaches.
+// embedded: the same, in the main window's terminal pane. inPane: inside the member's pane on the team page: only the
+// screen, never interactive (Open interactive CLI opens this window; Stop is in the pane's menu).
 const props = defineProps<{ memberId: number; api?: YawbleApi; pollMs?: number; embedded?: boolean; inPane?: boolean }>();
 const emit = defineEmits<{ banner: [TerminalBanner]; live: [boolean] }>();
 const api = resolveApi(props.api);

@@ -21,7 +21,7 @@ describe('the needs-you notification', () => {
     expect(needsYouToast(2, { kind: 'other', title: long, team: 'a' })).toBe(`2 things waiting for you. Newest: a request from a: ${'x'.repeat(120)}…`);
   });
 
-  it('without a newest item (an older core, or only reconnects) lists the kinds as before', () => {
+  it('without a newest item (an older core, or only reconnects) lists the kinds', () => {
     const before = '2 things waiting for you (questions, approvals, hosts agents ask to reach, developer tools agents ask for, connections to reconnect).';
     expect(needsYouToast(2)).toBe(before);
     expect(needsYouToast(2, null)).toBe(before);

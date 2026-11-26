@@ -317,7 +317,7 @@ describe('a workflow member on the team page', () => {
     expect(add.title).toBe(READ_ONLY_TITLE);
   });
 
-  it('the team page shows a workflow member card as its workflow tile, an agent as before', async () => {
+  it('the team page shows a workflow member card as its workflow tile, an agent as its pane', async () => {
     const agent = { ...card, kind: 'agent', member: { ...card.member, id: 2, name: 'DeveloperAda' } };
     const calls: Calls = [];
     const w = keep(mount(TeamView, { props: { team, api: fakeApi(calls, { 'teams.agents': () => [card, agent] }), pollMs: 60_000 },

@@ -277,8 +277,8 @@ function makeScene(w = 1280, h = 800): { scene: MonitorScene; canvas: HTMLCanvas
 /** One frame of the scene, at `now` (its frame loop is private; requestAnimationFrame would run it the same way). */
 const frame = (scene: MonitorScene, now: number) => (scene as unknown as { frame: (t: number) => void }).frame(now);
 
-// The tests run the frames themselves: the scene's own requestAnimationFrame loop must not run between them (under
-// load it did, with real times, and a label went missing from the frame the test looked at).
+// The tests run the frames themselves: the scene's own requestAnimationFrame loop must not run between them (it would
+// draw frames at real times, and a label could be missing from the frame a test looks at).
 beforeEach(() => { vi.stubGlobal('requestAnimationFrame', () => 0); vi.stubGlobal('cancelAnimationFrame', () => {}); });
 afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 

@@ -22,15 +22,10 @@ import { getMemberView, MemberViews, setMemberView, type MemberView } from '../m
 import { useNarrow } from '../narrowScreen';
 import { openDeliverablesPage } from '../deliverables/page';
 
-// One member on the team page, in one frame: a title bar (face, name, role and CLI chips, state, "more waiting", and a
-// ☰ menu with every action), a row of tabs - Report (what the member last said), Activity, Terminal - with the run's
-// details beside them, and one view: the chosen tab's. The tab is per member and remembered (memberPaneView.ts); the
-// terminal is mounted only while its tab shows, so only a shown terminal polls. The view's height is shared by every
-// member (the gaps between members set it, TeamView).
-// The terminal here is never interactive: it shows the member's runs (and mirrors a session opened elsewhere) with no
-// input. Open interactive CLI opens the agent's own terminal window, where the session runs; the remote view has no
-// such window, so it has no Open interactive CLI.
-// A phone stacks it the same way; its terminal is the whole screen with one header row.
+// One member on the team page, in one frame: a title bar (face, name, chips, state, a ☰ menu with every action), the
+// tabs Report | Activity | Terminal with the run's details beside them, and the chosen tab's view. The tab is kept per
+// member (memberPaneView.ts); the terminal is mounted only while its tab shows, and is never interactive here (Open
+// interactive CLI opens the agent's own terminal window; the remote view has none).
 /** pending: Stop or Remove was clicked and the core has not answered yet (that menu item is held). */
 const props = withDefaults(defineProps<{
   card: AgentCard; pending?: 'stop' | 'remove' | null; api?: YawbleApi; pollMs?: number;

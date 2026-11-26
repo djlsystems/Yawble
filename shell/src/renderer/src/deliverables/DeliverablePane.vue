@@ -20,12 +20,9 @@ import GoalPicker from '../goals/GoalPicker.vue';
 import { statusLook, statusTip, timeBar } from './page';
 
 /**
- * The Deliverables page's inline pane, like the Backlog's item pane: the deliverable's header (status, #id, the clean
- * title, the item link, its team), the item's spec (collapsed, Show all), its cards by lane (each opens in the board's
- * card panel), its last messages newest first (commit IDs link as in the rest of the app), its time, and the actions the Deliverables
- * dialog has - Nudge, Extend, Stop, Close - each asked first in the app's own confirm dialog, none for a Visitor (an open question
- * closes as Cancel when access turns read-only).
- * Read with deliverables.get (the core's deliverables contract) when opened and on every poll.
+ * The Deliverables page's inline pane: the deliverable's header, the item's spec, its cards by lane, its last messages,
+ * its time, and Nudge, Extend, Stop and Close, each asked first in the app's confirm dialog (none for a Visitor). Read
+ * with deliverables.get when opened and on every poll.
  */
 const props = defineProps<{ row: DeliverableRow; api: YawbleApi; pollMs?: number; readOnly?: boolean; phone?: boolean; goals?: readonly Goal[] | null }>();
 const emit = defineEmits<{ close: []; card: [id: number]; openTeam: [teamId: number]; board: [teamId: number]; changed: [] }>();

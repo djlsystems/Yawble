@@ -108,7 +108,7 @@ const NewestKind: Record<string, string> = {
 
 /**
  * The OS notification's body: how many things wait, then the newest one and its team ("Newest: a question from payments: Ship it?").
- * Without a newest item (an older core, or only connections to reconnect) it lists the kinds, as before.
+ * Without a newest item (an older core, or only connections to reconnect) it lists the kinds.
  */
 export function needsYouToast(needs: number, newest?: NeedsYouNewest | null): string {
   const count = `${needs} thing${needs === 1 ? '' : 's'} waiting for you`;

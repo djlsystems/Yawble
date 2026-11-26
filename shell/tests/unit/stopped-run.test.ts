@@ -200,7 +200,7 @@ describe('Board: a stopped run line reads Stopped in a neutral colour', () => {
     const done = boardCard({ id: 14, status: 'handback', lane: 'done', memberState: { state: 'idle', attention: 'stopped' } });
     expect(cardStatusLook(done).label).toBe('Handed back');
   });
-  it('a card recorded before the change ("failed" + the member stopped) still reads Stopped; a real failure stays red', () => {
+  it('a card recorded as "failed" whose member is stopped (an older core) reads Stopped; a real failure stays red', () => {
     const legacy = boardCard({ status: 'failed', lane: 'blocked', memberState: { state: 'idle', attention: 'stopped' } });
     expect(cardStatusLook(legacy)).toEqual({ label: 'Stopped', color: 'var(--state-stopped)', stopped: true });
     const byClass = boardCard({ status: 'failed', lane: 'blocked', memberState: { state: 'idle', attention: 'failed', lastRunFailureClass: 'stopped' } });

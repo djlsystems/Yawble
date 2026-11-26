@@ -56,7 +56,7 @@ const ALL_WFS = TEAMS.flatMap((_, i) => wfsOf(i));
 const titleOf = (id: number) => ALL_WFS.find((w) => w.id === id)!.title;
 
 /**
- * The rule cards 405 / 409 state, written out here to check what is drawn: "#id title", "Backlog item " dropped, 30 chars
+ * The label rule, written out here to check what is drawn: "#id title", "Backlog item " dropped, 30 chars
  * with "…"; only "#id" when the WINDOW is phone-wide (under 760: the window, not the canvas) and zoomed out under 0.6.
  * A crowded label may also fall back to "#id" or be left out (placeDeliverableLabels): see labelCheck.
  */
@@ -134,7 +134,7 @@ function seedWall(feed: Feed, n: number) {
     });
     // A wide map: 6 folders of 4 files, one commit per folder.
     for (let f = 0; f < FOLDERS; f++) {
-      // Inside the code map's 2 minute file life (main 6dcc8eb): 35-60 s ago, so the map stays for the whole test.
+      // Inside the code map's 2 minute file life: 35-60 s ago, so the map stays for the whole test.
       const at = feed.iso(60_000 - f * 5_000);
       const sha = `${ti}${f}`.padEnd(40, 'a');
       feed.events.push({
@@ -308,8 +308,8 @@ const hit = (a: WBox, b: WBox, slack = 1) => a.x < b.x + b.w - slack && b.x < a.
 /**
  * The label rules on one frame, in world px with the page's own text widths:
  *   overlaps   - a label over another label, any deliverable square, a member's disc (r + 5) or name, or a map folder / file dot
- *                (map things and folder names of the label's own team listed apart as ownMapOverlaps; by the
- *                Manager's decision those are faults too and the tests assert both).
+ *                (map things and folder names of the label's own team listed apart as ownMapOverlaps; those
+ *                are faults too and the tests assert both).
  *   roomMissed - a label left out (or cut to "#id") although one of the scene's own spots (under, above, to a side; full,
  *                then "#id") is clear of everything drawn in the final frame; checking against the final frame is lenient
  *                (later labels only take room after), so a hit here is a real fault.
@@ -389,7 +389,7 @@ async function labelCheck(page: Page, f: Frame, n: number, windowPx: number) {
     for (const text of p.texts) {
       const w = tw[ti++]!, h = font * 1.2, { x, y } = p.s, r = WF_R;
       const spots: [number, boolean][] = [[x - w / 2, false], [x - w / 2, true], [x - r, false], [x + r - w, false], [x - r, true], [x + r - w, true]];
-      // A 2 px margin on top of the scene's 1 px slack, so a near miss of my estimates is not called a fault.
+      // A 2 px margin on top of the scene's 1 px slack, so a near miss of the estimates is not called a fault.
       const free = spots.find(([sx, above]) => { const b = { x: sx, y: above ? y - r - 3 - h : y + r + 3, w, h, what: '' }; return !block.some((o) => hit(b, o, -2)); });
       if (free) { roomMissed.push(`#${p.id} "${text}" fits ${free[1] ? 'above' : 'under'} at x ${Math.round(free[0] - x)}`); break; }
     }
@@ -522,7 +522,7 @@ async function settle(page: Page, n: number, timeout = 20_000): Promise<Frame> {
   await expect.poll(async () => {
     const f = await lastFrame(page);
     return TEAMS.slice(0, n).every((t) => hubAt(f, t)) && squaresOf(f).length >= n * 5 && mapThings(f).length >= n * (FOLDERS + FOLDERS * FILES);
-  }, { timeout, intervals: [100] }).toBe(true).catch(() => {}); // as before: what is drawn is measured even if not all of it is
+  }, { timeout, intervals: [100] }).toBe(true).catch(() => {}); // what is drawn is measured even if not all of it is
   await still(page); // the spacing measure can take its full 12-24 moves on a crowded wall
   return freshFrame(page);
 }
@@ -749,7 +749,7 @@ test('the spacing setting at 375 light: the phone cog shows Team spacing and mov
 // =====================================================================================================================
 // No panel; the node labels.
 
-/** A deliverable node click opens the Deliverables page with that deliverable's pane (the old dialog is gone). */
+/** A deliverable node click opens the Deliverables page with that deliverable's pane. */
 const wfOpened = (page: Page, id: number) => page.locator(`[data-test=deliverables-view] [data-test=deliverable-pane][data-id="${id}"]`);
 
 for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'open'], ['dark', 375, 'open'], ['light', 375, 'open'], ['dark', 1280, 'collapsed'], ['light', 1280, 'collapsed']] as const) {
@@ -784,7 +784,7 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
     expect.soft(r.panelWords, 'no DELIVERABLES panel on the wall').toEqual([]);
     expect.soft(r.check.overlaps, 'no label over a label, square, member disc or name, or another team\'s map').toEqual([]);
     expect.soft(r.check.roomMissed, 'no label left out or cut short when it had room').toEqual([]);
-    // By the Manager's decision a label over its own team's map (folder, file dot, folder name) is a fault too.
+    // A label over its own team's map (folder, file dot, folder name) is a fault too.
     expect.soft(r.check.ownMapOverlaps, 'no label over its own team\'s map').toEqual([]);
 
     // Where the panel was (260 out from the hub, away from the middle): hover and click do nothing deliverable-ish.
@@ -913,10 +913,9 @@ test('labels: 1280 wide zoomed out (Activity hidden, wall over 760): titles stay
   expect(fit, 'a zoom under 0.6 reached').toBeTruthy();
   // Titles kept: no label is cut to "#id" by the phone rule on a wide wall. A label that is "#id" or left out must have had
   // no room (roomMissed below); the rest carry their title.
-  // This was "at least 10 of the 15 keep a title", which failed about half the runs with the scene right each
-  // time (no overlaps, nothing left out that had room). The deliverable nodes are born at a random offset beside their member
-  // (scene.ts rebuild), so the forces settle a different layout each run, and how many 30-character titles find room at
-  // zoom ~0.37 went from 8 to 12. So every node is accounted for instead: it shows exactly its wide-wall title, or it is
+  // The deliverable nodes are born at a random offset beside their member (scene.ts rebuild), so the forces settle a
+  // different layout each run, and 8 to 12 of the 30-character titles find room at zoom ~0.37. A count of titles would
+  // fail by chance, so every node is accounted for: it shows exactly its wide-wall title, or it is
   // "#id" or left out (and roomMissed proves it had no room). At least one title is drawn: the phone rule would cut all.
   expect(fit.squares, 'all 15 deliverable nodes drawn').toBe(ALL_WFS.length);
   expect.soft(fit.withTitle + fit.idOnly.length + fit.dropped.length, `every node titled, "#id" or left out at zoom ${fit.zoom}`).toBe(fit.squares);

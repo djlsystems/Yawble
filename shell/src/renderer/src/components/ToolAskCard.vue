@@ -11,15 +11,11 @@ import { useBusy } from '../busy';
 import { usePhone } from '../phone';
 
 /**
- * One tool ask in Needs you: a developer tool of the app's catalog a member asked for with request_tool, with who asked,
- * the agent's reason, the tool's name, publisher and winget id, whether it installs per-user or machine-wide, and the
- * exact command. Install (Try again after a failure, with the installer's message) calls tools.install, which returns
- * when winget (Windows) or pkexec (Linux: "Your system asks for your password") has finished; tools.installProgress says
- * what it is doing meanwhile. A closed password window (cancelled) or a refusal (notAuthorized) is shown in the core's
- * plain words and the item stays open with Install. Off Windows without Install the item shows the command to run
- * yourself and Check again (tools.checkAgain), which closes the item when the program is found. Install runs only from
- * the window on this computer: a remote view shows Check again and Not now and says to install it in the Yawble window.
- * Everything shown is agent-influenced text: always plain text ({{ }}), never HTML.
+ * One tool ask in Needs you: a developer tool from the app's catalog that a member asked for, with who asked, why, and
+ * the exact command. Install calls tools.install (winget on Windows, pkexec on Linux) and shows its progress; a
+ * cancelled or refused install keeps the item open. Where the app cannot install, the item shows the command and
+ * Check again. Install runs only in the window on this computer. Everything shown is agent-influenced text: always
+ * plain text ({{ }}), never HTML.
  */
 const props = defineProps<{ ask: ToolAsk; api: YawbleApi }>();
 const emit = defineEmits<{ installed: [r: ToolInstallResult]; answered: [r: ToolInstallResult | ToolNotNowResult] }>();

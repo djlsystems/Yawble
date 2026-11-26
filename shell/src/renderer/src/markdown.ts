@@ -1,14 +1,10 @@
 import MarkdownIt from 'markdown-it';
 import { commitParts, isCommitId } from './commitView';
 
-// Agent-written markdown, rendered inside a window that can reach the app's API: raw HTML is NOT allowed (html: false
-// escapes it), markdown-it's own link validation refuses javascript:, vbscript:, file: and most data: URLs, and links
-// open outside the page (the desktop's main process opens only http, https and mailto in the person's browser).
-// No typographer (smart quotes would corrupt commands the person copies).
-//
-// Linkify turns text that looks like a web address into a link: anything with http:// or https://, www.-addresses, and
-// bare domains ending in a common web TLD. The TLD list is short on purpose: the full list has country codes that
-// are also file extensions (.md, .py, .rs, .sh), and "README.md" must stay text. Text inside code is never linked.
+// Agent-written markdown, rendered inside a window that can reach the app's API: raw HTML is escaped (html: false),
+// markdown-it refuses javascript:, vbscript:, file: and most data: URLs, and links open outside the page. No
+// typographer (smart quotes would corrupt commands the person copies). Linkify uses a short TLD list on purpose: the
+// full list has country codes that are also file extensions (.md, .py, .rs, .sh), and "README.md" must stay text.
 const md = new MarkdownIt({ html: false, linkify: true, typographer: false, breaks: true });
 md.linkify
   .set({ fuzzyEmail: false, fuzzyIP: false })

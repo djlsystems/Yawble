@@ -1,17 +1,11 @@
 import { fileName, type StepRow } from './steps';
 
 /**
- * THE CODE MAP: one tree per team - the repository, its folders, their files - built up over the life of a deliverable
- * from two sources.
- *   - The members' steps (monitor.steps) are immediate and provisional: a Write makes a file, an Edit lights it bright,
- *     a Read lights it faint. They are the only source for reads.
- *   - The code events (monitor.codeEvents, from the core) are the truth: a commit's files confirm, add or delete
- *     nodes and override what the steps said (a Write over a file the commit says was modified is an edit, not a new
- *     file; a file the commit deleted is gone, and a step older than that commit does not bring it back).
- * A file leaves when every deliverable that touched it has ended, or when it has been idle for MapIdleMs (log time, so a
- * replay prunes as the past did), fading out over the last MapFadeMs of that (idleFade). A large map collapses to its busiest folders, each with a "+N" for the rest.
- * Everything here is plain data and arithmetic, so the scene can draw hundreds of files at 60 fps and the tests can
- * build it without a canvas.
+ * The code map: one tree per team (the repository, its folders, their files), built from two sources. The members'
+ * steps (monitor.steps) are immediate and provisional, and the only source for reads; the code events
+ * (monitor.codeEvents) are the truth: a commit's files confirm, add or delete nodes and override what the steps said.
+ * A file leaves when every deliverable that touched it has ended or it has been idle for MapIdleMs. A large map
+ * collapses to its busiest folders. Plain data and arithmetic: no canvas is needed to build it.
  */
 
 export type CodeEventKind = 'commit' | 'merge-team' | 'landed' | 'push';
@@ -398,9 +392,8 @@ export const MapCore = 130;
  * within it). The map lies on an arc pointing away from the others, so only the part of it that wraps back toward
  * them counts: the map is laid out as the scene lays it (layoutTeamMap at MapMembersReach + MapPastMembers), and its
  * nodes with their labels are measured along the directions to the neighbours, which lie `spread` radians either side
- * of straight back (0 for two teams; neighbourSpread in the scene). It used to count the arc's sideways spread
- * (depth × sin(half-span)), which lies across the line between the teams, not on it, so the default spacing left the
- * middle of the wall empty.
+ * of straight back (0 for two teams; neighbourSpread in the scene). The arc's sideways spread (depth × sin(half-span))
+ * is not counted: it lies across the line between the teams, not on it.
  */
 export function mapRoomOf(view: TeamMapView, core = MapCore, spread = 0): number {
   const n = view.folders.length + (view.moreFolders ? 1 : 0);

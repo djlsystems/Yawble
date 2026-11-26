@@ -12,13 +12,11 @@ import type { RunDetail } from '../workflows/types';
 const WorkflowRunView = defineAsyncComponent(() => import('./workflows/WorkflowRunView.vue').then((m) => m.default));
 
 /**
- * Logs: every log the app keeps, one at a time, as a table. The source is chosen from a list; the team, the member,
- * the source's own columns, a time range and free text filter it; any column sorts it; pages load as the table
- * scrolls. On this computer, Prune deletes old entries after saying exactly what goes, and Retention sets how long
- * each log is kept. A cloud viewer reads only. Opened from the sidebar, or from a member's card already filtered to
- * that member's activity.
+ * Logs: every log the app keeps, one at a time, as a table that filters, sorts and loads pages as it scrolls. On this
+ * computer, Prune deletes old entries after saying exactly what goes, and Retention sets how long each log is kept. A
+ * cloud viewer reads only.
  */
-// `page`: drawn as the app's Logs place (inline, filling it) instead of a dialog; a member's logs stay a dialog.
+// page: drawn as the app's Logs place (inline, filling it) instead of a dialog; a member's logs stay a dialog.
 const props = defineProps<{ api: YawbleApi; source?: string; team?: string; member?: string; page?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 

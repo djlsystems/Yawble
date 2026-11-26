@@ -1,5 +1,5 @@
-// The tester's own e2e of the Timeline dialog on remote.html against the phone fake core
-// (tests/e2e/phone, the core's wire contract canned), beside deliverable-timeline.spec.ts:
+// The Timeline dialog on remote.html against the phone fake core (tests/e2e/phone, the core's wire contract canned);
+// deliverable-timeline.spec.ts covers the deliverable's dialog at each access level:
 // - a CARD (the board's card 3, which has a 38 min Stalled stretch) and a DELIVERABLE (#10, summary row + one row per
 //   card) open the dialog from their overall time, in light and dark at 1280 and 375;
 // - the planned / started line ("planned … · started … · 20m before it started"), the Stalled band (hatched), markers;
@@ -9,7 +9,7 @@
 // - at 375 the axis scrolls inside the dialog and the page never scrolls sideways;
 // - no tokens or cost anywhere in the dialog.
 //
-//   npx playwright test overall-time-timeline-verify      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+//   npx playwright test timeline-dialog      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { type Access } from './phone/fake-core';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
@@ -178,11 +178,10 @@ for (const [w, h, theme] of [[1280, 800, 'light'], [375, 667, 'dark']] as const)
   });
 }
 
-// F1: at phone width the global touch rule (styles.css: button { min-height: 44px }) also hits the timeline's
-// band and marker buttons: a marker is a 44 px square turned 45 deg (62 x 62 px on screen) and a band 44 px tall in a
-// 26 px track, so the markers cover the bands and the start tick. Fixed: TimelineDialog.vue opts its
-// .band / .mk out of the 44 px minimum.
-test('F1: at 375 the bands stay inside their track and the markers keep their size', async ({ browser }) => {
+// At phone width the global touch rule (styles.css: button { min-height: 44px }) would make a marker a 44 px square
+// turned 45 deg (62 x 62 px on screen) and a band 44 px tall in a 26 px track, covering the bands and the start tick:
+// TimelineDialog.vue opts its .band / .mk out of the 44 px minimum.
+test('at 375 the bands stay inside their track and the markers keep their size', async ({ browser }) => {
   const { page, ctx } = await open(browser, { w: 375, h: 667, hash: '#deliverable=10' });
   await (await paneTime(page, 10)).click();
   await expect(page.locator('[data-test=timeline-band]').first()).toBeVisible();
@@ -198,10 +197,10 @@ test('F1: at 375 the bands stay inside their track and the markers keep their si
   expect(m.mk, 'a marker stays about 14 px (20 px turned)').toBeLessThanOrEqual(22);
 });
 
-// F3 (fixed): deliverable #12's break mark sits about 96% along the axis; its centred label
-// ("≈ 2d 17h") drew over the end label ("now"). Now it slides clear of the start / end labels, or hides if no room.
+// Deliverable #12's break mark sits about 96% along the axis: its label ("≈ 2d 17h") slides clear of the start / end
+// labels ("now"), or hides if there is no room.
 for (const [w, h] of [[1280, 800], [375, 667]] as const) {
-  test(`F3: a break label near the axis end never meets the start / end labels at ${w}`, async ({ browser }) => {
+  test(`a break label near the axis end never meets the start / end labels at ${w}`, async ({ browser }) => {
     const { page, ctx, errors } = await open(browser, { w, h, expiry: true, hash: '#deliverable=12' });
     await (await paneTime(page, 12)).click();
     const dlg = page.locator('[data-test=timeline-dialog]');

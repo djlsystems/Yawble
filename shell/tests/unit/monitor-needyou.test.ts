@@ -37,7 +37,7 @@ describe('needYouItems: one list for the header and the You node', () => {
     expect(needYouSummary(items)).toBe('2 questions');
   });
 
-  it('only asks: network and tool asks count (the header used to miss them)', () => {
+  it('only asks: network and tool asks count in the header', () => {
     const m = new MonitorModel();
     m.reconcile([team('payments', [member('Ana', 'running')])], 0);
     m.setAsks([
@@ -52,7 +52,7 @@ describe('needYouItems: one list for the header and the You node', () => {
     expect(needYouSummary(m.needYouItems())).toBe('1 network ask, 2 tool asks');
   });
 
-  it('only blocked and failed: they count on the You node too (it used to miss them)', () => {
+  it('only blocked and failed: they count on the You node too', () => {
     const m = new MonitorModel();
     m.reconcile([team('payments', [member('Ana', 'blocked', 'no host'), member('Bo', 'failed'), member('Cy', 'idle')])], 0);
     expect(m.needYouItems().map((i) => [i.kind, i.member, i.id, i.label])).toEqual([
@@ -192,7 +192,7 @@ describe('the needs-you pulse and sound fire once per new item, by id', () => {
     expect(played).toEqual(['needsYou', 'needsYou']);
   });
 
-  it('a question\'s own burst on its member no longer sounds needs you (its flyer does, once)', () => {
+  it('a question\'s own burst on its member does not sound needs you (its flyer does, once)', () => {
     const played: SoundKind[] = [];
     const s = new MonitorSound((k) => played.push(k));
     s.on = true;

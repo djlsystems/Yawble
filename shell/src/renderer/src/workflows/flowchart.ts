@@ -1,11 +1,8 @@
-// The workflow document as a flowchart: nodes and edges for the designer, and the edits the designer makes, as pure
-// functions. The document stays the source of truth: every edit returns a new document (the input is never changed)
-// that keeps every key it does not edit. Node positions live in the document's `layout` section
-// (`layout.nodes[stepId] = { x, y }`, top-left corner); a step without one is placed by dagre.
-//
-// Step types and their successors follow the core's checker and engine (Yawble.Core.Workflows.Language):
-// if: then / else; switch: cases (by value) / default; forEach and while: body / then; end: none; every other step: next.
-// A null successor ends the run, or, inside a loop body (forEach or while), ends that pass of the body.
+// The workflow document as a flowchart: nodes and edges for the designer, and the designer's edits as pure functions
+// that return a new document and keep every key they do not edit. Node positions live in `layout.nodes[stepId]`; a
+// step without one is placed by dagre. Successors follow the core's checker (Yawble.Core.Workflows.Language): if: then
+// / else; switch: cases / default; forEach and while: body / then; end: none; any other step: next. A null successor
+// ends the run, or inside a loop body ends that pass.
 import dagre from '@dagrejs/dagre';
 import type { Check, WorkflowDocument, WorkflowStep } from './types';
 

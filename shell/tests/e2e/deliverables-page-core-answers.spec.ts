@@ -1,10 +1,10 @@
 // The Deliverables page in a real browser (headless Chrome) on remote.html, the remote
-// view, with the phone-remote FAKE core whose deliverables.list / deliverables.get answer the REAL core's answers
-// (tests/unit/fixtures/deliverables, written by the core's deliverables verify test: live running / lease / slot / needs-you states,
+// view, with the phone-remote FAKE core whose deliverables.list / deliverables.get answer the core's own answers
+// (tests/unit/fixtures/deliverables, written by the core's DeliverablesPageTests: live running / lease / slot / needs-you states,
 // a dispatched item with its spec, an archived item, an expired deliverable). At 1280, 1440 and 375 px, light and dark,
-// with full access and as a Visitor (read-only). Screenshots go to $YAWBLE_TEAM_DOCS/deliverables-page/verify.
+// with full access and as a Visitor (read-only). With YAWBLE_TEAM_DOCS set, screenshots go to its deliverables-page/core-answers folder.
 //
-//   npx playwright test deliverables-page-verify      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+//   npx playwright test deliverables-page-core-answers      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -34,7 +34,7 @@ const saved = { ...answers };
 test.beforeAll(async () => { test.setTimeout(600_000); Object.assign(answers, OVERRIDES); await buildRenderer(); });
 test.afterAll(() => { for (const k of Object.keys(answers)) if (!(k in saved)) delete answers[k]; Object.assign(answers, saved); });
 
-const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'deliverables-page', 'verify') : null;
+const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'deliverables-page', 'core-answers') : null;
 if (shots) mkdirSync(shots, { recursive: true });
 
 async function open(browser: Browser, access: Access, w: number, h: number, theme: 'light' | 'dark', hash = '#deliverables') {
@@ -72,7 +72,7 @@ for (const access of ['full', 'read'] as const) {
         await expect(page.locator('[data-test=deliverables-chip-open] [data-test=deliverables-chip-count]')).toHaveText('4');
         await expect(page.locator('[data-test=deliverables-summary]').first()).toContainText('4 open');
         expect(await noSideScroll(page), 'the page never scrolls sideways').toBe(true);
-        if (shots) await page.screenshot({ path: path.join(shots, `c478-list-${tag}.png`) });
+        if (shots) await page.screenshot({ path: path.join(shots, `list-${tag}.png`) });
 
         // All: the ended ones after; the item labels link (the core said backlog: true).
         await page.locator('[data-test=deliverables-chip-all]').click();
@@ -80,7 +80,7 @@ for (const access of ['full', 'read'] as const) {
         await expect(row(page, n('dispatched')).locator('[data-test=deliverables-title]')).toHaveText('Deliverables page');
         await expect(row(page, n('dispatched')).locator('[data-test=deliverable-item-link]')).toHaveText(String(ID.spec));
         expect(await noSideScroll(page)).toBe(true);
-        if (shots) await page.screenshot({ path: path.join(shots, `c478-all-${tag}.png`) });
+        if (shots) await page.screenshot({ path: path.join(shots, `all-${tag}.png`) });
 
         // The running deliverable's pane: cards by lane, activity; Stop and Close only with full access.
         await row(page, n('lead')).click();
@@ -104,14 +104,14 @@ for (const access of ['full', 'read'] as const) {
           await expect(page.locator('[data-test=deliverables-listwrap]')).toBeHidden();
         }
         expect(await noSideScroll(page)).toBe(true);
-        if (shots) await page.screenshot({ path: path.join(shots, `c478-pane-running-${tag}.png`) });
+        if (shots) await page.screenshot({ path: path.join(shots, `pane-running-${tag}.png`) });
 
         // The dispatched one: its spec from the core.
         if (w < 760) { await pane.locator('[data-test=deliverable-pane-back]').click(); await expect(page.locator('[data-test=deliverables-listwrap]')).toBeVisible(); }
         await row(page, n('dispatched')).click();
         await expect(pane.locator('[data-test=deliverable-pane-spec]')).toContainText("every team's work in one place");
         await expect(pane.locator('[data-test=deliverable-pane-actions]')).toHaveCount(0); // ended: none
-        if (shots) await page.screenshot({ path: path.join(shots, `c478-pane-spec-${tag}.png`) });
+        if (shots) await page.screenshot({ path: path.join(shots, `pane-spec-${tag}.png`) });
 
         // Esc (desktop) or Back (phone) returns to the list.
         if (w < 760) await pane.locator('[data-test=deliverable-pane-back]').click();
@@ -129,7 +129,7 @@ test('1280 light: the Timeline icon opens the Timeline dialog; an Item link open
   const { page, ctx, errors } = await open(browser, 'full', 1280, 800, 'light');
   await row(page, n('lead')).locator('[data-test=deliverables-timeline]').click();
   await expect(page.locator('[aria-modal="true"]')).toBeVisible();
-  if (shots) await page.screenshot({ path: path.join(shots, 'c478-timeline-full-1280-light.png') });
+  if (shots) await page.screenshot({ path: path.join(shots, 'timeline-full-1280-light.png') });
   await page.keyboard.press('Escape');
   await expect(page.locator('[aria-modal="true"]')).toHaveCount(0);
   await page.locator('[data-test=deliverables-chip-all]').click();
@@ -147,7 +147,7 @@ test('1280 dark: the board\'s Deliverables button opens the page', async ({ brow
   const bb = await page.locator('[data-test=board-backlog]').boundingBox();
   const wb = await page.locator('[data-test=board-deliverables]').boundingBox();
   expect(bb && wb && Math.abs(bb.y - wb.y) < 4 && wb.x > bb.x).toBe(true); // beside Backlog
-  if (shots) await page.screenshot({ path: path.join(shots, 'c478-board-button-full-1280-dark.png') });
+  if (shots) await page.screenshot({ path: path.join(shots, 'board-button-full-1280-dark.png') });
   await page.locator('[data-test=board-deliverables]').click();
   await expect(page.locator('[data-test=deliverables-view]')).toBeVisible();
   await expect(page.locator('[data-test=nav-deliverables]')).toHaveClass(/on/);
@@ -164,7 +164,7 @@ const B_LIVE = [bItem(901, String(ID.spec), null)];
 const B_ARCH = [bItem(902, String(ID.old), '2026-11-03T00:00:00Z')];
 
 for (const theme of ['light', 'dark'] as const) {
-  test(`re-check 1280 ${theme}: F1 the Item column marks the match; the archived link opens the archive`, async ({ browser }) => {
+  test(`1280 ${theme}: the Item column marks the match; the archived link opens the archive`, async ({ browser }) => {
     answers['backlog.list'] = (p) => structuredClone(p?.archived ? B_ARCH : B_LIVE);
     answers['backlog.item'] = (p) => ({ ...[...B_LIVE, ...B_ARCH].find((b) => b.id === Number(p?.id))!, dispatches: [] });
     const { page, ctx, errors } = await open(browser, 'full', 1280, 800, theme);
@@ -182,13 +182,13 @@ for (const theme of ['light', 'dark'] as const) {
     const titleLook = await look('[data-test=deliverables-hit]');
     await search.fill(String(ID.spec));
     expect(await look(`[data-test=deliverables-row][data-wf="${n('dispatched')}"] td.itm mark`)).toBe(titleLook);
-    if (shots) await page.screenshot({ path: path.join(shots, `c478r-f1-full-${theme}.png`) });
+    if (shots) await page.screenshot({ path: path.join(shots, `filter-full-${theme}.png`) });
 
     // A partial match: only 001 is marked.
     await search.fill('001');
     await expect(link(n('dispatched')).locator('mark')).toHaveText('001');
     await expect(link(n('dispatched'))).toHaveText(String(ID.spec));
-    if (shots) await page.screenshot({ path: path.join(shots, `c478r-f1-partial-${theme}.png`) });
+    if (shots) await page.screenshot({ path: path.join(shots, `filter-partial-${theme}.png`) });
 
     // The pane (another ItemLink user) is not marked while the row is.
     await row(page, n('dispatched')).click();
@@ -200,19 +200,19 @@ for (const theme of ['light', 'dark'] as const) {
     // The archived item, lower case: marked, and the link opens the Backlog's archive at it.
     await search.fill(String(ID.old).toLowerCase());
     await expect(link(n('archived')).locator('mark')).toHaveText(String(ID.old));
-    if (shots) await page.screenshot({ path: path.join(shots, `c478r-f1-archived-${theme}.png`) });
+    if (shots) await page.screenshot({ path: path.join(shots, `filter-archived-${theme}.png`) });
     await link(n('archived')).click();
     await expect(page.locator('[data-test=deliverables-view]')).toHaveCount(0);
     await expect(page.locator('[data-test=backlog-tab-archived]').first()).toHaveClass(/on/);
     await expect(page.locator('[data-test=backlog-row][aria-selected=true]')).toContainText(String(ID.old));
-    if (shots) await page.screenshot({ path: path.join(shots, `c478r-f1-archive-opened-${theme}.png`) });
+    if (shots) await page.screenshot({ path: path.join(shots, `filter-archive-opened-${theme}.png`) });
     expect(errors).toEqual([]);
     await ctx.close();
   });
 }
 
 for (const [w, h] of [[1280, 800], [375, 740]] as const) {
-  test(`re-check ${w}px: O2 Clear is hidden at the defaults and puts them back; Show all deliverables goes to All`, async ({ browser }) => {
+  test(`${w}px: Clear is hidden at the defaults and puts them back; Show all deliverables goes to All`, async ({ browser }) => {
     const { page, ctx, errors } = await open(browser, 'full', w, h, 'light');
     const clear = page.locator('[data-test=deliverables-clear]');
     const chip = (c: string) => page.locator(`[data-test=deliverables-chip-${c}]`);
@@ -222,7 +222,7 @@ for (const [w, h] of [[1280, 800], [375, 740]] as const) {
     await expect(clear).toBeVisible();
     await page.locator('[data-test=deliverables-team-filter]').selectOption(String(n('web')));
     await page.locator('[data-test=deliverables-search]').fill('lead');
-    if (shots) await page.screenshot({ path: path.join(shots, `c478r-o2-filtered-${w}.png`) });
+    if (shots) await page.screenshot({ path: path.join(shots, `clear-filtered-${w}.png`) });
     await clear.click();
     await expect(chip('open')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('[data-test=deliverables-search]')).toHaveValue('');

@@ -358,7 +358,7 @@ describe('the Monitor view', () => {
     const w = mount(MonitorView, { props: { api, pollMs: 60_000 } });
     await flushPromises();
     const lit = () => ['monitor-autofit', 'monitor-pin'].filter((t) => w.get(`[data-test=${t}]`).classes().includes('on'));
-    expect(lit()).toEqual(['monitor-autofit']); // Auto fit, as before
+    expect(lit()).toEqual(['monitor-autofit']); // Auto fit
     await w.get('[data-test=monitor-fit]').trigger('click');
     expect(lit()).toEqual(['monitor-pin']);
     expect(localStorage.getItem('yawble.monitor.camera')).toBe('pinned');
@@ -604,7 +604,6 @@ describe('Team spacing', () => {
   });
 
   it('settles to the same gap every run, whatever the birth spots and the order things arrive in', () => {
-    // Before the fix, 3 teams' nearest gap measured at 4-248 and 2 teams' at -23 to 157 from run to run.
     for (const count of [2, 3]) {
       const nearest: number[] = [];
       for (const seed of [1, 42, 555]) for (const stagger of [0, 37]) {

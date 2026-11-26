@@ -89,8 +89,8 @@ describe('the You node on a short wall', () => {
     expect(inside(n, 375, 110)).toBe(true);
   });
 
-  // Under ~114.5 px no spot clears the row with the margins; the node used to go
-  // back to its old place, on Legend. 375x546 gives 113 px, 375x530 103 px.
+  // Under ~114.5 px no spot clears the row with the margins; the node must still not sit on Legend.
+  // 375x546 gives 113 px, 375x530 103 px.
   for (const h of [113, 110, 103, 100]) {
     it(`a ${h} px phone wall with the real row and Legend: inside, clear of Legend, its centre on the wall`, () => {
       const keep = phoneKeep(375, h);

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// Commit links fed the REAL core's git.commitsResolve answers.
-// tests/unit/fixtures/commit-links/*.json were written by the core's commitsResolve verify test with COMMIT_LINKS_FIXTURE_OUT set
+// Commit links fed the core's own git.commitsResolve answers. tests/unit/fixtures/commit-links/*.json are written by
+// core/tests/Yawble.Core.Tests/Ui/CommitsResolveRpcTests.cs with COMMIT_LINKS_FIXTURE_OUT set
 // (two teams "web" and "cloud" on real repositories; a 7-digit prefix shared by two commits of one repository; the same
 // commit in a team's main repository and its writable extra). The fake API answers each asked ID with the core's own
 // result row for it (an ID the core was not asked is answered as no commit, as the core does for an unknown hex word).
@@ -115,7 +115,7 @@ describe('commit links from the real core\'s answers', () => {
   // An ID in two teams opens the chooser, not a link to the first team.
   const choiceRepos = () => [...document.querySelectorAll('[data-test=commit-choice-repo]')].map((e) => e.textContent);
   for (const all of [['web', 'cloud'], ['cloud', 'web']]) {
-    it(`3a / F1 fixed: the same short ID in two teams, no team on the place and none on screen (the Concierge), all ${all.join(',')}: the chooser, both teams in that order`, async () => {
+    it(`3a. the same short ID in two teams, no team on the place and none on screen (the Concierge), all ${all.join(',')}: the chooser, both teams in that order`, async () => {
       const id = S.shared.slice(0, 8);
       commitTeams.value = { current: null, all };
       const box = place(`Both teams have ${id}.`, null);
@@ -165,7 +165,7 @@ describe('commit links from the real core\'s answers', () => {
     expect(commitTarget.value!.teams[0]).toBe('cloud');
   });
 
-  it('3a. the chooser for an ID in two teams (as when F1 is fixed): team, repository and title; picking one opens it', async () => {
+  it('3a. the chooser for an ID in two teams: team, repository and title; picking one opens it', async () => {
     const id = S.shared.slice(0, 8);
     // A place whose own team has neither copy (team "ops"): pickMatches then keeps both teams' matches.
     commitTeams.value = { current: null, all: ['web', 'cloud'] };
