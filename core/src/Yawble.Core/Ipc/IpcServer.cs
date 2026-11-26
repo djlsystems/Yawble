@@ -8,6 +8,12 @@ namespace Yawble.Core.Ipc;
 /// <summary>
 /// Accepts shell connections and answers JSON requests. The first request on a connection must be
 /// {"method":"auth","params":{"token":"..."}} with the per-launch token; anything else closes it.
+///
+/// After that, each request runs on its own task and is answered when it is done, so a slow call does not hold the
+/// calls sent after it; a reply carries its request's id, and replies and pushed events are written one frame at a
+/// time. Two things stay in order: the calls on one terminal channel (<see cref="LaneOf"/>) run one after the other
+/// as they were sent, and pushed events keep their publish order. At most <see cref="MaxInFlight"/> requests of a
+/// connection run at once: the next one is not read until one of them is answered.
 /// </summary>
 public sealed class IpcServer : IAsyncDisposable
 {
@@ -26,6 +32,23 @@ public sealed class IpcServer : IAsyncDisposable
     /// `dotnet --list-sdks`): each is answered when it finishes, off the connection's read loop.
     /// </summary>
     internal static readonly HashSet<string> LongRunning = ["tools.install", "tools.checkAgain", "git.install"];
+
+    /// <summary>
+    /// How many requests of one connection run at once (the <see cref="LongRunning"/> ones, which wait for the person,
+    /// are not counted): a window that sends faster than the core answers waits at this number, it does not fill the
+    /// thread pool.
+    /// </summary>
+    internal const int MaxInFlight = 32;
+
+    /// <summary>
+    /// The terminal channel a call belongs to, or null. Calls of one channel (keys typed, resizes, the attach) take
+    /// effect in the order they were sent, so each waits for the one before it; calls of different channels, and all
+    /// other calls, do not wait for each other.
+    /// </summary>
+    internal static string? LaneOf(string method, JsonObject? parameters) =>
+        method.StartsWith("terminal.", StringComparison.Ordinal) && parameters?["channel"] is JsonValue v && v.TryGetValue<string>(out var channel)
+            ? channel
+            : null;
 
     private IpcServer(IpcEndpoint endpoint, string token, RpcDispatcher dispatcher, Ui.AppEvents? events = null,
         Integrations.HostEvents? host = null, Integrations.ShellWebsiteHost? websites = null, Action<long>? signedIn = null)
@@ -84,6 +107,8 @@ public sealed class IpcServer : IAsyncDisposable
     {
         await using var _ = stream;
         var writeLock = new SemaphoreSlim(1, 1);
+        var inFlight = new SemaphoreSlim(MaxInFlight, MaxInFlight);
+        var lanes = new Dictionary<string, Task>(StringComparer.Ordinal); // each terminal channel's newest call
         var authenticated = false;
         IDisposable? subscription = null;
         IDisposable? hostSubscription = null;
@@ -161,36 +186,36 @@ public sealed class IpcServer : IAsyncDisposable
                     continue;
                 }
 
+                var (m, p, i) = (method, parameters, id);
                 if (LongRunning.Contains(method))
                 {
-                    // Minutes-long (an installer): answered on its own when it finishes, so the window's other calls on
-                    // this connection are not held behind it. Replies carry their id; the write lock keeps frames whole.
-                    var (m, p, i) = (method, parameters, id);
-                    var answering = Task.Run(async () =>
-                    {
-                        JsonObject reply;
-                        try { reply = Ok(i, await _dispatcher.DispatchAsAsync(Provenance.Actor.Window, m, p, _stop.Token).ConfigureAwait(false)); }
-                        catch (RpcException e) { reply = Error(i, e.Code, e.Message); }
-                        catch (Exception e) { reply = Error(i, "internal", $"{e.GetType().Name}: {e.Message}"); }
-                        try { await SendAsync(stream, writeLock, reply).ConfigureAwait(false); }
-                        catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException) { /* the window went away */ }
-                    });
+                    // Minutes-long (an installer waiting for the person): not counted among the requests in flight.
+                    var answered = Task.Run(() => AnswerAsync(stream, writeLock, i, m, p));
                     continue;
                 }
 
-                try
+                // The read waits here while MaxInFlight requests are running.
+                await inFlight.WaitAsync(_stop.Token).ConfigureAwait(false);
+                var lane = LaneOf(method, parameters);
+                var before = Task.CompletedTask;
+                if (lane is not null)
                 {
-                    response = Ok(id, await _dispatcher.DispatchAsAsync(Provenance.Actor.Window, method, parameters, _stop.Token).ConfigureAwait(false));
+                    foreach (var done in lanes.Where(l => l.Value.IsCompleted).Select(l => l.Key).ToList()) lanes.Remove(done);
+                    before = lanes.GetValueOrDefault(lane, Task.CompletedTask);
                 }
-                catch (RpcException e)
+                var answering = Task.Run(async () =>
                 {
-                    response = Error(id, e.Code, e.Message);
-                }
-                catch (Exception e)
-                {
-                    response = Error(id, "internal", $"{e.GetType().Name}: {e.Message}");
-                }
-                await SendAsync(stream, writeLock, response).ConfigureAwait(false);
+                    try
+                    {
+                        await before.ConfigureAwait(false); // never fails: AnswerAsync does not throw
+                        await AnswerAsync(stream, writeLock, i, m, p).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        inFlight.Release();
+                    }
+                });
+                if (lane is not null) lanes[lane] = answering;
             }
         }
         catch (Exception e) when (e is IOException or OperationCanceledException or InvalidDataException or ObjectDisposedException)
@@ -201,6 +226,41 @@ public sealed class IpcServer : IAsyncDisposable
             subscription?.Dispose();
             hostSubscription?.Dispose();
             bridge?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Runs one request and writes its reply. Never throws: a refusal and a failure are the reply, a failure is also
+    /// written to the Diagnostics log with its stack, and a window that went away is nobody to answer.
+    /// </summary>
+    private async Task AnswerAsync(Stream stream, SemaphoreSlim writeLock, JsonNode? id, string method, JsonObject? parameters)
+    {
+        JsonObject reply;
+        try
+        {
+            reply = Ok(id, await _dispatcher.DispatchAsAsync(Provenance.Actor.Window, method, parameters, _stop.Token).ConfigureAwait(false));
+        }
+        catch (RpcException e)
+        {
+            reply = Error(id, e.Code, e.Message);
+        }
+        catch (Exception e)
+        {
+            if (e is not OperationCanceledException)
+                Logs.Diag.Error("ipc", $"{method} failed: {e.GetType().Name}: {e.Message}", ("method", method), ("exception", e.GetType().Name), ("stack", e.StackTrace));
+            reply = Error(id, "internal", $"{e.GetType().Name}: {e.Message}");
+        }
+        try
+        {
+            await SendAsync(stream, writeLock, reply).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException)
+        {
+            // the window went away
+        }
+        catch (Exception e)
+        {
+            Logs.Diag.Error("ipc", $"the reply to {method} could not be written: {e.GetType().Name}: {e.Message}", ("method", method), ("exception", e.GetType().Name));
         }
     }
 
