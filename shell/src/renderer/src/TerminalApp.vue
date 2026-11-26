@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, inject, ref, watch } from 'vue';
+import { usePoll } from './usePoll';
 import { PaneHeaderKey } from './terminalPane';
 import LoadingNote from './components/LoadingNote.vue';
 import BusyLabel from './components/BusyLabel.vue';
@@ -32,7 +33,6 @@ const banner = ref<TerminalBanner | null>(null);
 const session = ref<TerminalSessionInfo | null>(null);
 const error = ref<string | null>(null);
 const view = ref<InstanceType<typeof TerminalScreen> | null>(null);
-let timer: ReturnType<typeof setInterval> | null = null;
 
 const DetailsKey = 'yawble.terminal.details';
 /** The policy banner is shown: off unless the person opened it (remembered in this app's storage, a convenience only). */
@@ -68,6 +68,7 @@ async function refresh() {
     error.value = null;
   } catch (e) {
     error.value = errorText(e);
+    return false;
   }
 }
 
@@ -101,11 +102,7 @@ async function stop() {
   }
 }
 
-onMounted(() => {
-  void refresh();
-  timer = setInterval(refresh, props.pollMs ?? 1000);
-});
-onBeforeUnmount(() => { if (timer) clearInterval(timer); });
+usePoll(refresh, props.pollMs ?? 1000);
 /** The terminal's fitted size (cols, rows), for a PTY started from outside (the member pane's Open interactive CLI). */
 defineExpose({ size: () => view.value?.size() ?? null });
 </script>

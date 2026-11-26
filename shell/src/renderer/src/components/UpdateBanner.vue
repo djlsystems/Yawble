@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { usePoll } from '../usePoll';
 import type { Overview, UpdateInfo, UpdateStatus, YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
 import BusyLabel from './BusyLabel.vue';
@@ -46,7 +47,7 @@ const percent = computed(() => (status.value && status.value.size > 0 ? Math.min
 
 async function refresh() {
   try { status.value = await props.api.call<UpdateStatus>('updates.status'); }
-  catch { /* an older core: no updates */ }
+  catch { return false; /* an older core: no updates */ }
 }
 
 async function download() {
@@ -84,14 +85,15 @@ async function checkNow() {
   else if (s.state === 'error') told.value = s.error;
 }
 
-let timer: ReturnType<typeof setInterval> | undefined;
+let gone = false;
+const poll = usePoll(refresh, props.pollMs ?? 30_000, { autoStart: false, immediate: false });
 onMounted(async () => {
   try { packaged.value = (await props.api.shellSettings?.())?.packaged ?? (props.api.remote ? null : false); } catch { packaged.value = false; }
   try { info.value = (await props.api.updateInfo?.()) ?? null; } catch { info.value = null; }
   await refresh();
-  timer = setInterval(() => void refresh(), props.pollMs ?? 30_000);
+  if (!gone) poll.start();
 });
-onBeforeUnmount(() => clearInterval(timer));
+onBeforeUnmount(() => { gone = true; });
 defineExpose({ checkNow, refresh });
 </script>
 

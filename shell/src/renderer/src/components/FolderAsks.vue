@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { usePoll } from '../usePoll';
 import type { YawbleApi } from '../../../shared/api';
 import FolderAskCard from './FolderAskCard.vue';
 import { usePhone } from '../phone';
@@ -28,15 +29,18 @@ let again = false;
 async function load() {
   if (loading) { again = true; return; }
   loading = true;
+  let ok = true;
   try {
     do {
       again = false;
       try {
         const r = await props.api?.call<FolderAsk[]>('folder.asks', {});
         asks.value = Array.isArray(r) ? r : [];
-      } catch { asks.value = []; } // an older core, or a remote view that may not read them: nothing to show
+        ok = true;
+      } catch { asks.value = []; ok = false; } // an older core, or a remote view that may not read them: nothing to show
     } while (again);
   } finally { loading = false; }
+  return ok; // false slows the poll down
 }
 
 function answered(a: FolderAsk, choice: FolderAskChoice) {
@@ -44,14 +48,14 @@ function answered(a: FolderAsk, choice: FolderAskChoice) {
   void load();
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
+const poll = usePoll(load, Math.max(props.pollMs ?? 5000, 5000), { autoStart: false, immediate: false });
 let off: (() => void) | null = null;
 onMounted(() => {
   void load();
   off = props.api?.onEvent?.((e) => { if (e.event === FOLDER_ASKS_CHANGED) void load(); }) ?? null;
-  timer = setInterval(load, Math.max(props.pollMs ?? 5000, 5000));
+  poll.start();
 });
-onBeforeUnmount(() => { off?.(); if (timer) clearInterval(timer); });
+onBeforeUnmount(() => { off?.(); });
 
 defineExpose({ load });
 </script>

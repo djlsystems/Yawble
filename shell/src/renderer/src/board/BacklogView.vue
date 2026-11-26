@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { vChange } from '../remoteAccess';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { usePoll } from '../usePoll';
 import type { BacklogItem, BacklogItemDetail, YawbleApi, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import { renderMarkdown } from '../markdown';
@@ -58,7 +59,7 @@ async function load() {
     error.value = null;
     if (openId.value !== null && !open.value) openId.value = null;
     focusItem();
-  } catch (e) { if (t === tab.value) error.value = errorText(e); }
+  } catch (e) { if (t === tab.value) error.value = errorText(e); return false; }
 }
 async function loadDetail() {
   if (openId.value === null) { detail.value = null; return; }
@@ -97,9 +98,9 @@ watch(() => props.focus?.seq, () => {
   else focusItem();
 }, { immediate: true });
 
-let timer: ReturnType<typeof setInterval> | null = null;
-onMounted(() => { void load(); timer = setInterval(() => { void load(); void loadDetail(); }, props.pollMs ?? 5000); });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); });
+onMounted(() => { void load(); });
+// Each poll reads the list and the open item; a list that cannot be read slows the poll down.
+usePoll(async () => (await Promise.all([load(), loadDetail()]))[0], props.pollMs ?? 5000, { immediate: false });
 
 // ---- filter and sort (Yawble: the # column is priority; drag only when sorted by # with no filter)
 type SortKey = 'pos' | 'label' | 'title' | 'state' | 'team' | 'created' | 'updated' | 'archived';

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { usePoll } from '../usePoll';
 import type { CompanionAction, CompanionActionStatus, CompanionLevel, CompanionList, CompanionPairing, YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
 import { COMPANION_LEVEL_TEXT, levelsUpTo } from '../companionLevels';
@@ -27,7 +28,6 @@ const answering = ref<Record<string, 'approve' | 'deny'>>({});
 /** Requests this window approved whose run was still under way: their outcome is fetched once the list no longer shows them running. */
 const awaiting = ref<Set<string>>(new Set());
 const error = ref<string | null>(null);
-let timer: ReturnType<typeof setInterval> | null = null;
 let off: (() => void) | null = null;
 
 async function load() {
@@ -40,8 +40,10 @@ async function load() {
     // An older core has no companion, or the core is down (the header says so): nothing to ask.
     pairings.value = [];
     actions.value = [];
+    return false;
   }
 }
+const poll = usePoll(load, props.pollMs ?? 3000, { autoStart: false, immediate: false });
 
 function levelFor(p: CompanionPairing): CompanionLevel { return chosen.value[p.id] ?? p.level; }
 
@@ -110,9 +112,9 @@ onMounted(() => {
   if (props.api.remote) return;
   void load();
   off = props.api.onEvent((e) => { if (e.event === 'companion.changed') void load(); });
-  timer = setInterval(load, props.pollMs ?? 3000);
+  poll.start();
 });
-onBeforeUnmount(() => { off?.(); if (timer) clearInterval(timer); });
+onBeforeUnmount(() => { off?.(); });
 </script>
 
 <template>

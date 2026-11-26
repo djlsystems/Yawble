@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
+import { usePoll } from '../usePoll';
 import { DELIVERABLES_LIST, type DeliverableRow, type DeliverablesListAnswer, type Goal, type GoalsListAnswer, type GoalTotals, type YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import LoadingNote from '../components/LoadingNote.vue';
@@ -30,11 +31,10 @@ const answer = ref<GoalsListAnswer | null>(null);
 const error = ref<string | null>(null);
 async function load() {
   try { answer.value = await calls.list(); error.value = null; }
-  catch (e) { error.value = errorText(e); }
+  catch (e) { error.value = errorText(e); return false; }
 }
-let timer: ReturnType<typeof setInterval> | null = null;
-onMounted(() => { void load(); timer = setInterval(() => { void load(); void reloadOpen(); }, Math.max(3000, props.pollMs ?? 5000)); });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); });
+onMounted(() => { void load(); });
+usePoll(async () => (await Promise.all([load(), reloadOpen()]))[0], Math.max(3000, props.pollMs ?? 5000), { immediate: false });
 
 const goals = computed(() => answer.value?.goals ?? []);
 const unassigned = computed<GoalTotals | null>(() => answer.value?.unassigned ?? null);

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { vChange } from '../remoteAccess';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { usePoll } from '../usePoll';
 import type { NetworkAsk, NetworkAskChoice, YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
 import NetworkAskCard from './NetworkAskCard.vue';
@@ -30,23 +31,25 @@ let again = false;
 async function load() {
   if (loading) { again = true; return; }
   loading = true;
+  let ok = true;
   try {
     do {
       again = false;
-      try { asks.value = await props.api.call<NetworkAsk[]>('network.asks', {}); }
-      catch { asks.value = []; } // an older core, or a remote view that may not read them: nothing to show
+      try { asks.value = await props.api.call<NetworkAsk[]>('network.asks', {}); ok = true; }
+      catch { asks.value = []; ok = false; } // an older core, or a remote view that may not read them: nothing to show
     } while (again);
   } finally { loading = false; }
+  return ok; // false slows the poll down
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
+const poll = usePoll(load, Math.max(props.pollMs ?? 5000, 5000), { autoStart: false, immediate: false });
 let off: (() => void) | null = null;
 onMounted(() => {
   void load();
   off = props.api.onEvent?.((e) => { if (e.event === 'network.asksChanged') void load(); }) ?? null;
-  timer = setInterval(load, Math.max(props.pollMs ?? 5000, 5000));
+  poll.start();
 });
-onBeforeUnmount(() => { off?.(); if (timer) clearInterval(timer); });
+onBeforeUnmount(() => { off?.(); });
 
 /**
  * Answer all (two or more items): one choice for every waiting item, each answered as its own card would answer it with

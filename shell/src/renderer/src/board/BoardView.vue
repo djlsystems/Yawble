@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { usePoll } from '../usePoll';
 import type { BoardCard, BoardList, ConnectionAttention, YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import { displayName } from '../faces/faces';
@@ -35,7 +36,7 @@ const member = ref<string>('');
 const search = ref('');
 const openCard = ref<number | null>(null);
 const panel = ref<InstanceType<typeof CardPanel> | null>(null);
-let timer: ReturnType<typeof setInterval> | null = null;
+const poll = usePoll(() => Promise.all([load(), loadReconnect(), loadLimit()]), props.pollMs ?? 2000, { autoStart: false, immediate: false });
 
 const members = computed(() => {
   const set = new Set<string>();
@@ -160,9 +161,9 @@ onMounted(() => {
     if (e.event === 'connections.changed') void loadReconnect();
     else if (e.event === 'board.changed') void load(); // cleared or restored (here or in another view)
   }) ?? null;
-  timer = setInterval(() => { void load(); void loadReconnect(); void loadLimit(); }, props.pollMs ?? 2000);
+  poll.start();
 });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
+onBeforeUnmount(() => { off?.(); });
 </script>
 
 <template>

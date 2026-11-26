@@ -1,4 +1,5 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { usePoll } from '../usePoll';
 import type { YawbleApi } from '../../../shared/api';
 import { MonitorModel, type ActivityRow, type FeedRow } from './model';
 import { readStep, type StepRow } from './steps';
@@ -26,7 +27,6 @@ export function useTeamActivity(api: YawbleApi, team: () => string, pollMs: () =
   let stepsOff = false;
   let busy = false;
   let generation = 0;
-  let timer: ReturnType<typeof setInterval> | null = null;
 
   const mine = (name: string | null | undefined) => !!name && name.toLowerCase() === team().toLowerCase();
 
@@ -54,9 +54,10 @@ export function useTeamActivity(api: YawbleApi, team: () => string, pollMs: () =
     return got;
   }
 
-  async function tick(first = false): Promise<void> {
+  async function tick(first = false): Promise<boolean | void> {
     if (busy) return;
     busy = true;
+    let ok = true;
     const gen = generation;
     try {
       const rs = await messages(first);
@@ -72,11 +73,12 @@ export function useTeamActivity(api: YawbleApi, team: () => string, pollMs: () =
       }
       if (rs.length || ss.length || first) rows.value = [...model.activity];
     } catch {
-      // keeps what it shows; the next poll tries again
+      ok = false; // keeps what it shows; the next poll tries again, later while it keeps failing
     } finally {
       if (gen === generation) { loaded.value = true; now.value = Date.now(); }
       busy = false;
     }
+    return ok;
   }
 
   function reset(): void {
@@ -104,12 +106,10 @@ export function useTeamActivity(api: YawbleApi, team: () => string, pollMs: () =
   });
   const of = (member: string): ActivityRow[] => byMember.value.get(member.toLowerCase()) ?? [];
 
-  onMounted(() => {
-    void tick(true);
-    timer = setInterval(() => void tick(), pollMs() ?? 1500);
-  });
+  onMounted(() => { void tick(true); });
+  usePoll(() => tick(), () => pollMs() ?? 1500, { immediate: false });
   watch(team, reset);
-  onBeforeUnmount(() => { if (timer) clearInterval(timer); generation++; });
+  onBeforeUnmount(() => { generation++; });
 
   return { of, loaded, now };
 }

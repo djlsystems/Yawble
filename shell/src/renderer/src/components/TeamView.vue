@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { vChange } from '../remoteAccess';
 import TeamStateChip from './TeamStateChip.vue';
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { usePoll } from '../usePoll';
 import { confirmDialog } from '../confirm';
 import TaskAskCard from './TaskAskCard.vue';
 import type { AgentCard as Card, Decision, IntegrationAsk, YawbleApi, TeamSummary } from '../../../shared/api';
@@ -78,7 +79,6 @@ const showDocs = ref(false);
 /** The Add form's CLI choice also offers a workflow member (its own form: workflow, version, settings, bindings). */
 const WorkflowMemberChoice = 'workflow' as const;
 const newAgent = ref({ name: '', cli: 'claude' as AgentCliId | typeof WorkflowMemberChoice });
-let timer: ReturnType<typeof setInterval> | null = null;
 
 // The first answer for this team has arrived (later polls keep what is shown: no loading flash).
 const loaded = ref(false);
@@ -97,6 +97,7 @@ async function refresh() {
   } catch (e) {
     if (id !== props.team.id) return;
     refreshError.value = errorText(e);
+    return false; // the poll slows down while the core does not answer
   }
 }
 
@@ -241,10 +242,7 @@ watch([() => memberFocus(), () => props.team.name, () => cards.value.map((c) => 
   panes.get(f.member)?.el()?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
 }, { immediate: true });
 
-onMounted(() => {
-  void refresh();
-  timer = setInterval(refresh, props.pollMs ?? 1000);
-});
+usePoll(refresh, props.pollMs ?? 1000);
 watch(() => props.team.id, () => {
   cancelAdd();
   told.value = null; loaded.value = false; error.value = null; refreshError.value = null; cards.value = []; decisions.value = []; asks.value = [];
@@ -253,7 +251,6 @@ watch(() => props.team.id, () => {
 // A phone: the page opens with every member on Activity, so leaving it (or its team) closes that team's terminal.
 watch(() => props.team.name, (_now, before) => closePhoneTerminals(before));
 onBeforeUnmount(() => {
-  if (timer) clearInterval(timer);
   closeCode();
   closePhoneTerminals(props.team.name);
   gridObserver?.disconnect();
