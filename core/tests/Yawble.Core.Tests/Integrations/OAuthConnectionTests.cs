@@ -648,8 +648,6 @@ public class OAuthConnectionTests
         Assert.Contains("'notesmcp sign-in' is the sign-in of an MCP server; sign in again in Settings → Integrations → MCP servers (Sign in), or sign in as a new connection instead", e.Message);
     }
 
-    // ------------------------------------------------------------------ fix round
-
     [Fact]
     public async Task WithNoRulesSavedTheScopesFollowTheSuggestion()
     {

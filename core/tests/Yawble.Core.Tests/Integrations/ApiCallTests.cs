@@ -504,7 +504,7 @@ public class ApiCallTests
         Assert.DoesNotContain(r.Http.Requests, q => q.Method == HttpMethod.Post);
     }
 
-    /// <summary>M5: "Add API" (create: true) with a blank name whose host is already an API is refused like a typed duplicate.</summary>
+    /// <summary>"Add API" (create: true) with a blank name whose host is already an API is refused like a typed duplicate.</summary>
     [Fact]
     public async Task AddApi_BlankNameFromAnExistingHost_IsRefused()
     {
@@ -677,8 +677,6 @@ public class ApiCallTests
         await Assert.ThrowsAsync<RpcException>(() => r.Rpc("integrations.apiSave", new JsonObject { ["name"] = "my--thing", ["baseUrl"] = "https://thing.example" }));
         await r.Rpc("integrations.apiSave", new JsonObject { ["name"] = "my-thing", ["baseUrl"] = "https://thing.example" }); // one underscore is fine
     }
-
-    // ------------------------------------------------------------------ fix round 1
 
     [Fact]
     public async Task RedirectOnTheSameHost_ToASignInRouteOrOutsideTheBasePath_NotFollowed()

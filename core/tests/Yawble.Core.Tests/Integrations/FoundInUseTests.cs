@@ -367,8 +367,6 @@ public class FoundInUseTests
         Assert.StartsWith("asked:", await rig.CallAs("Beta", "Bo", "fake__frobnicate", new { _reason = "try it" }));
     }
 
-    // ------------------------------------------------------------------ fix round 1
-
     [Fact]
     public async Task ABuiltInsRowNeverLoosensTheFloorOnTheRealArguments()
     {
@@ -489,7 +487,7 @@ public class FoundInUseTests
     private static Task<string> Call(Rig rig, string cli, params string[] args) => rig.CallAs("Alpha", "Ada", cli, new { args, reason = "needed" });
 
     [Fact]
-    public async Task C1_AGuessTakesAllItsPlainWords_SoAlwaysOnAnUpdateNeverAllowsADelete()
+    public async Task AGuessTakesAllItsPlainWords_SoAlwaysOnAnUpdateNeverAllowsADelete()
     {
         await using var rig = await Rig.Make();
         await rig.AddFakeCli("az"); // az-shaped and never discovered: its preset turns "* delete*" off
@@ -509,7 +507,7 @@ public class FoundInUseTests
     }
 
     [Fact]
-    public async Task I4_APassthroughCommandIsOnlyEverRememberedAsTheExactLine()
+    public async Task APassthroughCommandIsOnlyEverRememberedAsTheExactLine()
     {
         await using var rig = await Rig.Make();
         await rig.AddFakeCli("gh");
@@ -539,7 +537,7 @@ public class FoundInUseTests
     }
 
     [Fact]
-    public async Task I5_DiscoverRefreshesTheSignInStatus()
+    public async Task DiscoverRefreshesTheSignInStatus()
     {
         await using var rig = await Rig.Make();
         await rig.AddFakeCli(); // its status command (--version for an unknown CLI) succeeds
@@ -553,7 +551,7 @@ public class FoundInUseTests
     }
 
     [Fact]
-    public void Ruling11_TheDenylistIsCaseInsensitive_WithOrWithoutAnExtension()
+    public void TheDenylistIsCaseInsensitive_WithOrWithoutAnExtension()
     {
         foreach (var name in new[] { "shutdown", "Shutdown.exe", "cmd.BAT", "rmdir.cmd", "PowerShell", "pwsh", "reg", "net.exe", "ICACLS" })
             Assert.Contains("cannot be added as an integration", CliCatalog.Refused(name));
@@ -570,7 +568,7 @@ public class FoundInUseTests
     [InlineData("ERASE.exe")]
     [InlineData("rd.cmd")]
     [InlineData("Rmdir.BAT")]
-    public async Task Ruling11_ASystemCommandCannotBeAdded(string name)
+    public async Task ASystemCommandCannotBeAdded(string name)
     {
         Assert.Null(CliRunner.Find(name)); // nothing that could run
         await using var rig = await Rig.Make();
@@ -592,7 +590,7 @@ public class FoundInUseTests
     }
 
     [Fact]
-    public async Task Ruling11_DetectingAnUnknownCliAsksForItsHelpWithDashDashHelpOnly()
+    public async Task DetectingAnUnknownCliAsksForItsHelpWithDashDashHelpOnly()
     {
         // Safety: only a fake .cmd in this test's temp folder ever runs. Its name is no system program and nothing on PATH,
         // so nothing else could be found on PATH.
@@ -624,7 +622,7 @@ public class FoundInUseTests
     }
 
     [Fact]
-    public async Task AnAskStoredBeforeTheGuessRules_IsRecheckedWhenRemembered()
+    public async Task AStoredActionShorterThanTheCallsPlainWords_IsNotRememberedAsARow()
     {
         await using var rig = await Rig.Make();
         await rig.AddFakeCli();
@@ -647,7 +645,7 @@ public class FoundInUseTests
     }
 
     [Fact]
-    public async Task Ruling11c_ARuleSavedForAnUnknownCli_DoesNotMakeItAnIntegrationTheCloudLinkMayRun()
+    public async Task ARuleSavedForAnUnknownCli_DoesNotMakeItAnIntegrationTheCloudLinkMayRun()
     {
         // Saving a rule adds a row with no path; only a CLI detected here (a stored path to a program) counts for the Cloud Link.
         await using var rig = await Rig.Make();

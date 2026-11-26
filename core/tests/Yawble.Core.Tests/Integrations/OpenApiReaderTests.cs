@@ -380,7 +380,7 @@ public class OpenApiReaderTests
         Assert.Equal(["limit"], a.Params["required"]!.AsArray().Select(n => (string)n!));
     }
 
-    // ---- fix round 2: bypasses of the first guard (each overflowed the stack inside YamlDotNet) -------------------------------
+    // ---- nesting a plain bracket count misses (each overflows the stack inside YamlDotNet when it is let through) -------------------------------
 
     [Fact]
     public void ApostropheInFlowContext_DoesNotHideNesting()

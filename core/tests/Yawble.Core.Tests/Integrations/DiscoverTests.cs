@@ -252,7 +252,7 @@ public class DiscoverTests
     [Fact]
     public async Task TheHelpFlagIsFoundOnce_GitOnlyEverGetsDashH()
     {
-        // Ruling 11: an unknown command is never probed with -h (shutdown -h halts the computer): --help only
+        // An unknown command is never probed with -h (shutdown -h halts the computer): --help only
         var fx = new FixtureCli(null, FakeCliHelp());
         var walk = await CliWalker.WalkAsync("fakecli", null, HelpFlagOnlyDashH(fx), Fast, null, Ct);
         Assert.Equal("could not read its help", walk.Error);

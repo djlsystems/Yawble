@@ -133,7 +133,7 @@ public class IntegrationTests
         var told = store.Deliverable(root.Seq).Last(m => m.Type == MessageTypes.InstructionPrefix + "Alpha/Ada");
         Assert.Contains("The person approved your call `git count-objects -v`", Payload.Field(told, "text"));
         Assert.Contains("exit ", Payload.Field(told, "text"));
-        // "Always" on a one-word guess of a CLI never discovered ("count-objects") remembers the exact line for the team, as before.
+        // "Always" on a one-word guess of a CLI never discovered ("count-objects") remembers the exact line for the team.
         var list = (await integrations.DispatchAsync("integrations.list", null, Ct))!["integrations"]!.AsArray();
         var git = list.Single(i => i!["name"]!.GetValue<string>() == "git")!;
         Assert.Contains(git["rules"]!.AsArray(), r => r!["pattern"]!.GetValue<string>() == "count-objects -v" && r["teamId"]!.GetValue<long>() == alpha);

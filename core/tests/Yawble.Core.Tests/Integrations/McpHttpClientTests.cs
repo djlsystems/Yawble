@@ -427,6 +427,8 @@ public class McpHttpClientTests
         await firstIn.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
         var two = c.ListToolsAsync(TestContext.Current.CancellationToken);
         await Task.WhenAll(one, two).WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        Assert.True(secondIn.Task.IsCompletedSuccessfully); // the second call reached the server while the first was held
+        Assert.Equal(2, arrivals);
     }
 
     [Fact]

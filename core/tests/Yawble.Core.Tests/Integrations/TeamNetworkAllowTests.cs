@@ -23,7 +23,8 @@ namespace Yawble.Core.Tests.Integrations;
 /// the policy merger, a member's narrowing override notwithstanding; the list is per team; Remove takes a host away for
 /// the next run, however it is typed. A refused name is never looked up for the agent, and the person's Allow is refused
 /// for a name with only private addresses; a removed member's waiting ask closes; the 24-hour deny is the member's id,
-/// so a new member with an old name is asked again; a plain-http ask carries plainHttp. Fakes only: a temporary database, fake runners and credentials, a fake resolver; no network.
+/// so a new member with an old name is asked again; a plain-http ask carries plainHttp. Fakes only: a temporary
+/// database, fake runners and credentials, a fake resolver; no network.
 /// </summary>
 public sealed class TeamNetworkAllowTests : IAsyncLifetime
 {
