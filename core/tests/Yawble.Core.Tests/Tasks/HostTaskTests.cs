@@ -9,7 +9,11 @@ using Xunit;
 
 namespace Yawble.Core.Tests.Tasks;
 
-/// <summary>A temp git repository playing the person's checkout, a database with one team, and a service wired to them.</summary>
+/// <summary>
+/// A temp git repository playing the person's checkout, a database with one team, and a service wired to them. Its
+/// tasks run the test program's own stand-in (<see cref="StandInTask"/>) on a tracked file of steps, so a task is
+/// pinned to that file as a real one is to its script, and no system shell starts.
+/// </summary>
 internal sealed class TaskFixture : IDisposable
 {
     public TempDb Db { get; } = new();
@@ -23,7 +27,7 @@ internal sealed class TaskFixture : IDisposable
 
     public static bool IsWin => OperatingSystem.IsWindows();
     public bool Win => IsWin;
-    public string ScriptPath => Win ? "scripts/run.ps1" : "scripts/run.sh";
+    public string ScriptPath => "scripts/run.task";
 
     /// <summary>Set with <c>withConnections</c>: Connections over an in-memory credential store, given to the service.</summary>
     public Connections.MemoryCredentialStore? Creds { get; }
@@ -44,7 +48,7 @@ internal sealed class TaskFixture : IDisposable
         G("init");
         G("config", "core.autocrlf", "false");
         G("config", "core.longpaths", "true");
-        Write(ScriptPath, Win ? "Write-Output 'hello'" : "echo hello");
+        Write(ScriptPath, "print hello");
         Write("other.txt", "unpinned");
         Commit("first");
         Svc = new HostTaskService(Db.ConnectionString, Git, (_, name) => name == "main" ? new TaskRepoInfo(Repo, BaseBranch) : null, _ => Docs,
@@ -70,9 +74,9 @@ internal sealed class TaskFixture : IDisposable
     public HostTaskDef Def(string name = "build", Action<List<string>>? args = null, int timeout = 60, IEnumerable<string>? env = null, IEnumerable<string>? watch = null,
         string pinMode = PinModes.Files, string? script = null)
     {
-        var list = Win ? new List<string> { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script ?? ScriptPath } : [script ?? ScriptPath];
+        var list = new List<string> { StandInTask.ScriptArgument, script ?? ScriptPath };
         args?.Invoke(list);
-        return HostTaskDef.Make(name, Win ? "powershell" : "sh", list, timeoutSeconds: timeout, envNames: env, watch: watch, pinMode: pinMode);
+        return HostTaskDef.Make(name, StandInTask.ProgramName, list, timeoutSeconds: timeout, envNames: env, watch: watch, pinMode: pinMode);
     }
 
     public Task<HostTask> SaveAsync(HostTaskDef d) => Svc.SaveAsync(TeamId, d);
@@ -115,7 +119,7 @@ public class HostTaskTests
         Assert.NotEqual(h, H(baseDef with { EnvNames = ["FOO"] }));
         Assert.NotEqual(h, H(baseDef with { Watch = ["other.txt", "x"] }));
         Assert.NotEqual(h, H(baseDef with { PinMode = PinModes.Commit }));
-        Assert.NotEqual(h, H(baseDef, @"C:\elsewhere\powershell.exe"));
+        Assert.NotEqual(h, H(baseDef, @"C:\elsewhere\program.exe"));
         Assert.NotEqual(h, H(baseDef with { Repo = "other" }));
         Assert.Equal(H(baseDef with { EnvNames = ["B", "A"] }), H(baseDef with { EnvNames = ["A", "B"] })); // sorted
     }
@@ -176,7 +180,7 @@ public class HostTaskTests
         Assert.Equal(RequestKind.Started, second.Kind);
         await f.Finish(second);
 
-        f.Write(f.ScriptPath, f.Win ? "Write-Output 'evil'" : "echo evil");
+        f.Write(f.ScriptPath, "print evil");
         f.Commit("script changed on base");
         var third = await f.Request();
         Assert.Equal(RequestKind.Asked, third.Kind);
@@ -195,7 +199,7 @@ public class HostTaskTests
         using var f = new TaskFixture();
         await f.SaveAsync(f.Def());
         var ask = await f.Request();
-        f.Write(f.ScriptPath, f.Win ? "Write-Output 'new'" : "echo new");
+        f.Write(f.ScriptPath, "print new");
         f.Commit("merge landed while the dialog was open");
 
         var r = await f.Svc.ApproveAsync(ask.AskId!.Value, always: true, Ct);
@@ -223,7 +227,7 @@ public class HostTaskTests
         await f.Finish(await f.Svc.ApproveAsync(b.AskId!.Value, true, Ct)); // B approved, replaces A
         Assert.Equal(RequestKind.Started, (await RequestAndFinish(f, "build")).Kind);
 
-        f.Write(f.ScriptPath, f.Win ? "Write-Output 'hello'" : "echo hello"); // back to A
+        f.Write(f.ScriptPath, "print hello"); // back to A
         f.Commit("A again");
         Assert.Equal(RequestKind.Asked, (await f.Request()).Kind);
     }
@@ -285,9 +289,9 @@ public class HostTaskTests
         f.G("checkout", "--", "other.txt");
 
         // untracked file: exactly the deploy script that must not run
-        f.Write("scripts/deploy.ps1", "x");
-        Assert.Contains("deploy.ps1", (await Refused(4)).Text);
-        File.Delete(Path.Combine(f.Repo, "scripts", "deploy.ps1"));
+        f.Write("scripts/deploy.task", "x");
+        Assert.Contains("deploy.task", (await Refused(4)).Text);
+        File.Delete(Path.Combine(f.Repo, "scripts", "deploy.task"));
 
         // staged file
         f.Write("other.txt", "staged");
@@ -388,7 +392,7 @@ public class HostTaskTests
     {
         using var f = new TaskFixture();
         // a program on PATH with no script and no watch pins nothing
-        var bare = HostTaskDef.Make("bare", f.Win ? "powershell" : "sh", ["--version"]);
+        var bare = HostTaskDef.Make("bare", StandInTask.ProgramName, ["--version"]);
         await Assert.ThrowsAsync<ArgumentException>(() => f.SaveAsync(bare));
         await f.SaveAsync(bare with { CommandLineOnly = true });
         // a watch glob that matches nothing is a warning
@@ -398,18 +402,14 @@ public class HostTaskTests
 
     // ------------------------------------------------------------------ 9. runner
 
-    private static string Prog => TaskFixture.IsWin ? "powershell" : "sh";
-
-    private static (string Program, string[] Args) Script(string dir, string psBody, string shBody)
+    /// <summary>
+    /// A shell script, for the two tests of process groups: they need a shell's own "$$", "&amp;" and "trap", and
+    /// run on Linux and macOS only.
+    /// </summary>
+    private static (string Program, string[] Args) PosixScript(string dir, string body)
     {
-        if (TaskFixture.IsWin)
-        {
-            var path = Path.Combine(dir, Guid.NewGuid().ToString("N") + ".ps1");
-            File.WriteAllText(path, psBody);
-            return (CliRunner.Find("powershell")!, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path]);
-        }
         var sh = Path.Combine(dir, Guid.NewGuid().ToString("N") + ".sh");
-        File.WriteAllText(sh, shBody);
+        File.WriteAllText(sh, body);
         return (CliRunner.Find("sh")!, [sh]);
     }
 
@@ -456,7 +456,7 @@ public class HostTaskTests
         {
             var pidFile = Path.Combine(dir, "child.pid");
             // No setsid binary is involved: the group comes from posix_spawn. ps is on every Linux and macOS.
-            var s = Script(dir, "", $"echo \"pid=$$ pgid=$(ps -o pgid= -p $$ | tr -d ' ')\"\nsleep 30 &\necho $! > '{pidFile}'\nexit 3");
+            var s = PosixScript(dir, $"echo \"pid=$$ pgid=$(ps -o pgid= -p $$ | tr -d ' ')\"\nsleep 30 &\necho $! > '{pidFile}'\nexit 3");
             var r = await TaskProcess.RunAsync(Options(dir, s, TimeSpan.FromSeconds(60)), Ct);
             Assert.Equal(3, r.ExitCode);
             Assert.Null(r.KilledBy);
@@ -482,7 +482,7 @@ public class HostTaskTests
         try
         {
             var pidFile = Path.Combine(dir, "child.pid");
-            var s = Script(dir, "", $"trap 'exit 0' TERM\nsleep 30 &\necho $! > '{pidFile}'\necho started\nwait");
+            var s = PosixScript(dir, $"trap 'exit 0' TERM\nsleep 30 &\necho $! > '{pidFile}'\necho started\nwait");
             using var cancel = CancellationTokenSource.CreateLinkedTokenSource(Ct);
             var o = Options(dir, s, TimeSpan.FromSeconds(60));
             var run = TaskProcess.RunAsync(o, cancel.Token);
@@ -515,7 +515,7 @@ public class HostTaskTests
         var dir = Directory.CreateTempSubdirectory("yawble-task-").FullName;
         try
         {
-            var s = Script(dir, "1..3000 | ForEach-Object { \"line $_\" }", "i=1; while [ $i -le 3000 ]; do echo line $i; i=$((i+1)); done");
+            var s = StandInTask.Script(dir, "lines 3000");
             var o = Options(dir, s, TimeSpan.FromSeconds(60), cap: 2000);
             var r = await TaskProcess.RunAsync(o, Ct);
             Assert.Equal(0, r.ExitCode);
@@ -543,9 +543,8 @@ public class HostTaskTests
         Environment.SetEnvironmentVariable("HOSTTASK_NAMED", "named-value-passes-1234567");
         try
         {
-            var s = Script(dir,
-                "Write-Output \"token=[$env:YAWBLE_RUN_TOKEN] unnamed=[$env:HOSTTASK_UNNAMED] named=[$env:HOSTTASK_NAMED] ci=[$env:CI] absent=[$env:HOSTTASK_ABSENT]\"",
-                "echo \"token=[$YAWBLE_RUN_TOKEN] unnamed=[$HOSTTASK_UNNAMED] named=[$HOSTTASK_NAMED] ci=[$CI] absent=[$HOSTTASK_ABSENT]\"");
+            var s = StandInTask.Script(dir,
+                "print token=[${YAWBLE_RUN_TOKEN}] unnamed=[${HOSTTASK_UNNAMED}] named=[${HOSTTASK_NAMED}] ci=[${CI}] absent=[${HOSTTASK_ABSENT}]");
             var (env, missing, secrets) = TaskProcess.BuildEnvironment(["HOSTTASK_NAMED", "HOSTTASK_ABSENT"], Environment.GetEnvironmentVariable);
             Assert.Equal(["HOSTTASK_ABSENT"], missing);
             var o = Options(dir, s, TimeSpan.FromSeconds(60), env, secrets);
@@ -573,9 +572,7 @@ public class HostTaskTests
     {
         using var f = new TaskFixture();
         var flag = Path.Combine(f.Db.Dir, "stop.flag");
-        f.Write(f.ScriptPath, f.Win
-            ? $"while (-not (Test-Path '{flag}')) {{ Start-Sleep -Milliseconds 100 }}"
-            : $"while [ ! -e '{flag}' ]; do sleep 0.1; done");
+        f.Write(f.ScriptPath, $"wait-for {flag} 60");
         f.Commit("long script");
         await f.SaveAsync(f.Def("long"));
         await f.SaveAsync(f.Def("second"));
@@ -617,7 +614,7 @@ public class HostTaskTests
     public async Task ARunRecordsTheCommitAndNotesWhenTheCheckoutIsLeftDirty()
     {
         using var f = new TaskFixture();
-        f.Write(f.ScriptPath, f.Win ? "Set-Content -Path 'stray.txt' -Value 'x'; Write-Output done" : "echo x > stray.txt; echo done");
+        f.Write(f.ScriptPath, "write stray.txt x\nprint done");
         var head = f.Commit("dirtying script");
         await f.SaveAsync(f.Def());
         var started = await f.Svc.RunNowAsync(f.TeamId, "build", Ct);

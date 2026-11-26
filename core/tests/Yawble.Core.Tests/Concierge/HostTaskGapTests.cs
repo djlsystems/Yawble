@@ -88,12 +88,12 @@ public sealed class HostTaskGapTests : IAsyncLifetime
     private IReadOnlyList<ConciergeMessageRow> Updates(string conversation = Conversation) =>
         _store.Messages(conversation).Where(m => m.Role == "update").ToList();
 
-    private string Script(string name, string ps, string sh)
+    /// <summary>Commits a file of stand-in steps (<see cref="StandInTask"/>) and gives its path in the checkout.</summary>
+    private string Script(string name, params string[] steps)
     {
-        _f.Write($"scripts/{name}.ps1", ps);
-        _f.Write($"scripts/{name}.sh", sh);
+        _f.Write($"scripts/{name}.task", string.Join('\n', steps));
         _f.Commit(name);
-        return TaskFixture.IsWin ? $"scripts/{name}.ps1" : $"scripts/{name}.sh";
+        return $"scripts/{name}.task";
     }
 
     // ------------------------------------------------------------------ point 1: host_task_list's approval and state lines
@@ -113,7 +113,7 @@ public sealed class HostTaskGapTests : IAsyncLifetime
         Assert.Contains("approval: always (standing approval); state: idle", text);
         Assert.Contains($"last run {run.Id}: exit 0", text);
 
-        _f.Write(_f.ScriptPath, TaskFixture.IsWin ? "Write-Output 'changed'" : "echo changed");
+        _f.Write(_f.ScriptPath, "print changed");
         _f.Commit("script changed");
         Assert.Contains("approval: asks (the standing approval no longer matches the code)", await Call(ConciergeHostTasks.ListTool, ListArgs()));
         Assert.StartsWith("asked:", await Call(ConciergeHostTasks.RunTool, RunArgs()));
@@ -139,9 +139,7 @@ public sealed class HostTaskGapTests : IAsyncLifetime
     public async Task Status_ByTeamAndTask_ShowsTheLiveTailWhileRunning_ThenTheExitCodeDurationCommitAndCheckAfter()
     {
         var flag = Path.Combine(_f.Db.Dir, "go.flag");
-        var script = Script("wait",
-            $"Write-Output 'step one'; while (-not (Test-Path '{flag}')) {{ Start-Sleep -Milliseconds 100 }}; Write-Output 'step two'; exit 2",
-            $"echo 'step one'; while [ ! -e '{flag}' ]; do sleep 0.1; done; echo 'step two'; exit 2");
+        var script = Script("wait", "print step one", $"wait-for {flag} 60", "print step two", "exit 2");
         await SaveDeploy(script);
         await Call(ConciergeHostTasks.RunTool, RunArgs());
         var started = await Approve();
@@ -199,9 +197,9 @@ public sealed class HostTaskGapTests : IAsyncLifetime
     [Fact]
     public async Task ATimedOutRun_IsAFailedUpdate()
     {
-        var script = Script("hang", "Write-Output 'started'; Start-Sleep -Seconds 120", "echo started; sleep 120");
+        var script = Script("hang", "print started", "wait 60");
         await SaveDeploy(script, timeout: 10);
-        _f.Svc.SecondLength = TimeSpan.FromMilliseconds(300); // the 10 s limit runs out after 3 real seconds (PowerShell is up and has said "started")
+        _f.Svc.SecondLength = TimeSpan.FromMilliseconds(300); // the 10 s limit runs out after 3 real seconds (the task is up and has said "started")
         await Call(ConciergeHostTasks.RunTool, RunArgs());
         var run = await _f.Finish(await Approve());
         Assert.True(run.TimedOut);
@@ -216,7 +214,7 @@ public sealed class HostTaskGapTests : IAsyncLifetime
     [Fact]
     public async Task ARunThePersonStopped_IsAFailedUpdate()
     {
-        var script = Script("long", "Write-Output 'started'; Start-Sleep -Seconds 120", "echo started; sleep 120");
+        var script = Script("long", "print started", "wait 60");
         await SaveDeploy(script);
         await Call(ConciergeHostTasks.RunTool, RunArgs());
         var started = await Approve();
@@ -242,8 +240,33 @@ public sealed class HostTaskGapTests : IAsyncLifetime
         Assert.Contains("nothing ran", update.Text);
     }
 
-    // ------------------------------------------------------------------ point 5: real prompts with stdin closed
+    // ------------------------------------------------------------------ prompts with the input closed
 
+    /// <summary>A task's input is closed, so a program that waits for a line or a key gets the end of input at once.</summary>
+    [Theory]
+    [InlineData("read-line")]
+    [InlineData("read-key")]
+    public async Task ATaskThatWaitsForInput_EndsAtOnce_NotAtTheTimeLimit(string step)
+    {
+        var script = Script(step, $"{step} 6", "print after the input");
+        await SaveDeploy(script, timeout: 120);
+        await Call(ConciergeHostTasks.RunTool, RunArgs());
+        var watch = Stopwatch.StartNew();
+        var run = await _f.Finish(await Approve());
+        watch.Stop();
+        Assert.False(run.TimedOut);
+        Assert.Equal(6, run.ExitCode);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(45), $"took {watch.Elapsed}");
+        Assert.DoesNotContain("after the input", LastWake().Tail);
+        Assert.True(_service.TryPostTaskUpdate(LastWake(), "Alpha"));
+        Assert.Equal("failed", Assert.Single(Updates()).Kind);
+    }
+
+    /// <summary>
+    /// Windows PowerShell's own prompts (Read-Host, PromptForChoice, ReadKey, pause) with the input closed. This is
+    /// the one test that starts PowerShell, since what it checks is PowerShell's behaviour; it runs only with
+    /// YAWBLE_REAL_POWERSHELL=1. The script only prompts and prints.
+    /// </summary>
     [Theory]
     [InlineData("read-host", "$a = Read-Host 'Are you sure? [y/N]'; if ($a -ne 'y') { Write-Output 'not confirmed'; exit 6 }; Write-Output 'confirmed'")]
     [InlineData("prompt-for-choice", "$c = $Host.UI.PromptForChoice('Deploy', 'Are you sure?', @('&Yes', '&No'), 1); Write-Output \"choice [$c]\"; exit 6")]
@@ -252,8 +275,11 @@ public sealed class HostTaskGapTests : IAsyncLifetime
     public async Task AWindowsPowerShellPrompt_EndsAtOnce_NotAtTheTimeLimit(string name, string ps)
     {
         Assert.SkipUnless(TaskFixture.IsWin, "Windows PowerShell prompts");
-        var script = Script(name, ps, "exit 6");
-        await SaveDeploy(script, timeout: 120);
+        Assert.SkipUnless(Environment.GetEnvironmentVariable("YAWBLE_REAL_POWERSHELL") == "1", "starts Windows PowerShell: set YAWBLE_REAL_POWERSHELL=1 to run it");
+        _f.Write($"scripts/{name}.ps1", ps);
+        _f.Commit(name);
+        await _f.SaveAsync(HostTaskDef.Make("deploy", "powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $"scripts/{name}.ps1"], timeoutSeconds: 120)
+            with { Description = "Deploys the cloud", CheckAfter = "https://cloud.example.test/health" });
         await Call(ConciergeHostTasks.RunTool, RunArgs());
         var watch = Stopwatch.StartNew();
         var run = await _f.Finish(await Approve());

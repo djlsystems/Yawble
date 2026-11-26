@@ -37,9 +37,7 @@ public class HostTaskEnvBindingTests
     /// <summary>The fixture's script, printing what the child got: the value's length (proof it is there) and the value itself (to be masked).</summary>
     private static void PrintTokenScript(TaskFixture f)
     {
-        f.Write(f.ScriptPath, f.Win
-            ? "Write-Output \"len=$($env:GH_TOKEN.Length)\"; Write-Output \"value=[$env:GH_TOKEN]\""
-            : "echo \"len=${#GH_TOKEN}\"; echo \"value=[$GH_TOKEN]\"");
+        f.Write(f.ScriptPath, "print len=${#GH_TOKEN}\nprint value=[${GH_TOKEN}]");
         f.Commit("print the token");
     }
 
@@ -303,7 +301,7 @@ public class HostTaskEnvBindingTests
         {
             var def = new JsonObject
             {
-                ["name"] = "release", ["program"] = f.Win ? "powershell" : "sh",
+                ["name"] = "release", ["program"] = f.Def().Program,
                 ["args"] = new JsonArray(f.Def().Args.Select(a => (JsonNode?)a).ToArray()), ["timeoutSeconds"] = timeout,
             };
             if (bindings is not null) def["envFromConnections"] = bindings;

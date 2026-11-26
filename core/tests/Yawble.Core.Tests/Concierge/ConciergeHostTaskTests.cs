@@ -156,10 +156,9 @@ public sealed class ConciergeHostTaskTests : IAsyncLifetime
     [Fact]
     public async Task Run_ANonZeroExit_IsAFailedUpdate_WithTheExitCodeAndTail()
     {
-        _f.Write("scripts/fail.ps1", "Write-Output 'deploy broke'; exit 4");
-        _f.Write("scripts/fail.sh", "echo 'deploy broke'; exit 4");
+        _f.Write("scripts/fail.task", "print deploy broke\nexit 4");
         _f.Commit("fail");
-        await SaveDeploy(TaskFixture.IsWin ? "scripts/fail.ps1" : "scripts/fail.sh");
+        await SaveDeploy("scripts/fail.task");
         await Call(Tools(), ConciergeHostTasks.RunTool, RunArgs());
         var run = await ApproveAndFinish();
         Assert.Equal(4, run.ExitCode);
@@ -201,7 +200,7 @@ public sealed class ConciergeHostTaskTests : IAsyncLifetime
         await _f.Svc.WaitForRunAsync(runId);
 
         // A pinned file changes: the approval no longer covers it, so it asks again.
-        _f.Write(_f.ScriptPath, TaskFixture.IsWin ? "Write-Output 'changed'" : "echo changed");
+        _f.Write(_f.ScriptPath, "print changed");
         _f.Commit("script changed");
         text = await Call(Tools(), ConciergeHostTasks.RunTool, RunArgs());
         Assert.StartsWith("asked:", text);
@@ -275,10 +274,9 @@ public sealed class ConciergeHostTaskTests : IAsyncLifetime
     [Fact]
     public async Task Status_ShowsTheLiveLogWhileTheRunIsUnderWay()
     {
-        _f.Write("scripts/slow.ps1", "Write-Output 'step one'; Start-Sleep -Seconds 20; Write-Output 'step two'");
-        _f.Write("scripts/slow.sh", "echo 'step one'; sleep 20; echo 'step two'");
+        _f.Write("scripts/slow.task", "print step one\nwait 20\nprint step two");
         _f.Commit("slow");
-        await SaveDeploy(TaskFixture.IsWin ? "scripts/slow.ps1" : "scripts/slow.sh");
+        await SaveDeploy("scripts/slow.task");
         await Call(Tools(), ConciergeHostTasks.RunTool, RunArgs());
         var ask = Assert.Single(_f.Svc.Store.PendingAsks(_f.TeamId));
         TaskRequestResult started;
@@ -306,10 +304,9 @@ public sealed class ConciergeHostTaskTests : IAsyncLifetime
     [Fact]
     public async Task AScriptThatPromptsGetsEndOfInput_AndEndsAtOnce()
     {
-        _f.Write("scripts/ask.ps1", "$answer = [Console]::In.ReadLine(); if ($null -eq $answer) { Write-Output 'no input'; exit 3 }; Write-Output \"got $answer\"");
-        _f.Write("scripts/ask.sh", "if read answer; then echo \"got $answer\"; else echo 'no input'; exit 3; fi");
+        _f.Write("scripts/ask.task", "read-line 3");
         _f.Commit("prompting script");
-        await SaveDeploy(TaskFixture.IsWin ? "scripts/ask.ps1" : "scripts/ask.sh");
+        await SaveDeploy("scripts/ask.task");
         await Call(Tools(), ConciergeHostTasks.RunTool, RunArgs());
         var watch = Stopwatch.StartNew();
         var run = await ApproveAndFinish();

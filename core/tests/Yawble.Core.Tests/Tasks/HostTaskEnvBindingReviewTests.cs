@@ -73,7 +73,7 @@ public class HostTaskEnvBindingReviewTests
             ["teamId"] = f.TeamId,
             ["def"] = new JsonObject
             {
-                ["name"] = "probe", ["program"] = f.Win ? "powershell" : "sh",
+                ["name"] = "probe", ["program"] = f.Def().Program,
                 ["args"] = new JsonArray(f.Def().Args.Select(a => (JsonNode?)a).ToArray()), ["timeoutSeconds"] = 60,
                 ["envFromConnections"] = new JsonArray(new JsonObject { ["name"] = "GH_TOKEN", ["connectionId"] = connectionId, ["field"] = "nope" }),
             },

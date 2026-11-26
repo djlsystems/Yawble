@@ -1,13 +1,15 @@
 using System.Diagnostics;
 using Yawble.Core.Teams;
+using Yawble.Core.Tests.Tasks;
 using Xunit;
 
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
 /// A program the core runs on the host for a provider call or a push is stopped, with the processes it started, when
-/// its time runs out and when the caller cancels. The program here is a script that starts a child and sleeps; it
-/// touches nothing but its own temp folder.
+/// its time runs out and when the caller cancels. The program here is the test program's own stand-in
+/// (<see cref="StandInTask"/>): it starts a copy of itself and waits, touches nothing but its own temp folder, and
+/// ends by itself after a minute when nothing stops it.
 /// </summary>
 public class HostProcessTests : IDisposable
 {
@@ -21,25 +23,12 @@ public class HostProcessTests : IDisposable
 
     private string PidFile => Path.Combine(_dir, "pids.txt");
 
-    /// <summary>The shell and arguments of a script that writes its own and its child's process id, then sleeps for minutes.</summary>
-    private (string Program, string[] Args) Sleeper()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            var ps = Path.Combine(_dir, "sleeper.ps1");
-            File.WriteAllText(ps,
-                "$p = Start-Process -FilePath powershell -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 300' -PassThru -WindowStyle Hidden\r\n" +
-                $"\"$PID $($p.Id)\" | Set-Content -Path '{PidFile}'\r\nStart-Sleep -Seconds 300\r\n");
-            return ("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps]);
-        }
-        var sh = Path.Combine(_dir, "sleeper.sh");
-        File.WriteAllText(sh, $"sleep 300 &\necho \"$$ $!\" > '{PidFile}'\nsleep 300\n");
-        return ("sh", [sh]);
-    }
+    /// <summary>The program and arguments of a stand-in that starts a waiting copy, writes its own and the copy's process id, then waits a minute.</summary>
+    private (string Program, string[] Args) Sleeper() => StandInTask.Script(_dir, $"spawn {PidFile} 60", "wait 60");
 
     private async Task<int[]> PidsAsync()
     {
-        await Bus.Wait.UntilAsync(() => File.Exists(PidFile) && ReadPids().Length == 2, "the script wrote its process ids", TimeSpan.FromSeconds(60));
+        await Bus.Wait.UntilAsync(() => File.Exists(PidFile) && ReadPids().Length == 2, "the stand-in wrote its process ids", TimeSpan.FromSeconds(60));
         return ReadPids();
     }
 
@@ -69,13 +58,13 @@ public class HostProcessTests : IDisposable
         var (program, args) = Sleeper();
         var watch = Stopwatch.StartNew();
 
-        var call = PullRequestProviders.RunOnHostAsync(program, _dir, args, TimeSpan.FromSeconds(15), Ct);
+        var call = PullRequestProviders.RunOnHostAsync(program, _dir, args, TimeSpan.FromSeconds(10), Ct);
         var pids = await PidsAsync();
         var result = await call;
 
         Assert.Equal(-1, result.ExitCode);
-        Assert.Contains("did not finish within 15 s and was stopped", result.Stderr);
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(120));
+        Assert.Contains("did not finish within 10 s and was stopped", result.Stderr);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(50), "the call ended with its program, not at the time limit");
         await GoneAsync(pids);
     }
 
@@ -97,11 +86,9 @@ public class HostProcessTests : IDisposable
     [Fact]
     public async Task WaitOrStop_LetsAProgramThatEndsInTimeEnd()
     {
-        var psi = OperatingSystem.IsWindows()
-            ? new ProcessStartInfo("powershell") { ArgumentList = { "-NoProfile", "-Command", "exit 3" } }
-            : new ProcessStartInfo("sh") { ArgumentList = { "-c", "exit 3" } };
-        psi.UseShellExecute = false;
-        psi.CreateNoWindow = true;
+        var (program, args) = StandInTask.Script(_dir, "exit 3");
+        var psi = new ProcessStartInfo(program) { UseShellExecute = false, CreateNoWindow = true };
+        foreach (var a in args) psi.ArgumentList.Add(a);
         using var process = Process.Start(psi)!;
 
         Assert.True(await HostProcess.WaitOrStopAsync(process, TimeSpan.FromSeconds(60), Ct));

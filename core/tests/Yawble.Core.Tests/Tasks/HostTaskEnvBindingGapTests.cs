@@ -50,7 +50,7 @@ public class HostTaskEnvBindingGapTests
             ["teamId"] = f.TeamId,
             ["def"] = new JsonObject
             {
-                ["name"] = "release", ["program"] = f.Win ? "powershell" : "sh",
+                ["name"] = "release", ["program"] = f.Def().Program,
                 ["args"] = new JsonArray(f.Def().Args.Select(a => (JsonNode?)a).ToArray()), ["timeoutSeconds"] = timeout,
                 ["envFromConnections"] = new JsonArray(new JsonObject { ["name"] = "GH_TOKEN", ["connectionId"] = connectionId, ["field"] = "token", ["connectionName"] = ConnName }),
             },
