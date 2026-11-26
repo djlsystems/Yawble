@@ -117,10 +117,19 @@ public sealed partial class BusEngine
         WithGate(() => TeamEnv.Parse(_store.TeamEnvJson(TeamId(team))), ct);
 
     /// <summary>Replaces the team's environment variables (whole). Refused, with every problem named, when any is invalid.</summary>
-    public Task<IReadOnlyDictionary<string, string>> SetTeamEnvAsync(string team, IReadOnlyList<KeyValuePair<string, string>> entries, CancellationToken ct = default) =>
+    /// <param name="hiddenValues">The caller saw the values hidden (a Cloud Link viewer): an entry that still holds
+    /// <see cref="TeamEnv.HiddenValue"/> keeps its stored value (<see cref="TeamEnv.KeepHidden"/>).</param>
+    public Task<IReadOnlyDictionary<string, string>> SetTeamEnvAsync(string team, IReadOnlyList<KeyValuePair<string, string>> entries, CancellationToken ct = default,
+        bool hiddenValues = false) =>
         WithGate(() =>
         {
             var id = TeamId(team);
+            if (hiddenValues)
+            {
+                var (kept, missing) = TeamEnv.KeepHidden(entries, TeamEnv.Parse(_store.TeamEnvJson(id)));
+                if (missing.Count != 0) throw new BusRefusal("bad_env", "nothing was saved: " + string.Join("; ", missing));
+                entries = kept;
+            }
             var problems = TeamEnv.Problems(entries);
             if (problems.Count != 0) throw new BusRefusal("bad_env", "nothing was saved: " + string.Join("; ", problems));
             _store.SetTeamEnv(id, TeamEnv.Serialize(entries));

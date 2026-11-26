@@ -18,6 +18,7 @@ import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
 import { usePhone } from '../phone';
 import { vChange } from '../remoteAccess';
+import { ENV_HIDDEN_HINT, envEntries, envRows, type EnvRow } from '../teamEnv';
 
 /**
  * A team's housekeeping: pause or resume it, who its Manager may hire, its repositories, its environment variables, archive it, delete it. Archive and delete need
@@ -190,16 +191,15 @@ async function loadApprovals() { try { approvals.value = await api.call<Approval
 const removeApproval = (id: number) => act('teams.removeApproval', { id }, () => { void loadApprovals(); void loadIntegrations(); });
 
 // ---- environment variables
-interface Row { name: string; value: string }
-const rows = ref<Row[]>([]);
+const rows = ref<EnvRow[]>([]);
 const envSaved = ref(false);
 async function loadEnv() {
   try {
     const env = await api.call<Record<string, string>>('teams.env', { teamId: props.team.id });
-    rows.value = Object.entries(env).map(([name, value]) => ({ name, value }));
+    rows.value = envRows(env);
   } catch (e) { error.value = errorText(e); } finally { ready.env = true; }
 }
-const saveEnv = () => act('teams.setEnv', { entries: rows.value.filter((r) => r.name.trim()).map((r) => ({ name: r.name, value: r.value })) }, () => { envSaved.value = true; void loadEnv(); });
+const saveEnv = () => act('teams.setEnv', { entries: envEntries(rows.value) }, () => { envSaved.value = true; void loadEnv(); });
 
 // ---- integrations offered to this team (CLIs and MCP servers), each opening the shared dialog scoped to the team
 interface OfferedInt { kind: 'cli' | 'mcp' | 'api'; website?: boolean; name: string; label: string; counts: string | null }
@@ -414,12 +414,12 @@ onMounted(() => { void models.loadProfiles(); void loadHiring(); void loadLesson
       <table v-else class="env" data-test="env-rows">
         <tr v-for="(r, i) in rows" :key="i">
           <td><input v-model="r.name" placeholder="NAME" class="mono" :data-test="`env-name-${i}`" @input="envSaved = false" /></td>
-          <td class="grow"><input v-model="r.value" placeholder="value" class="mono" :data-test="`env-value-${i}`" @input="envSaved = false" /></td>
+          <td class="grow"><input v-model="r.value" :placeholder="r.hidden ? ENV_HIDDEN_HINT : 'value'" :title="r.hidden ? 'The value stays on the computer. Type a new one to replace it.' : undefined" class="mono" :data-test="`env-value-${i}`" @input="envSaved = false" /></td>
           <td><button class="icon" title="Remove" @click="rows.splice(i, 1); envSaved = false">✕</button></td>
         </tr>
       </table>
       <div class="buttons">
-        <button data-test="env-add" @click="rows.push({ name: '', value: '' }); envSaved = false">+ Add a variable</button>
+        <button data-test="env-add" @click="rows.push({ name: '', value: '', hidden: false }); envSaved = false">+ Add a variable</button>
         <span class="grow" />
         <span v-if="envSaved" class="ok" data-test="env-saved">Saved: the next runs get them.</span>
         <button class="primary" data-test="env-save" :disabled="busy" @click="saveEnv"><BusyLabel :busy="doing('teams.setEnv')" text="Saving…">Save</BusyLabel></button>

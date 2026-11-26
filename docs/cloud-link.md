@@ -47,6 +47,10 @@ changing agents and teams. A network request shows in the remote view's **Needs 
 the computer refuses the answer, the item says why and to answer it in the window. A tool request shows there too,
 with **Not now** only: it says to install it in the Yawble window on the computer.
 
+A team's environment variables show their names only. Each value reads **set on the computer** and never leaves it,
+for a full viewer and a Visitor alike. A full viewer can add a variable, remove one, or type a new value over a hidden
+one; a variable saved untouched keeps its value.
+
 Calls from a viewer run as that viewer. Every remote call that changes something, and every refused call, is
 written to `cloud-link-audit.log` in the app's data folder, with the time, the viewer and the method.
 

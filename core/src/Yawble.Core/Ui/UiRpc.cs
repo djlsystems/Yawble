@@ -106,8 +106,10 @@ public sealed class UiRpc(
                 "teams.deliverableExpiry" => await DeliverableExpiryAsync(p, ct),
                 // { teamId } reads "Allow localhost (macOS)" (off by default), { teamId, on } sets it; both return { on }.
                 "teams.localhost" => await LocalhostSettingAsync(p, ct),
-                "teams.env" => S(await bus.TeamEnvAsync(await TeamNameOf(Long(p, "teamId"), ct), ct)),
-                "teams.setEnv" => S(await bus.SetTeamEnvAsync(await TeamNameOf(Long(p, "teamId"), ct), EnvEntries(p), ct)),
+                // Over the Cloud Link the names are shown and every value is TeamEnv.HiddenValue, on the read and on a save's
+                // answer; a save that sends that text back for a variable keeps the variable's stored value.
+                "teams.env" => S(EnvFor(await bus.TeamEnvAsync(await TeamNameOf(Long(p, "teamId"), ct), ct))),
+                "teams.setEnv" => S(EnvFor(await bus.SetTeamEnvAsync(await TeamNameOf(Long(p, "teamId"), ct), EnvEntries(p), ct, hiddenValues: ViaCloud))),
                 "teams.approvals" => S(await bus.TeamApprovalsAsync(await TeamNameOf(Long(p, "teamId"), ct), ct)),
                 "teams.addApproval" => S(await bus.AddTeamApprovalAsync(await TeamNameOf(Long(p, "teamId"), ct), Str(p, "text"),
                     Provenance.Actor.Current?.User ?? Provenance.Actor.LocalUser, ct)),
@@ -1133,6 +1135,12 @@ public sealed class UiRpc(
     }
 
     /// <summary>The env editor's rows, in order: [{name, value}].</summary>
+    /// <summary>Whether the call in progress is a Cloud Link viewer's.</summary>
+    private static bool ViaCloud => Provenance.Actor.Current?.Via == Provenance.Actor.Cloud;
+
+    /// <summary>A team's variables as the caller may see them: whole in the window, names only (values hidden) over the Cloud Link.</summary>
+    private static IReadOnlyDictionary<string, string> EnvFor(IReadOnlyDictionary<string, string> env) => ViaCloud ? Teams.TeamEnv.Hidden(env) : env;
+
     private static List<KeyValuePair<string, string>> EnvEntries(JsonObject? p) =>
         (p?["entries"] as JsonArray ?? []).OfType<JsonObject>()
             .Select(e => new KeyValuePair<string, string>((e["name"]?.GetValue<string>() ?? "").Trim(), e["value"]?.GetValue<string>() ?? ""))
