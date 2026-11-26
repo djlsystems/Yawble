@@ -329,13 +329,7 @@ public class HostTaskTests
         if (!OperatingSystem.IsWindows()) return;
         var outside = Directory.CreateDirectory(Path.Combine(f.Db.Dir, "outside")).FullName;
         var link = Path.Combine(f.Repo, "scripts", "evil");
-        var psi = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
-        psi.Arguments = $"/c mklink /J \"{link}\" \"{outside}\"";
-        using (var p = Process.Start(psi)!)
-        {
-            p.WaitForExit();
-            if (p.ExitCode != 0) return; // this environment may not allow creating a junction: the rest of the test needs one
-        }
+        if (!TestFiles.TryCreateJunction(link, outside)) return; // this file system has no junctions: the rest of the test needs one
         File.AppendAllText(Path.Combine(f.Repo, ".git", "info", "exclude"), "scripts/evil\n");
         // saving through a junction is refused at once
         await Assert.ThrowsAsync<ArgumentException>(() => f.SaveAsync(f.Def("viaLink") with { Workdir = "scripts/evil" }));
@@ -433,16 +427,16 @@ public class HostTaskTests
         try
         {
             var pidFile = Path.Combine(dir, "child.pid");
-            var s = Script(dir,
-                $"$p = Start-Process -FilePath powershell -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 300' -PassThru -WindowStyle Hidden\r\n$p.Id | Set-Content -Path '{pidFile}'\r\nStart-Sleep -Seconds 300",
-                $"sleep 300 &\necho $! > '{pidFile}'\nsleep 300");
+            // The task is this test program as a stand-in: it starts a second copy that only waits, writes that
+            // copy's process id, and waits too. Left alone, both end by themselves after 30 seconds.
+            var s = StandInTask.Tree(pidFile, seconds: 30);
             var watch = Stopwatch.StartNew();
-            var r = await TaskProcess.RunAsync(Options(dir, s, TimeSpan.FromSeconds(4)), Ct);
+            var r = await TaskProcess.RunAsync(Options(dir, s, TimeSpan.FromSeconds(5)), Ct);
             Assert.True(r.TimedOut);
             Assert.Equal("timeout", r.KilledBy);
             Assert.Null(r.ExitCode);
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(60));
-            Assert.True(File.Exists(pidFile));
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(25), "the run ended with its program, not at the time limit");
+            Assert.True(File.Exists(pidFile), "the stand-in did not start its second copy before the time limit");
             var pid = int.Parse(File.ReadAllText(pidFile).Trim());
             await Task.Delay(500, Ct);
             Assert.False(IsAlive(pid), "the grandchild survived the time limit");
@@ -462,7 +456,7 @@ public class HostTaskTests
         {
             var pidFile = Path.Combine(dir, "child.pid");
             // No setsid binary is involved: the group comes from posix_spawn. ps is on every Linux and macOS.
-            var s = Script(dir, "", $"echo \"pid=$$ pgid=$(ps -o pgid= -p $$ | tr -d ' ')\"\nsleep 300 &\necho $! > '{pidFile}'\nexit 3");
+            var s = Script(dir, "", $"echo \"pid=$$ pgid=$(ps -o pgid= -p $$ | tr -d ' ')\"\nsleep 30 &\necho $! > '{pidFile}'\nexit 3");
             var r = await TaskProcess.RunAsync(Options(dir, s, TimeSpan.FromSeconds(60)), Ct);
             Assert.Equal(3, r.ExitCode);
             Assert.Null(r.KilledBy);
@@ -488,7 +482,7 @@ public class HostTaskTests
         try
         {
             var pidFile = Path.Combine(dir, "child.pid");
-            var s = Script(dir, "", $"trap 'exit 0' TERM\nsleep 300 &\necho $! > '{pidFile}'\necho started\nwait");
+            var s = Script(dir, "", $"trap 'exit 0' TERM\nsleep 30 &\necho $! > '{pidFile}'\necho started\nwait");
             using var cancel = CancellationTokenSource.CreateLinkedTokenSource(Ct);
             var o = Options(dir, s, TimeSpan.FromSeconds(60));
             var run = TaskProcess.RunAsync(o, cancel.Token);
