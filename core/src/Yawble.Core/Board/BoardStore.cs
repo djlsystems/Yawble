@@ -450,6 +450,29 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
         finally { _batch = null; _batchTx = null; _batchThread = 0; }
     }
 
+    /// <summary>
+    /// Runs <paramref name="work"/> as one unit of this thread's batch (a savepoint): when it throws, everything it
+    /// wrote is undone, the batch stays as it was before the unit and goes on, and the exception goes to the caller.
+    /// Outside a batch it is a batch of its own.
+    /// </summary>
+    public void InUnit(string name, Action work)
+    {
+        if (!InThisBatch) { InBatch(work); return; }
+        var tx = _batchTx!;
+        tx.Save(name);
+        try
+        {
+            work();
+        }
+        catch
+        {
+            tx.Rollback(name); // back to the savepoint, which stays; the release below takes it away
+            tx.Release(name);
+            throw;
+        }
+        tx.Release(name);
+    }
+
     private bool InThisBatch => _batch is not null && _batchThread == Environment.CurrentManagedThreadId;
 
     /// <summary>The connection a statement runs on: this thread's batch, or a new one of its own.</summary>
