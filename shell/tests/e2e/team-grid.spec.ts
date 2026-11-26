@@ -203,15 +203,27 @@ for (const theme of ['light', 'dark'] as const) {
         expect.soft(p.bodyInside, `${where}: the view inside the pane`).toBe(true);
         expect.soft(p.bodyH, `${where}: the view takes the rest (${JSON.stringify(p)})`).toBeGreaterThan(p.cell.h - 100);
         expect.soft(p.titleOut, `${where}: nothing in the title bar sticks out`).toEqual([]);
-        expect.soft(p.titleH, `${where}: title one 30 px row`).toBeLessThanOrEqual(31);
+        // The title is two fixed rows: the name with the ☰ (30 px) and the pills under it (20 px), 54 px with the gap.
+        expect.soft(p.titleH, `${where}: title two rows, 54 px`).toBeLessThanOrEqual(55);
         expect.soft(p.tabsH, `${where}: tabs on one line (one row, <= 30 px)`).toBeLessThanOrEqual(30);
         expect.soft(p.paneOverflow, `${where}: nothing wider than the pane`).toBe(false);
         for (const c of p.chips) if (c.cut) expect.soft(c.te, `${where}: a cut chip ends in …`).toBe('ellipsis');
         if (p.contentTaller) expect.soft(p.scrolls, `${where}: taller content scrolls inside`).toBeGreaterThan(0);
       }
       if (tiles.w === 280) {
-        // At the narrowest tile at least one title chip is actually cut (with …) - the case the ellipsis is for.
-        expect.soft(m.some((p) => p.chips.some((c) => c.cut && c.te === 'ellipsis')), `${theme}: a chip ellipsized at 280 (${JSON.stringify(m.map((p) => p.chips))})`).toBe(true);
+        // The pills have a row of their own, so at 280 px they fit. With less room than they need (the first tile's
+        // pills row held to 60 px) a pill is cut and ends in …, and nothing in the row wraps or sticks out of it.
+        const squeezed = await page.locator('[data-test=member-cell]').first().locator('[data-test=agent-pills]').evaluate((pills: HTMLElement) => {
+          pills.style.width = '60px';
+          const row = pills.getBoundingClientRect();
+          const kids = [...pills.children] as HTMLElement[];
+          const out = { h: Math.round(row.height), cut: kids.filter((e) => e.scrollWidth > e.clientWidth && getComputedStyle(e).textOverflow === 'ellipsis').length,
+            tops: new Set(kids.filter((e) => e.offsetWidth > 0).map((e) => Math.round(e.getBoundingClientRect().top + e.getBoundingClientRect().height / 2))).size };
+          pills.style.width = '';
+          return out;
+        });
+        expect.soft(squeezed.cut, `${theme}: a pill ellipsized in a 60 px row (${JSON.stringify(squeezed)})`).toBeGreaterThan(0);
+        expect.soft(squeezed.h, `${theme}: the squeezed pills row keeps its 20 px`).toBe(20);
       }
       {
         // The ☰ menu of the first tile and of the third (the right end of the row at 280) opens fully visible.

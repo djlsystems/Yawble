@@ -446,8 +446,8 @@ test('map: the tree grows over a deliverable, a Write pops, edits bright, reads 
 test('map: a large map collapses to its busiest 8 folders, "+N" per folder and "+N folders"', async ({ browser }) => {
   const feed = new Feed();
   seedDeliverable(feed, 300_000);
-  // 12 folders x 10 files, read at the start (quiet), each folder busier than the next.
-  for (let d = 0; d < 12; d++) for (let i = 0; i < 10; i++) for (let k = 0; k <= (11 - d) % 3; k++) feed.step(ADA, 'edit', `src/mod${String(d).padStart(2, '0')}/file${i}.ts`, 200_000 - d * 1000 - i * 10 - k);
+  // 12 folders x 10 files, touched about a minute ago (quiet, and well inside the two minutes a file stays on the map), each folder busier than the next.
+  for (let d = 0; d < 12; d++) for (let i = 0; i < 10; i++) for (let k = 0; k <= (11 - d) % 3; k++) feed.step(ADA, 'edit', `src/mod${String(d).padStart(2, '0')}/file${i}.ts`, 60_000 - d * 1000 - i * 10 - k);
   const { page, ctx, errors } = await open(browser, { feed });
   await until(page, (x) => fileDots(x).length, (n) => n > 0);
   await still(page); // the camera settles on the whole map (off-screen nodes are culled)
