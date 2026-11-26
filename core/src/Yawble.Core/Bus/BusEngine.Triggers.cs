@@ -8,6 +8,8 @@ public sealed record TriggerFire(string Outcome, long? Seq, string? Reason, long
 /// <summary>
 /// Triggers and wakes. The pump loop sweeps them at most every
 /// <see cref="TriggerSweepInterval"/>, inside the gate, so a fire is ordered with every other state change.
+/// A folder trigger's folder is listed outside the gate (a large or remote folder takes seconds): the gate is held
+/// only to say which folders are due and, once they are listed, to record and fire what the listing shows.
 ///
 /// - A due trigger tells its member its instruction as a NEW deliverable (source "trigger:&lt;id&gt;"), unless the member
 ///   is busy and the trigger is "only when idle" (skipped, the next fire armed).
@@ -28,17 +30,51 @@ public sealed partial class BusEngine
 
     private DateTimeOffset _nextTriggerSweep = DateTimeOffset.MinValue;
 
+    /// <summary>The folder looks being listed outside the gate; null when none is. Under the gate.</summary>
+    private Task<IReadOnlyList<FolderLook>>? _folderLooks;
+
+    /// <summary>The time the pump's sweeps go by (tests set their own).</summary>
+    internal Func<DateTimeOffset> TriggerClock { get; set; } = () => DateTimeOffset.UtcNow;
+
+    /// <summary>Lists a watched folder: relative path to size (tests set a fake that waits).</summary>
+    internal Func<string, string?, Dictionary<string, long>> ListFolder { get; set; } = FolderWatcher.Listing;
+
     /// <summary>Called by the pump pass (under the gate).</summary>
     private void SweepTriggersIfDue()
     {
-        var now = DateTimeOffset.UtcNow;
+        // Folders whose listing has finished are recorded at once: the listing signals the pump when it is done.
+        if (_folderLooks is { IsCompleted: true } listed)
+        {
+            _folderLooks = null;
+            ApplyFolderLooks(listed.Result);
+        }
+        var now = TriggerClock();
         if (now < _nextTriggerSweep) return;
         _nextTriggerSweep = now + TriggerSweepInterval;
         SweepTriggers(now);
+        // One listing pass at a time: while a slow folder is being listed, the due folders wait for the next sweep.
+        if (_folderLooks is not null) return;
+        var plans = FolderPlans(now);
+        if (plans.Count == 0) return;
+        _folderLooks = Task.Run(() =>
+        {
+            var looks = LookAtFolders(plans);
+            Signal();
+            return looks;
+        });
     }
 
     /// <summary>Fires every due trigger and wake as of <paramref name="now"/> (tests call it with their own clock).</summary>
-    public Task SweepTriggersAsync(DateTimeOffset now, CancellationToken ct = default) => WithGate(() => SweepTriggers(now), ct);
+    public async Task SweepTriggersAsync(DateTimeOffset now, CancellationToken ct = default)
+    {
+        var plans = await WithGate(() => FolderPlans(now), ct);
+        var looks = plans.Count == 0 ? [] : await Task.Run(() => LookAtFolders(plans), ct);
+        await WithGate(() =>
+        {
+            SweepTriggers(now);
+            ApplyFolderLooks(looks);
+        }, ct);
+    }
 
     private void SweepTriggers(DateTimeOffset now)
     {
@@ -50,16 +86,14 @@ public sealed partial class BusEngine
         }
         foreach (var row in _store.DueTriggers(now))
         {
+            if (row.Schedule.Kind == TriggerKinds.Folder) continue; // looked at once its folder is listed (ApplyFolderLooks)
             try
             {
                 FireDue(row, now);
             }
             catch (Exception ex)
             {
-                var member = MemberOrNull(row.MemberId);
-                Logs.Diag.Warning("triggers", $"trigger {row.Id} ({row.Name}) failed: {ex.GetType().Name}: {ex.Message}",
-                    ("team", member?.Team ?? TeamNameOrNull(row.TeamId)), ("member", member?.Qualified), ("trigger", row.Id),
-                    ("schedule", row.Schedule.Kind), ("exception", ex.GetType().Name));
+                WarnTriggerFailed(row, ex);
             }
         }
         foreach (var wake in _store.DueWakes(now))
@@ -87,6 +121,14 @@ public sealed partial class BusEngine
         }
     }
 
+    private void WarnTriggerFailed(TriggerRow row, Exception ex)
+    {
+        var member = MemberOrNull(row.MemberId);
+        Logs.Diag.Warning("triggers", $"trigger {row.Id} ({row.Name}) failed: {ex.GetType().Name}: {ex.Message}",
+            ("team", member?.Team ?? TeamNameOrNull(row.TeamId)), ("member", member?.Qualified), ("trigger", row.Id),
+            ("schedule", row.Schedule.Kind), ("exception", ex.GetType().Name));
+    }
+
     /// <summary>A member for a failure's log line; null when it is gone or cannot be read (the line is written anyway).</summary>
     private MemberRef? MemberOrNull(long memberId)
     {
@@ -102,11 +144,6 @@ public sealed partial class BusEngine
 
     private void FireDue(TriggerRow row, DateTimeOffset now)
     {
-        if (row.Schedule.Kind == TriggerKinds.Folder)
-        {
-            LookAtFolder(row, now);
-            return;
-        }
         var due = row.NextDueAt!.Value;
         var next = TriggerScheduling.NextOccurrence(row.Schedule, due);
         // More than one occurrence passed (the app was not running): record them as missed, never catch up.
@@ -123,21 +160,97 @@ public sealed partial class BusEngine
         _store.RecordTriggerOutcome(row.Id, fire.Outcome == "fired" ? now : null, next, fire.Outcome, fire.Reason, fire.Seq, row.MissedCount);
     }
 
-    /// <summary>
-    /// One look at a folder trigger's folder: remember it, wait for a change to settle, and tell the member what changed
-    /// when one has (through the same checks as any fire: paused team, only when idle).
-    /// </summary>
-    private void LookAtFolder(TriggerRow row, DateTimeOffset now)
+    /// <summary>A due folder trigger's look, as planned under the gate: what to list, and the time the look counts as.</summary>
+    /// <param name="DocumentsRoot">The team's documents folder, for a watch inside it; null for a folder on this computer,
+    /// or when the team's folders are not here.</param>
+    private sealed record FolderPlan(TriggerRow Trigger, DateTimeOffset At, bool HasMember, string? DocumentsRoot);
+
+    /// <summary>A planned look after the file system was read: the folder (null: nothing to watch), its listing (null:
+    /// no such folder), or what went wrong.</summary>
+    private sealed record FolderLook(FolderPlan Plan, string? Folder, Dictionary<string, long>? Listing, Exception? Error);
+
+    /// <summary>Under the gate: the folder triggers due as of <paramref name="now"/>, with what their listing needs from the store.</summary>
+    private List<FolderPlan> FolderPlans(DateTimeOffset now)
     {
+        var plans = new List<FolderPlan>();
+        foreach (var row in _store.DueTriggers(now))
+        {
+            if (row.Schedule.Kind != TriggerKinds.Folder) continue;
+            try
+            {
+                var member = _store.Member(row.MemberId);
+                var team = member is null || row.Watch is null || row.Watch.Root == FolderWatch.Host || Repos is null
+                    ? null
+                    : _store.Teams().FirstOrDefault(t => t.Id == member.TeamId)?.Name;
+                plans.Add(new FolderPlan(row, now, member is not null, team is null ? null : Path.Combine(Repos!.TeamRoot(team), Teams.TeamDocuments.Folder)));
+            }
+            catch (Exception ex)
+            {
+                WarnTriggerFailed(row, ex);
+            }
+        }
+        return plans;
+    }
+
+    /// <summary>Outside the gate: reads each planned folder. Never throws; a failure is kept with its look.</summary>
+    private IReadOnlyList<FolderLook> LookAtFolders(IReadOnlyList<FolderPlan> plans)
+    {
+        var looks = new List<FolderLook>(plans.Count);
+        foreach (var plan in plans)
+        {
+            try
+            {
+                var watch = plan.Trigger.Watch;
+                var folder = watch is null || !plan.HasMember ? null : WatchedFolder(watch, plan.DocumentsRoot);
+                looks.Add(new FolderLook(plan, folder, folder is not null && Directory.Exists(folder) ? ListFolder(folder, watch!.Glob) : null, null));
+            }
+            catch (Exception ex)
+            {
+                looks.Add(new FolderLook(plan, null, null, ex));
+            }
+        }
+        return looks;
+    }
+
+    /// <summary>
+    /// Under the gate: records and fires what the listings show. A trigger that was edited, re-armed, disabled or
+    /// removed while its folder was being listed is left for its next look.
+    /// </summary>
+    private void ApplyFolderLooks(IReadOnlyList<FolderLook> looks)
+    {
+        foreach (var look in looks)
+        {
+            var planned = look.Plan.Trigger;
+            try
+            {
+                var row = _store.Trigger(planned.Id);
+                if (row is null || !row.Enabled || row.Schedule != planned.Schedule || row.Watch != planned.Watch
+                    || row.NextDueAt is not { } due || due > look.Plan.At) continue;
+                LookAtFolder(row, look);
+            }
+            catch (Exception ex)
+            {
+                WarnTriggerFailed(planned, ex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// One look at a folder trigger's folder, from its listing: remember it, wait for a change to settle, and tell the
+    /// member what changed when one has (through the same checks as any fire: paused team, only when idle).
+    /// </summary>
+    private void LookAtFolder(TriggerRow row, FolderLook look)
+    {
+        if (look.Error is { } error) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(error);
+        var now = look.Plan.At;
         var next = TriggerScheduling.NextOccurrence(row.Schedule, now);
-        var member = _store.Member(row.MemberId);
-        var folder = member is null || row.Watch is null ? null : WatchedFolder(row.Watch, member);
-        if (folder is null || !Directory.Exists(folder))
+        var folder = look.Folder;
+        if (folder is null || look.Listing is null)
         {
             _store.RecordTriggerOutcome(row.Id, null, next, "skipped", folder is null ? "nothing to watch" : $"the folder {folder} is not there", null, row.MissedCount);
             return;
         }
-        var (change, state) = FolderWatcher.Look(FolderWatcher.Listing(folder, row.Watch!.Glob), _store.WatchState(row.Id), now, row.Watch.QuietSec, row.Watch.FireOn);
+        var (change, state) = FolderWatcher.Look(look.Listing, _store.WatchState(row.Id), now, row.Watch!.QuietSec, row.Watch.FireOn);
         if (change is null)
         {
             _store.SetWatch(row.Id, state, next);
@@ -152,15 +265,12 @@ public sealed partial class BusEngine
     }
 
     /// <summary>The folder a watch means: inside the team's documents, or the absolute folder on this computer.</summary>
-    private string? WatchedFolder(FolderWatch w, MemberRef member)
+    private static string? WatchedFolder(FolderWatch w, string? documentsRoot)
     {
         if (w.Root == FolderWatch.Host) return Path.IsPathFullyQualified(w.Path) ? w.Path : null;
-        if (Repos is null) return null;
-        var team = _store.Teams().FirstOrDefault(t => t.Id == member.TeamId)?.Name;
-        if (team is null) return null;
-        var root = Path.Combine(Repos.TeamRoot(team), Teams.TeamDocuments.Folder);
-        Directory.CreateDirectory(root);
-        try { return Teams.TeamDocuments.Resolve(root, w.Path, mustExist: false); }
+        if (documentsRoot is null) return null;
+        Directory.CreateDirectory(documentsRoot);
+        try { return Teams.TeamDocuments.Resolve(documentsRoot, w.Path, mustExist: false); }
         catch (Teams.DocumentsException) { return null; }
     }
 

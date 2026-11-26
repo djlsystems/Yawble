@@ -39,6 +39,12 @@ public sealed class BusOptions
 
     public Action<string>? Log { get; init; }
 
+    /// <summary>A hold of the bus gate at least this long is reported in the Diagnostics log, with who held it.</summary>
+    public TimeSpan SlowGateHold { get; init; } = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>At most one slow-hold line is written in this time; the next line says how many it stands for.</summary>
+    public TimeSpan SlowGateReportEvery { get; init; } = TimeSpan.FromSeconds(10);
+
     /// <summary>
     /// The agent CLIs on this computer and whether each can run now (the Agents dialog's detection), for the Manager's
     /// <c>hiring</c> tool. Null in tests and when the core has no detector: then every preset is offered unchecked.
@@ -210,6 +216,7 @@ public sealed partial class BusEngine : IAsyncDisposable
         MemberRow? manager = null;
         var id = await WithGate(() => _store.InTransaction(() =>
         {
+            RefuseWhileFolderGoes(name);
             var team = _store.CreateTeam(name);
             var m = AddMember(team, managerName, MemberRole.Manager, "claude");
             manager = _store.MemberRows(memberId: m.Id).Single();
@@ -804,6 +811,7 @@ public sealed partial class BusEngine : IAsyncDisposable
             result = RunResult.Fail("the runner failed: " + ex.Message);
         }
         await _gate.WaitAsync();
+        var taken = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
             _active.Remove(run.RunId);
@@ -849,6 +857,7 @@ public sealed partial class BusEngine : IAsyncDisposable
         finally
         {
             cancel.Dispose();
+            GateHeld(nameof(ExecuteAsync), taken);
             _gate.Release();
         }
     }
@@ -898,20 +907,47 @@ public sealed partial class BusEngine : IAsyncDisposable
 
     // ------------------------------------------------------------------ plumbing
 
-    private async Task<T> WithGate<T>(Func<T> work, CancellationToken ct)
+    /// <param name="caller">The method that takes the gate: named in the slow-hold line.</param>
+    private async Task<T> WithGate<T>(Func<T> work, CancellationToken ct, [System.Runtime.CompilerServices.CallerMemberName] string caller = "")
     {
         await _gate.WaitAsync(ct);
+        var taken = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
             return work();
         }
         finally
         {
+            GateHeld(caller, taken);
             _gate.Release();
         }
     }
 
-    private Task WithGate(Action work, CancellationToken ct) => WithGate(() => { work(); return 0; }, ct);
+    private Task WithGate(Action work, CancellationToken ct, [System.Runtime.CompilerServices.CallerMemberName] string caller = "") =>
+        WithGate(() => { work(); return 0; }, ct, caller);
+
+    // The slow holds not yet written (the rate limit), and when the last line was written. Under the gate.
+    private int _slowHoldsUnwritten;
+    private long _slowHoldWrittenAt;
+
+    /// <summary>
+    /// Called by whoever holds the gate, just before releasing it. Every agent tool call, delivery and admission waits
+    /// on the gate, so a long hold is a stall of all of them: one that reaches <see cref="BusOptions.SlowGateHold"/> is
+    /// written as a warning with the holder's name and the time, at most once per <see cref="BusOptions.SlowGateReportEvery"/>.
+    /// </summary>
+    private void GateHeld(string caller, long taken)
+    {
+        var held = System.Diagnostics.Stopwatch.GetElapsedTime(taken);
+        if (held < _options.SlowGateHold) return;
+        _slowHoldsUnwritten++;
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_slowHoldWrittenAt != 0 && System.Diagnostics.Stopwatch.GetElapsedTime(_slowHoldWrittenAt, now) < _options.SlowGateReportEvery) return;
+        var ms = (long)held.TotalMilliseconds;
+        Logs.Diag.Warning("bus", $"the bus gate was held for {ms} ms by {caller}",
+            ("caller", caller), ("ms", ms), ("count", _slowHoldsUnwritten));
+        _slowHoldsUnwritten = 0;
+        _slowHoldWrittenAt = now;
+    }
 
     private void Log(string line) => _options.Log?.Invoke(line);
 

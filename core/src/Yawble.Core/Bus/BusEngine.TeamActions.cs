@@ -80,27 +80,62 @@ public sealed partial class BusEngine
     /// cards, and its folder in the app's data (the members' clones and workspaces, and the repository when the app made
     /// it). A repository folder the person picked is never touched. The message log keeps the history.
     /// </summary>
+    /// <remarks>
+    /// The team leaves the database inside the gate, in one transaction; its folder is removed after the gate is
+    /// released, so a large folder holds up nobody else. The order is the database first: a core that stops in between
+    /// leaves a folder without a team, never a team without its folder. Until the folder is gone a new team may not
+    /// take the name (its folder would be the one being removed).
+    /// </remarks>
     /// <returns>What could not be removed from disk (in use, say), in words; empty when everything went.</returns>
-    public Task<IReadOnlyList<string>> DeleteTeamAsync(string team, CancellationToken ct = default) =>
-        WithGate<IReadOnlyList<string>>(() =>
+    public async Task<IReadOnlyList<string>> DeleteTeamAsync(string team, CancellationToken ct = default)
+    {
+        var (name, folder) = await WithGate(() =>
         {
             var row = TeamRow(team);
             var quiet = Quiet(row.Id);
             if (!quiet.Quiet) throw new BusRefusal("not_quiet", NotQuiet(row.Name, quiet));
             foreach (var m in _store.TeamMembers(row.Id)) _statusLines.Remove(m.Id);
-            var folder = Repos?.TeamRoot(row.Name);
+            var root = Repos?.TeamRoot(row.Name);
             Integrations?.ForgetTeam(row.Id, row.Name);
             _store.InTransaction(() => _store.DeleteTeam(row.Id));
             Board?.ForgetTeam(row.Name);
-            var left = new List<string>();
-            if (folder is not null && Directory.Exists(folder))
-            {
-                try { DeleteTree(folder); }
-                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { left.Add($"{folder}: {e.Message}"); }
-            }
-            Log($"team {row.Name}: deleted");
-            return left;
+            if (root is not null) _teamFoldersGoing.Add(row.Name);
+            return (row.Name, root);
         }, ct);
+        var left = new List<string>();
+        if (folder is not null)
+        {
+            // The team is gone from the database: its folder goes whatever becomes of the caller's token.
+            try
+            {
+                await Task.Run(() =>
+                {
+                    if (!Directory.Exists(folder)) return;
+                    try { RemoveFolder(folder); }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { left.Add($"{folder}: {e.Message}"); }
+                }, CancellationToken.None);
+            }
+            finally
+            {
+                await WithGate(() => { _teamFoldersGoing.Remove(name); }, CancellationToken.None);
+            }
+        }
+        Log($"team {name}: deleted");
+        return left;
+    }
+
+    /// <summary>The deleted teams whose folders are being removed now, by name. Under the gate.</summary>
+    private readonly HashSet<string> _teamFoldersGoing = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Removes a deleted team's folder (tests set a fake that waits).</summary>
+    internal Action<string> RemoveFolder { get; set; } = DeleteTree;
+
+    /// <summary>Under the gate: refuses a new team the name of one whose folder is still being removed.</summary>
+    private void RefuseWhileFolderGoes(string name)
+    {
+        if (_teamFoldersGoing.Contains(name))
+            throw new BusRefusal("busy", $"the deleted team '{name}' is still being removed from this computer. Try again in a moment.");
+    }
 
     /// <summary>Removes a folder whose git objects are read-only (Windows refuses to delete those as they are).</summary>
     private static void DeleteTree(string folder)
