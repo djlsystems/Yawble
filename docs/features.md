@@ -166,7 +166,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - Claude Code: the app's switch, a Claude subscription, or an Anthropic API key.
   - Grok: the app's switch, your Grok login, or an xAI API key.
   - The other CLIs: their own sign-in on this computer.
-- Credentials are kept in the OS credential store and used by the run's gateway, never inside the sandbox.
+- Credentials are kept in the OS credential store and used by the run's gateway outside the sandbox. Two cases put
+  your sign-in inside a member's own folder, where its agent can read it: a Codex terminal session, and every
+  Antigravity run.
 - Claude Code on macOS keeps its sign-in in the login Keychain item "Claude Code-credentials". The app's gateway reads
   it there with macOS's own `security` tool, the same tool Claude Code uses to keep the item, so macOS shows no
   Keychain prompt. The gateway keeps the token in memory and reads the item again only shortly before the token
@@ -198,8 +200,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 ## Sandbox and policy
 
 - Every agent run, Concierge turn and guardrail check runs in its own sandbox.
-- No model credential enters a sandbox. Each run has its own gateway on this computer. It is the run's only network
-  path, and it adds the real credential to model requests outside the sandbox.
+- Each run has its own gateway on this computer. It is the run's only network path, and it adds the real credential
+  to model requests outside the sandbox. The sandbox holds no model credential, except in a Codex terminal session
+  and an Antigravity run, which get a copy of your sign-in to that CLI.
 - The run gets a random run token. It works only for that run and stops when the run ends.
 - Network: model and team traffic go through the gateway. Other hosts are reachable only if allowed; every refusal
   is logged.

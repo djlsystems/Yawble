@@ -192,7 +192,29 @@ gate fails because the check could no longer tell the difference.
 
 ## Gateway, credentials and bridge
 
-No model credential ever enters a sandbox.
+A run uses the person's own sign-in to its CLI on this computer. For most runs the gateway holds it and the sandbox
+gets only the run token; two cases place the sign-in itself inside the sandbox.
+
+- **Where a sign-in is.** The launcher picks one credential mode per run (`SandboxLauncher.ModeFor`):
+  - **Held by the gateway, nothing inside:** Claude Code, Grok, GitHub Copilot, and Codex on a headless run (a member's
+    ordinary run). The sandbox gets the run token in the CLI's credential variable or a placeholder file (Codex: an
+    `auth.json` whose tokens are the run token; Grok: a command that prints it). The gateway reads the person's
+    sign-in on the host at each model request and puts it on the request. No sign-in file is granted.
+  - **Codex in a terminal session (interactive):** Codex's terminal UI needs an HTTPS backend, which the gateway's
+    plain-HTTP host is not. The person's `~/.codex/auth.json` is copied into the member's `home/.codex/` before the
+    session, and Codex talks to OpenAI's hosts by `CONNECT`. The copy holds the real access and refresh tokens and the
+    agent can read it. After the session a copy the CLI refreshed is written back over the host's file; the copy
+    itself stays in the member's folder until the member's next headless run writes its placeholder over it. A session
+    that starts from a sign-in more than 7 days old (one the CLI may refresh) holds a lease until it ends, and other
+    Codex sessions wait for it, so two never refresh the same token (`SignInCopy`).
+  - **Antigravity (Windows):** its sign-in is in Windows Credential Manager, which a sandbox cannot read. The launcher
+    reads the entry at each launch and writes it to the member's `home/.gemini/antigravity-cli/antigravity-oauth-token`,
+    where the CLI reads it. It holds the real tokens, the agent can read it, and it is not removed after the run. On
+    Linux and macOS Antigravity and GitHub Copilot keep the sign-in in the system keychain and their runs are refused.
+  - The compiler also knows host sign-in modes for Claude Code and Grok (the host's `.credentials.json` or `auth.json`
+    granted read-only as that one file, never its folder: a folder grant would also show files the host writes during
+    the run) and for GitHub Copilot (the token in `COPILOT_GITHUB_TOKEN`). The app's wiring (`HostSignInModes`) never
+    selects them.
 
 - **Per-run gateway.** Each run gets its own gateway on `127.0.0.1:<ephemeral>`, handed to the sandbox as its only
   network proxy, and a random run token (`YAWBLE_RUN_TOKEN`, also every CLI's credential placeholder). The token

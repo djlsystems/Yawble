@@ -21,8 +21,8 @@
 
 Yawble is a desktop app that runs teams of AI coding agents on your own computer. You describe the work; a Manager
 agent splits it between member agents, each member works on its own branch of your repository, and you review and
-merge the result. Every agent run happens inside its own sandbox, with no access to your model credentials, your other
-files or the open network.
+merge the result. Every agent run happens inside its own sandbox, with no access to your other files or the open network; your
+model credentials stay outside it (a Codex terminal session and Antigravity runs get a copy of that CLI's sign-in).
 
 Yawble is agent-agnostic. Each member of a team picks its own agent CLI and model, so different agents work side by
 side in one team: Claude Code, Codex, Grok, GitHub Copilot and Antigravity, as you already installed them. Yawble does
