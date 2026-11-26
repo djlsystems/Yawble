@@ -7,21 +7,16 @@
 //    Bring main current list what came in.
 //  - 390 x 844 (a phone): the counts' list and the merge preview do not scroll sideways.
 //   npx playwright test git-previews      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/git-previews (else test-results/git-previews).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
-import { mkdirSync } from 'node:fs';
-import path from 'node:path';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'git-previews');
-const shot = (page: Page, name: string) => page.screenshot({ path: path.join(SHOTS, `git-previews-${name}.png`) });
 const MERGE = 'def5678a9b0c1d2e3f405162738495a6b7c8d9e0';
 const FEATURE = 'fea7c0de1a2b3c4d5e6f708192a3b4c5d6e7f809';
 
-test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
+test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 test.afterEach(() => { fakeRemote(builtDir).core.setGitPreview(false); });
 
 async function open(browser: Browser, w: number, h: number) {
@@ -76,7 +71,6 @@ test('1280 x 800: counts open their commits; merge and delete previews; sync and
   await expect(range.locator('[data-test=commit-list-row]')).toHaveCount(2);
   await expect(range.locator('[data-test=commit-list-row]').first().locator('[data-test=local-mark]')).toHaveText('not pushed');
   await expect(range.locator('[data-test=commit-list-row]').nth(1).locator('[data-test=local-mark]')).toHaveCount(0);
-  await shot(page, 'range-1280');
   await range.locator('[data-test=commit-link]').nth(1).click();
   await expect(page.locator('[data-test=commit-title]')).toHaveText('Partial refunds: refund part of a payment');
   await closeCommitDialog(page);
@@ -99,7 +93,6 @@ test('1280 x 800: counts open their commits; merge and delete previews; sync and
   const pBox = (await preview.boundingBox())!;
   const yesBox = (await page.locator('[data-test=git-merge-yes]').boundingBox())!;
   expect(pBox.y).toBeLessThan(yesBox.y);
-  await shot(page, 'merge-preview-1280');
   await page.locator('[data-test=git-merge-cancel]').click();
   await expect(preview).toHaveCount(0);
 
@@ -108,7 +101,6 @@ test('1280 x 800: counts open their commits; merge and delete previews; sync and
   const del = page.locator('[data-test=git-delete]');
   await expect(del.locator('[data-test=git-delete-summary]')).toHaveText('Deleting it loses 1 commit of its own (fea7c0de1a2b); it is not on origin either.');
   await expect(del.locator('[data-test=commit-list-mark]')).toHaveText(['work of its own', 'already in main']);
-  await shot(page, 'delete-preview-1280');
   await del.locator('[data-test=git-delete-yes]').click();
   const rec = page.locator('[data-test=git-result-recorded]');
   await expect(rec).toContainText("members/payments/developerbo's last commit, kept on record:");
@@ -128,7 +120,6 @@ test('1280 x 800: counts open their commits; merge and delete previews; sync and
   await page.locator('[data-test=git-bring-current]').click();
   await expect(came).toContainText('1 commit came into main:');
   await expect(came.locator('[data-test=commit-link]')).toHaveAttribute('data-sha', FEATURE);
-  await shot(page, 'came-in-1280');
 
   expect(s.core.calls).toEqual(expect.arrayContaining(['git.commitRange', 'git.mergePreview', 'git.mergeDiff', 'git.deletePreview']));
   const previewMethods = ['git.commitRange', 'git.mergePreview', 'git.mergeDiff', 'git.deletePreview', 'git.merge', 'git.sync', 'git.bringCurrent', 'git.deleteBranches'];
@@ -148,7 +139,6 @@ test('390 x 844: the counts list and the merge preview fit a phone', async ({ br
   await page.locator('[data-test=git-merge-file-open]').click();
   await expect(page.locator('[data-test=git-merge-preview] [data-test=diff-view]')).toBeVisible();
   await noSideways(page);
-  await shot(page, 'phone-390');
   await page.locator('[data-test=git-merge-preview] [data-test=commit-link]').first().click();
   await expect(page.locator('[data-test=commit-dialog]')).toHaveAttribute('data-sha', MERGE);
   expect(errors).toEqual([]);

@@ -10,8 +10,6 @@
 //
 //   npx playwright test terminal-links   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
-import path from 'node:path';
-import { mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 import { settled } from './settle';
@@ -19,7 +17,6 @@ import { settled } from './settle';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'terminal-links');
 const URL_ = 'https://example.com/docs?q=1';
 const osc8 = (uri: string, text: string) => `\x1b]8;;${uri}\x1b\\${text}\x1b]8;;\x1b\\`;
 const REPLAY = [
@@ -43,7 +40,6 @@ const OVERRIDES: Record<string, (p?: any) => unknown> = {
 
 test.beforeAll(async () => {
   test.setTimeout(600_000);
-  mkdirSync(SHOTS, { recursive: true });
   for (const k of Object.keys(OVERRIDES)) { saved[k] = (answers as any)[k]; (answers as any)[k] = OVERRIDES[k]; }
   await buildRenderer();
 });
@@ -117,7 +113,6 @@ for (const [w, h] of [[1280, 800], [390, 844]] as const) {
       await expect(box(page)).toBeVisible();
       await expect(page.locator('[data-test=confirm-message]')).toContainText(`Do you want to navigate to ${URL_}?`);
       await expect(page.locator('[data-test=confirm-ok]')).toHaveText('Open');
-      await page.screenshot({ path: path.join(SHOTS, `dialog-${w}x${h}.png`) });
       await page.locator('[data-test=confirm-cancel]').click();
       await expect(box(page)).toHaveCount(0);
       await settled(page); // the confirm's answer handled (an open would be called as it closes)
@@ -167,7 +162,6 @@ for (const [w, h] of [[1280, 800], [390, 844]] as const) {
         await clickLink(page, t, mobile, false);
         await expect(box(page), `${t}: no dialog`).toHaveCount(0);
       }
-      await page.screenshot({ path: path.join(SHOTS, `non-http-${w}x${h}.png`) });
       expect(await opens(page), 'no window.open').toEqual([]);
       expect(popups, 'no popup').toEqual([]);
       expect(dialogs, 'no browser dialog').toEqual([]);

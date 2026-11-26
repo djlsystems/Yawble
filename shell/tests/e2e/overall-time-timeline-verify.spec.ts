@@ -1,7 +1,7 @@
 // The tester's own e2e of the Timeline dialog on remote.html against the phone fake core
 // (tests/e2e/phone, the core's wire contract canned), beside deliverable-timeline.spec.ts:
 // - a CARD (the board's card 3, which has a 38 min Stalled stretch) and a DELIVERABLE (#10, summary row + one row per
-//   card) open the dialog from their overall time, in light and dark at 1280 and 375; screenshots of both;
+//   card) open the dialog from their overall time, in light and dark at 1280 and 375;
 // - the planned / started line ("planned … · started … · 20m before it started"), the Stalled band (hatched), markers;
 // - a break mark on a long quiet gap (deliverable #12 with the expiry fixtures on: 66 h, mostly Idle);
 // - a Visitor (read access) gets the same card dialog; timeline.get is asked;
@@ -10,19 +10,15 @@
 // - no tokens or cost anywhere in the dialog.
 //
 //   npx playwright test overall-time-timeline-verify      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/timeline-verify (else test-results/timeline-verify).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
-import { mkdirSync } from 'node:fs';
-import path from 'node:path';
 import { type Access } from './phone/fake-core';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'timeline-verify');
 
-test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
+test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 
 type Theme = 'light' | 'dark';
 
@@ -135,7 +131,6 @@ for (const [w, h] of [[1280, 800], [375, 667]] as const) {
         expect(sz.scroll, 'the axis is wider than the dialog').toBeGreaterThan(sz.box);
         expect(sz.moved, 'the axis scrolls inside the dialog').toBeGreaterThan(0);
       }
-      await page.screenshot({ path: path.join(SHOTS, `timeline-card-${w}-${theme}.png`) });
       expect(errors).toEqual([]);
       await ctx.close();
     });
@@ -161,7 +156,6 @@ for (const [w, h] of [[1280, 800], [375, 667]] as const) {
       expect(sz.page).toBeLessThanOrEqual(sz.view);
       expect(sz.pageX).toBe(0);
       if (w < 760) expect(sz.moved).toBeGreaterThan(0);
-      await page.screenshot({ path: path.join(SHOTS, `timeline-deliverable-${w}-${theme}.png`) });
       expect(errors).toEqual([]);
       await ctx.close();
     });
@@ -179,7 +173,6 @@ for (const [w, h, theme] of [[1280, 800, 'light'], [375, 667, 'dark']] as const)
     // the 40 min of work stays readable: its band is a real share of the axis, not a sliver
     const width = await dlg.locator('.band.agent-working').first().evaluate((b) => b.getBoundingClientRect().width / (b.parentElement as HTMLElement).getBoundingClientRect().width);
     expect(width).toBeGreaterThan(0.05);
-    await page.screenshot({ path: path.join(SHOTS, `timeline-break-${w}-${theme}.png`) });
     expect(errors).toEqual([]);
     await ctx.close();
   });
@@ -246,7 +239,6 @@ test('a Visitor gets the same card dialog (timeline.get is a read)', async ({ br
   await expect(dlg.locator('[data-test=timeline-error]')).toHaveCount(0);
   await expect(dlg.locator('.band.stalled')).toHaveCount(1);
   expect(s.core.calls).toContain('timeline.get');
-  await page.screenshot({ path: path.join(SHOTS, 'timeline-card-visitor-1280-light.png') });
   expect(errors).toEqual([]);
   await ctx.close();
 });

@@ -10,8 +10,6 @@
 //
 //   npx playwright test member-pane-phone      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser } from './phone/fixtures';
-import path from 'node:path';
-import { mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 import { settled } from './settle';
@@ -19,7 +17,6 @@ import { settled } from './settle';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), process.env.MEMBER_PANE_SHOTS || 'member-pane-screens');
 
 // The terminal's calls (not in the shared fake): an idle member's last run, replayed.
 answers['terminal.banner'] = (p) => ({ memberId: p?.memberId, channel: `member:${p?.memberId}`, title: 'payments / DeveloperAda', details: ['timeout 2h'], loosened: [],
@@ -29,7 +26,7 @@ answers['terminal.attach'] = (p) => ({ channel: p?.channel, replay: Buffer.from(
 answers['terminal.resize'] = () => null;
 answers['terminal.events'] = () => ({ end: 24, chunks: [] });
 
-test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
+test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 
 async function open(browser: Browser, w: number, h: number) {
   const s = fakeRemote(builtDir);
@@ -57,7 +54,6 @@ for (const [w, h] of [[375, 501], [375, 667], [667, 263], [667, 375]] as const) 
   test(`phone ${w}x${h}: the terminal is the whole screen, one header row over the top bar, transcript >= 60%, 44 px controls`, async ({ browser }) => {
     const { page, ctx, errors } = await open(browser, w, h);
     const pane = page.locator('[data-test=agent-DeveloperAda]');
-    await page.screenshot({ path: path.join(SHOTS, `member-pane-${w}x${h}.png`) });
     const m = await page.evaluate(() => {
       const pane = document.querySelector('[data-test=agent-DeveloperAda]')!;
       const r = (e: Element | null) => (e ? e.getBoundingClientRect() : null);
@@ -101,7 +97,6 @@ for (const [w, h] of [[375, 501], [375, 667], [667, 263], [667, 375]] as const) 
 
 test('desktop 1280x800: one frame, one view, the pane fills its grid tile', async ({ browser }) => {
   const { page, ctx, errors } = await open(browser, 1280, 800);
-  await page.screenshot({ path: path.join(SHOTS, 'member-pane-1280x800.png') });
   const m = await page.evaluate(() => {
     const out: Record<string, { h: number; cell: number; views: number; tabs: string[]; menu: boolean }> = {};
     for (const n of ['Manager', 'DeveloperAda', 'TesterBen']) {

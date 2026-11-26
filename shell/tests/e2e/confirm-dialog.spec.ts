@@ -103,7 +103,6 @@ for (const [label, w, h] of [['phone 390x844', 390, 844], ['iPad 820x1180', 820,
       // Escape: the confirm closes, the trigger stays, and the Triggers dialog under it stays open.
       await row.locator('[data-test=trigger-delete]').click();
       await expectConfirm(page, 'Delete the trigger nightly-check?', 'Delete', phone);
-      await page.screenshot({ path: test.info().outputPath(`confirm-trigger-${w}.png`) });
       await page.keyboard.press('Escape');
       await expect(confirmBox(page)).toHaveCount(0);
       await expect(page.locator('[data-test=triggers-table]')).toBeVisible();
@@ -143,7 +142,6 @@ for (const [label, w, h] of [['phone 390x844', 390, 844], ['iPad 820x1180', 820,
       };
 
       await ask();
-      await page.screenshot({ path: test.info().outputPath(`confirm-member-${w}.png`) });
       await page.locator('[data-test=confirm-cancel]').click();
       await expect(confirmBox(page)).toHaveCount(0);
       // The ⋯ menu (v-if) went before the confirm opened: the focus is back on the ⋯ button, not <body>.

@@ -7,20 +7,15 @@
 //  - 390 x 844 (a phone): the same view as a sheet, nothing scrolls sideways but the diff itself; with members' code
 //    hidden from cloud viewers the files are listed and no diff opens.
 //   npx playwright test commit-view      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/commit-view (else test-results/commit-view).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
-import { mkdirSync } from 'node:fs';
-import path from 'node:path';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'commit-view');
-const shot = (page: Page, name: string) => page.screenshot({ path: path.join(SHOTS, `commit-view-${name}.png`) });
 const ADA = '3f9c2a1b7d4e5f60718293a4b5c6d7e8f9012345';
 
-test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
+test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 test.afterEach(() => { fakeRemote(builtDir).core.setCodeShown(true); });
 
 async function open(browser: Browser, w: number, h: number, hash = '#team=1') {
@@ -85,10 +80,8 @@ test('1280 x 800: a member branch commit from the Git dialog: what, where, files
   expect(right.x + right.width).toBeLessThanOrEqual(box.x + box.width + 1);
   expect(right.x).toBeGreaterThan(box.x + box.width / 3);
   await expect(view.locator('[data-test=commit-author]')).toContainText('developerada@yawble.local');
-  await shot(page, 'split-1280');
   await view.locator('[data-test=diff-mode-inline]').click();
   await expect(view.locator('[data-test=diff-inline] [data-test=diff-line]')).toHaveCount(5);
-  await shot(page, 'inline-1280');
 
   // The binary file: its summary line only.
   await view.locator('[data-test=commit-file-open]').nth(2).click();
@@ -99,7 +92,6 @@ test('1280 x 800: a member branch commit from the Git dialog: what, where, files
   await view.locator('[data-test=commit-branch]').click();
   await expect(page.locator('[data-test=commit-dialog]')).toHaveCount(0);
   await expect(page.locator('[data-test=git-member-row][data-focus=true]')).toContainText('members/payments/developerada');
-  await shot(page, 'its-branch-1280');
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -117,7 +109,6 @@ test('1280 x 800: a confirmed commit ID in a card\'s trail opens the view; a gon
   await expect(line.locator('[data-test=commit-link]')).toHaveAttribute('title', /^Partial refunds: refund part of a payment\nNot pushed: only on this computer$/);
   await line.locator('[data-test=commit-link]').first().click();
   await expect(page.locator('[data-test=commit-title]')).toHaveText('Partial refunds: refund part of a payment');
-  await shot(page, 'trail-confirmed-1280');
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -134,7 +125,6 @@ test('390 x 844: the view as a sheet, no sideways scroll; code hidden lists file
   const m = await sideways(page);
   expect(m.docScrollW, 'page scroll width').toBeLessThanOrEqual(m.vw);
   expect(m.past, 'elements past the right edge').toEqual([]);
-  await shot(page, 'phone-390');
   await page.locator('[data-test=modal-close]').last().click();
   await expect(page.locator('[data-test=commit-dialog]')).toHaveCount(0);
 
@@ -147,7 +137,6 @@ test('390 x 844: the view as a sheet, no sideways scroll; code hidden lists file
   await view.locator('[data-test=commit-file-open]').first().click();
   await expect(view.locator('[data-test=diff-view]')).toHaveCount(0);
   expect(s.core.calls.filter((c) => c === 'git.commitDiff').length).toBe(before);
-  await shot(page, 'phone-390-code-hidden');
   expect(errors).toEqual([]);
   await ctx.close();
 });

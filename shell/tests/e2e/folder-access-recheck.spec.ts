@@ -6,9 +6,8 @@
 //  - A folder typed with ".." is listed once; Remove takes it out (stored loosen back to empty).
 //
 //   npx playwright test folder-access-recheck --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/folder-access/verify (else test-results/folder-access/verify).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { answers, createFakeCore } from './phone/fake-core';
 import { ORIGIN, buildRenderer, builtDir } from './phone/server';
@@ -16,7 +15,6 @@ import { ORIGIN, buildRenderer, builtDir } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(150_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'folder-access', 'verify');
 
 /** PolicyPaths.Resolve on Windows, lexically: "/" -> "\", drive upper case, "." and ".." folded, never above C:\. */
 function resolve(raw: string): string {
@@ -113,10 +111,9 @@ async function generalAndBack(page: Page) {
   await page.locator('[data-test=tab-policy]').click();
   await expect(page.locator('[data-test=folder-access]')).toBeVisible();
 }
-const shot = (page: Page, name: string) => page.screenshot({ path: path.join(SHOTS, `${name}.png`) });
 const rwPaths = (page: Page) => page.locator('[data-test=folders-readwrite] [data-test=folder-row] [data-test=folder-path]');
 
-test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
+test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 
 const RUNS = [{ name: '1280-light', size: { width: 1280, height: 800 }, theme: 'light' as const }, { name: '375-dark', size: { width: 375, height: 812 }, theme: 'dark' as const }];
 for (const { name, size, theme } of RUNS) {
@@ -135,11 +132,9 @@ for (const { name, size, theme } of RUNS) {
     await expect(page.locator('[data-test=folder-confirm-title]')).toHaveText('This gives TesterBen read-only on:');
     await expect(page.locator('[data-test=folder-confirm-item]')).toHaveText(['C:\\work\\shared']);
     await page.locator('[data-test=folder-confirm]').scrollIntoViewIfNeeded();
-    await shot(page, `recheck-01-after-round-trip-${name}`);
     // Close asks; Cancel keeps it.
     await page.locator('[data-test=modal-close]').click();
     await expect(page.locator('[data-test=confirm-dialog]')).toContainText('Policy has unsaved changes. Discard?');
-    await shot(page, `recheck-02-close-asks-${name}`);
     await page.locator('[data-test=confirm-dialog] [data-test=confirm-cancel]').click();
     await expect(page.locator('[data-test=confirm-dialog]')).toHaveCount(0);
     await expect(page.locator('[data-test=folder-access]')).toBeVisible();
@@ -166,7 +161,6 @@ for (const { name, size, theme } of RUNS) {
     await openPolicy(page);
     await expect(rwPaths(page)).toHaveText(['C:\\clone', 'C:\\scratch', 'D:\\work\\data']);
     await page.locator('[data-test=folders-readwrite]').scrollIntoViewIfNeeded();
-    await shot(page, `recheck-03-dotdot-once-${name}`);
     const row = page.locator('[data-test=folders-readwrite] [data-test=folder-row][data-path="D:\\\\work\\\\data"]');
     await row.locator('[data-test=folder-remove]').click();
     await expect(page.locator('[data-test=folder-confirm-title]')).toHaveText("This takes away TesterBen's read-write access to:");
@@ -174,7 +168,6 @@ for (const { name, size, theme } of RUNS) {
     await expect(page.locator('[data-test=settings-saved]')).not.toHaveText('Nothing changed.');
     await expect(rwPaths(page)).toHaveText(['C:\\clone', 'C:\\scratch']);
     expect(state.loosen).toEqual({ filesystem: { readonly: ['C:\\work\\shared'] } });
-    await shot(page, `recheck-04-dotdot-removed-${name}`);
     expect(errors).toEqual([]);
     await ctx.close();
   });

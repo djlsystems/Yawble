@@ -5,7 +5,7 @@
 //  - the Delete confirm row (tap Delete): one row, "Cancel" and "Delete" shown as words, the question ellipsized,
 //    the buttons 44 px tall, nothing past the row's edge.
 //  - 1280 x 900 (desktop): the labels shown on one row.
-//   npx playwright test teams-buttons     (measurements: test-results/teams-buttons-measure-*.json; screenshots: test-results/teams-buttons-*.png)
+//   npx playwright test teams-buttons     (measurements: test-results/teams-buttons-measure-*.json)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -69,7 +69,6 @@ test('375 px iPhone: the four buttons are 44 px icons on one row', async ({ brow
   const { page, ctx } = await teamsPage(browser, 375, 812);
   const m = await row(page);
   measured['phone375.normal'] = m;
-  await page.locator('[data-test=team-card]').first().screenshot({ path: path.join(OUT, 'teams-buttons-phone375-normal.png') });
   expect(m.gridIconsOnly, 'icons-only switched on').toBe(true);
   expect(m.flexWrap).toBe('nowrap');
   const btns = m.items;
@@ -91,7 +90,6 @@ test('375 px iPhone: the four buttons are 44 px icons on one row', async ({ brow
   await settled(page);
   const c = await row(page);
   measured['phone375.confirm'] = c;
-  await page.locator('[data-test=team-card]').first().screenshot({ path: path.join(OUT, 'teams-buttons-phone375-confirm.png') });
   const q = c.items.find((i) => i.cls.includes('confirm-q'))!;
   const yes = c.items.find((i) => i.test === 'card-delete-yes')!;
   const no = c.items.find((i) => i.test === 'card-delete-no')!;
@@ -117,7 +115,6 @@ test('375 px iPhone: the four buttons are 44 px icons on one row', async ({ brow
     return { text: q.innerText, qScroll: q.scrollWidth, qClient: q.clientWidth, textOverflow: s.textOverflow, whiteSpace: s.whiteSpace, noRight: no.right, rowRight: rb.right, rowScroll: r.scrollWidth, rowClient: r.clientWidth };
   });
   measured['phone375.confirmLongName'] = long;
-  await second.screenshot({ path: path.join(OUT, 'teams-buttons-phone375-confirm-longname.png') });
   expect.soft(long.qScroll, 'the long question is cut (ellipsized)').toBeGreaterThan(long.qClient);
   expect.soft(long.textOverflow).toBe('ellipsis');
   expect.soft(long.whiteSpace).toBe('nowrap');
@@ -130,7 +127,6 @@ test('1280 px desktop, default 320 px tile: recorded (the labelled row needs mor
   const { page, ctx } = await teamsPage(browser, 1280, 900);
   const m = await row(page);
   measured['desktop1280.tile320'] = m;
-  await page.locator('[data-test=team-card]').first().screenshot({ path: path.join(OUT, 'teams-buttons-desktop1280-tile320.png') });
   // Not a phone: the buttons keep the desktop size (28 px tall), and the row stays inside the tile.
   for (const b of m.items) expect.soft(b.h, `${b.test} desktop height`).toBe(28);
   expect.soft(m.scrollWidth).toBeLessThanOrEqual(m.clientWidth);
@@ -141,7 +137,6 @@ test('1280 px desktop, a 480 px tile: the labels are shown', async ({ browser })
   const { page, ctx } = await teamsPage(browser, 1280, 900, { w: 480, h: 260 });
   const m = await row(page);
   measured['desktop1280.tile480'] = m;
-  await page.locator('[data-test=team-card]').first().screenshot({ path: path.join(OUT, 'teams-buttons-desktop1280-tile480.png') });
   expect(m.gridIconsOnly).toBe(false);
   for (const b of m.items) {
     expect.soft(b.lblShown, `${b.test} label shown`).toBe(true);

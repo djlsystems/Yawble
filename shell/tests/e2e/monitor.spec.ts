@@ -17,7 +17,7 @@
 //   comets            - heads are #38bdf8 (tell) arcs of r 3.2, labels "#card", hand-backs "#card ✓" / "#card ✗".
 //
 //   npx playwright test monitor --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots and the results go to $YAWBLE_TEAM_DOCS/monitor (else test-results/monitor).
+// The results go to $YAWBLE_TEAM_DOCS/monitor (else test-results/monitor).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -28,7 +28,7 @@ test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(150_000);
 
 const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'monitor');
-test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(path.join(SHOTS, 'screens'), { recursive: true }); await buildRenderer(); });
+test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
 
 const TEAM = 'payments';
 const TEAM2 = 'checkout-web-with-a-rather-long-team-name';
@@ -301,7 +301,6 @@ async function clickWorld(page: Page, o: { m: number[] }, p: Pt) {
   const s = screen(o, p.x, p.y);
   await page.mouse.move(box.x + s.x, box.y + s.y);
   await tipShown(page);
-  if (process.env.DBG_CLICK) await page.screenshot({ path: 'test-results/dbg-click.png' });
   if (process.env.DBG_CLICK) console.log('CLICK at', s.x.toFixed(1), s.y.toFixed(1), 'tip:', (await page.locator('[data-test=monitor-tip]').count()) ? (await page.locator('[data-test=monitor-tip]').innerText()).replace(/\s+/g, ' ') : 'none');
   await page.mouse.down();
   await page.mouse.up();
@@ -461,11 +460,10 @@ async function open(browser: Browser, o: OpenOpts = {}) {
   return { page, ctx, feed, core, errors, push };
 }
 
-/** A screenshot once the fonts are in and the layout is at rest (data-settled). */
-async function shot(page: Page, name: string) {
+/** Waits until the fonts are in and the layout is at rest (data-settled). */
+async function atRest(page: Page) {
   await page.evaluate(() => document.fonts.ready.then(() => true));
   if (await page.locator('[data-test=monitor-canvas]').count()) await expect(page.locator('[data-test=monitor-canvas]')).toHaveAttribute('data-settled', 'true', { timeout: 20_000 });
-  await page.screenshot({ path: path.join(SHOTS, 'screens', `${name}.png`) });
 }
 
 const result: Record<string, unknown> = {};
@@ -517,7 +515,7 @@ test('1 deliverable nodes: open ones tied to their members (or hub), blocked loo
   expect(dashedBetween(f, n12, ben).length, '#12 tied to Ben').toBeGreaterThan(0);
   expect(dashedBetween(f, n11, hub).length, '#11 (nobody on it) tied to the hub').toBeGreaterThan(0);
   expect(dashedBetween(f, n11, ada).length).toBe(0);
-  await shot(page, 'wf-01-open-nodes');
+  await atRest(page);
 
   // Blocked: a "blocked" row in deliverable 12.
   feed.row('blocked', BEN, BEN, 12, 0, 'Needs the refund limit');
@@ -527,7 +525,7 @@ test('1 deliverable nodes: open ones tied to their members (or hub), blocked loo
   expect(b12.color, '#12 blocked: orange').toBe(C.blocked);
   expect(b12.lw, 'thicker edge').toBeCloseTo(2.2, 5);
   expect(b12.label, 'its "#12" in the blocked colour').toBe(C.blocked);
-  await shot(page, 'wf-02-blocked');
+  await atRest(page);
 
   // Completed: #10 flashes green and drifts away from the hub; closed: #11 fades as a grey cross.
   await page.evaluate(() => { (window as any).__frames = []; });
@@ -547,7 +545,7 @@ test('1 deliverable nodes: open ones tied to their members (or hub), blocked loo
   expect(dist.at(-1)! - dist[0]!, 'and drifts away from its hub').toBeGreaterThan(30);
   expect(greys.length, 'the closed node fades as a grey square').toBeGreaterThan(10);
   expect(greys.at(-1)!, 'fading').toBeLessThan(greys[0]! - 0.2);
-  await shot(page, 'wf-03-after-ends');
+  await atRest(page);
 
   // A click on the deliverable node #12 opens that deliverable.
   await unhover(page);
@@ -560,7 +558,7 @@ test('1 deliverable nodes: open ones tied to their members (or hub), blocked loo
   }
   await expectDeliverablesPage(page, 12);
   r.clickOpens = 'the Deliverables page with deliverable 12 open (team payments)';
-  await shot(page, 'wf-04-click-opens-deliverable');
+  await atRest(page);
   result.deliverableNodes = r;
   expect(errors).toEqual([]);
   await ctx.close();
@@ -584,7 +582,7 @@ test('1b a deliverable node click with a team focused: the deliverable opens; is
   await expectDeliverablesPage(page, 10);
   const focusAfter = await page.locator('[data-test=monitor-focus]').count();
   result.wfClickFocused = { deliverableOpened: true, focusChipAfterClick: focusAfter };
-  await shot(page, 'wf-05-click-while-focused');
+  await atRest(page);
   // Recorded, not asserted either way: the card expects the focus to be left.
   console.log('FOCUS after a deliverable-node click:', focusAfter ? 'still focused' : 'left');
   expect(errors).toEqual([]);
@@ -638,7 +636,7 @@ test('2 rhythm: the pulse follows the step rate, a command ring fills then burst
   r.runNoExit = { fill1, fill2 };
   expect(fill1, 'the ring is drawn while it runs').not.toBeNull();
   expect(fill2!, 'and fills').toBeGreaterThan(fill1!);
-  await shot(page, 'rhythm-01-run-ring');
+  await atRest(page);
   await page.evaluate(() => { (window as any).__frames = []; });
   feed.step(BEN, 'read', 'src/refund.ts');
   // The ring goes full when the command ends, then it goes: a burst, if there were one, would show before it does.
@@ -667,7 +665,6 @@ test('2 rhythm: the pulse follows the step rate, a command ring fills then burst
     r[`exit${exit}`] = { ring, sparks: sp };
     expect(ring, `exit ${exit}: the ring in ${color}`).toBe(true);
     expect(sp, `exit ${exit}: a burst of ${n} sparks`).toBe(n);
-    if (exit === 2) await shot(page, 'rhythm-02-exit-red');
     await untilFrame(page, (x) => { const b = memberAt(x, BEN); return !!b && arcsAt(x, b, b.r + 12).length === 0; }, 6000); // its ring gone
   }
 
@@ -683,7 +680,7 @@ test('2 rhythm: the pulse follows the step rate, a command ring fills then burst
   expect(g1).toBeDefined();
   expect(g2).not.toBe(g1);
   expect(halo, 'the soft halo').toBe(1);
-  await shot(page, 'rhythm-03-thinking');
+  await atRest(page);
   result.rhythm = r;
   expect(errors).toEqual([]);
   await ctx.close();
@@ -708,7 +705,7 @@ test('3 You node: a question flies in, it glows with the count; a click opens Ne
   expect(y.y).toBeCloseTo(Math.max(120, box.height / 2), 0);
   r.nothingWaiting = { youCount: y.count, fill: y.fill };
   expect(y.count, 'nothing waits: no count').toBeNull();
-  await shot(page, 'you-01-nothing-waiting');
+  await atRest(page);
 
   // A question: the decision row flies to the You node; with the member's attention it counts 1 and glows.
   await page.evaluate(() => { (window as any).__frames = []; });
@@ -727,7 +724,7 @@ test('3 You node: a question flies in, it glows with the count; a click opens Ne
   expect(y.count).toBe('1');
   expect(y.fill, 'glowing').toBe('rgba(46, 26, 84, 0.95)');
   expect(y.needsYou).toBe(true);
-  await shot(page, 'you-02-question-counted');
+  await atRest(page);
 
   // A press on the You node picks nothing (no pick panel, no tip), the release opens Needs you (the Board).
   await page.mouse.move(box.x + y.x, box.y + y.y);
@@ -740,7 +737,7 @@ test('3 You node: a question flies in, it glows with the count; a click opens Ne
   r.click = { pickedOnPress, tip, opened: 'board' };
   expect(pickedOnPress, 'picks nothing').toBe(0);
   expect(tip).toBe(0);
-  await shot(page, 'you-03-click-opened-board');
+  await atRest(page);
   result.you = r;
   expect(errors).toEqual([]);
   await ctx.close();
@@ -766,7 +763,7 @@ test('3b You node: pending network and tool asks are counted (waiting at open: n
   await page.waitForTimeout(2000); // a window longer than a flight (1.5 s): none may start in it
   r.atOpen = { ...(r.atOpen as object), flyingFramesAfter: (await frames(page)).filter((x) => youFlyers(x).length >= 4).length };
   expect((r.atOpen as any).flyingFramesAfter, 'nothing flies for those waiting at open').toBe(0);
-  await shot(page, 'you-04-asks-at-open');
+  await atRest(page);
 
   // A network ask added later, with its change event: it flies in and the count goes to 3.
   await page.evaluate(() => { (window as any).__frames = []; });
@@ -787,7 +784,7 @@ test('3b You node: pending network and tool asks are counted (waiting at open: n
   expect(countedMs, 'on the event, not the 5 s poll').toBeLessThan(3000);
   expect(netFlying, 'the new network ask flies in').toBeGreaterThan(5);
   expect(netRing, 'a ring opens on arrival').toBe(true);
-  await shot(page, 'you-05-network-ask-added');
+  await atRest(page);
 
   // A tool ask added later (installing counts too), with its change event: it flies in, 4.
   await page.evaluate(() => { (window as any).__frames = []; });
@@ -818,7 +815,7 @@ test('3b You node: pending network and tool asks are counted (waiting at open: n
   f = await untilFrame(page, (x) => youNode(x)?.count === '3', 9000);
   r.slowPoll = { count: youNode(f)?.count ?? null, ms: Date.now() - t1 };
   expect(youNode(f)?.count, 'the slow poll: 3').toBe('3');
-  await shot(page, 'you-06-asks-after-poll');
+  await atRest(page);
   result.youAsks = r;
   console.log('YOU-ASKS', JSON.stringify(r));
   expect(errors).toEqual([]);
@@ -840,7 +837,6 @@ test.afterAll(() => {
   try { old = JSON.parse(readFileSync(file, 'utf8')); } catch { /* none yet */ }
   if (Object.keys(needYouResult).length) writeFileSync(file, JSON.stringify({ ...old, ...needYouResult }, null, 2));
 });
-async function needYouShot(page: Page, name: string) { mkdirSync(path.join(NEED_YOU_SHOTS, 'screens'), { recursive: true }); await page.screenshot({ path: path.join(NEED_YOU_SHOTS, 'screens', `${name}.png`) }); }
 
 const FLY = [C.decision, C.blocked, C.fail];
 /** The heads of the flights to the You node this frame, by colour. */
@@ -928,7 +924,6 @@ for (const W of [1280, 375]) {
             await freshFrame(page);
             const y = youNode(await lastFrame(page));
             console.log('TAP you at', you.x.toFixed(1), you.y.toFixed(1), 'node now', y?.x.toFixed(1), y?.y.toFixed(1), 'tip', await page.locator('[data-test=monitor-you-tip]').count(), 'board', await page.locator('[data-test=board]').count(), 'hit', await page.evaluate((q) => (document.elementFromPoint(q.x, q.y) as HTMLElement | null)?.dataset?.test ?? (document.elementFromPoint(q.x, q.y) as HTMLElement | null)?.className, { x: b.x + you.x, y: b.y + you.y }));
-            await needYouShot(page, `${tag}-dbg-tap-${Date.now() % 100000}`);
           }
         }
       } else { await page.mouse.move(b.x + you.x, b.y + you.y); }
@@ -989,13 +984,12 @@ for (const W of [1280, 375]) {
     expect(r.atOpen.soundOn).toBe('on');
     r.atOpen.tip = await tip();
     expect(r.atOpen.tip.summary).toBe('1 question, 1 blocked');
-    if (process.env.DBG_YOU) { console.log('AFTER TIP board', await page.locator('[data-test=board]').count(), 'tip', await page.locator('[data-test=monitor-you-tip]').count()); await needYouShot(page, `${tag}-dbg-after-tip`); }
+    if (process.env.DBG_YOU) { console.log('AFTER TIP board', await page.locator('[data-test=board]').count(), 'tip', await page.locator('[data-test=monitor-you-tip]').count()); }
     r.atOpen.untip = await untip();
-    if (process.env.DBG_YOU) { console.log('AFTER UNTIP', JSON.stringify(r.atOpen.untip), 'board', await page.locator('[data-test=board]').count()); await needYouShot(page, `${tag}-dbg-after-untip`); }
+    if (process.env.DBG_YOU) { console.log('AFTER UNTIP', JSON.stringify(r.atOpen.untip), 'board', await page.locator('[data-test=board]').count()); }
     expect(r.atOpen.untip.tipAfter, 'a tap elsewhere / leaving hides the tip').toBe(0);
     // Both resolve: 0, nothing flies.
     await step('open items resolve', () => { feed.attn.delete('2/DeveloperCleo'); feed.attn.delete(`1/${BEN}`); }, 0, { flights: 0, tones: 0 }, 1500);
-    await needYouShot(page, `${tag}-01-nothing`);
 
     // Only blocked / failed (attention only, no feed rows): each flies in once in its tone, one tone each.
     let s = await step('Ada failed', () => feed.attn.set(`1/${ADA}`, 'failed'), 1, { flights: 1, tones: 1 });
@@ -1007,7 +1001,6 @@ for (const W of [1280, 375]) {
     expect(r.onlyBlockedFailed.kinds).toEqual(['blocked', 'failed']);
     expect(r.onlyBlockedFailed.items[0]).toContain(`${TEAM2} / Developer Cleo`);
     expect(r.onlyBlockedFailed.items[1]).toContain(`${TEAM} / Developer Ada`);
-    await needYouShot(page, `${tag}-02-blocked-failed-tip`);
     await untip();
     // Repeated polls fire nothing new.
     await step('polls only (blocked / failed)', () => {}, 2, { flights: 0, tones: 0 }, 3000);
@@ -1020,7 +1013,6 @@ for (const W of [1280, 375]) {
     r.onlyQuestions = await tip();
     expect(r.onlyQuestions.summary).toBe('2 questions');
     expect(r.onlyQuestions.kinds).toEqual(['question', 'question']);
-    await needYouShot(page, `${tag}-03-questions-tip`);
     await untip();
     await step('questions resolve', () => { feed.attn.delete(`1/${BEN}`); feed.attn.delete('2/Manager'); }, 0, { flights: 0, tones: 0 }, 1500);
 
@@ -1033,7 +1025,6 @@ for (const W of [1280, 375]) {
     expect(r.onlyAsks.items[0]).toContain(`${TEAM} / Developer Ada`);
     expect(r.onlyAsks.items[0]).toContain('api.nuget.org');
     expect(r.onlyAsks.items[1]).toContain('.NET SDK 10');
-    await needYouShot(page, `${tag}-04-asks-tip`);
     await untip();
 
     // A mix: Ada now has a question too (her network ask stays: 2 for her), Ben blocked, Cleo failed. 1 + 1 + 1 + 1 + 1 = 5.
@@ -1045,7 +1036,6 @@ for (const W of [1280, 375]) {
     expect(r.mix.kinds).toEqual(['question', 'network', 'tool', 'blocked', 'failed']);
     expect(r.mix.items.filter((t: string) => t.includes(`${TEAM} / Developer Ada`)).length, 'Ada: a question and a network ask, 2 lines').toBe(2);
     expect(r.mix.more).toBeNull();
-    await needYouShot(page, `${tag}-05-mix-tip`);
     await untip();
     await step('polls only (mix)', () => {}, 5, { flights: 0, tones: 0 }, 3000);
 
@@ -1056,7 +1046,6 @@ for (const W of [1280, 375]) {
     await step('Ben unblocked', () => feed.attn.delete(`1/${BEN}`), 1, { flights: 0, tones: 0 }, 1200);
     // A resolved item that returns is new again.
     await step('Ben blocked again (returns)', () => feed.attn.set(`1/${BEN}`, 'blocked'), 2, { flights: 1, tones: 1 });
-    await needYouShot(page, `${tag}-06-resolved-and-returned`);
 
     // More than ten: 11 network asks on distinct hosts (13 in all): ten lines, then "+3 more".
     await step('11 network asks at once', () => {
@@ -1067,7 +1056,6 @@ for (const W of [1280, 375]) {
     expect(r.many.items.length).toBe(10);
     expect(r.many.more?.trim()).toBe('+3 more');
     expect(r.many.summary).toBe('11 network asks, 1 blocked, 1 failed');
-    await needYouShot(page, `${tag}-07-more-than-ten`);
 
     // The wall changes size: a shorter window, then the panel shown again (hover / tap) follows the You node;
     // then a taller window: desktop re-hovers, on the phone the tapped panel stays open through the resize and follows.
@@ -1080,7 +1068,6 @@ for (const W of [1280, 375]) {
     let yn = youNode(await freshFrame(page));
     if (yn) you = { x: yn.x, y: yn.y };
     r.resized = await tip();
-    await needYouShot(page, `${tag}-08-after-resize-tip`);
     if (!phone) await unhover(page);
     await page.setViewportSize({ width: W, height: H0 });
     await still(page);
@@ -1089,7 +1076,6 @@ for (const W of [1280, 375]) {
     const stayedOpen = (await page.locator('[data-test=monitor-you-tip]').count()) > 0;
     if (phone) expect.soft(stayedOpen, 'the tapped panel stays open through the resize').toBe(true);
     r.grown = { ...(await tip()), stayedOpen };
-    await needYouShot(page, `${tag}-09-after-grow-tip`);
     if (!phone) await unhover(page);
 
     // Opening Needs you: a desktop click on the You node; a phone tap shows the panel with its button, which opens it.
@@ -1137,7 +1123,7 @@ test(`3d You node on a short phone wall (375 x ${H}, 12 asks): inside the wall, 
     legend: { x: Math.round(lb.x - cb.x), y: Math.round(lb.y - cb.y), w: Math.round(lb.width), h: Math.round(lb.height) },
   };
   console.log('short-wall-at', H, JSON.stringify({ ...r, controls: { y: Math.round(rb.y - cb.y), h: Math.round(rb.height) } }));
-  await shot(page, `you-375x${H}-before-tap`);
+  await atRest(page);
   // Short enough that the old place (y 120) lay on the controls row (its top 52 px above the wall's bottom).
   expect(cb.height, 'the 12 asks leave a short wall').toBeLessThan(120 + 24 + 52);
   expect(f.y - 24, 'the node is inside the wall (top)').toBeGreaterThanOrEqual(0);
@@ -1164,7 +1150,7 @@ test(`3d You node on a short phone wall (375 x ${H}, 12 asks): inside the wall, 
   await expect(page.locator('[data-test=monitor-you-tip]')).toBeVisible({ timeout: 4000 });
   r.summary = await page.locator('[data-test=monitor-you-summary]').innerText();
   expect(r.summary).toBe('12 network asks');
-  await shot(page, `you-375x${H}-12-asks`);
+  await atRest(page);
   // The panel's button opens Needs you.
   await page.locator('[data-test=monitor-you-open]').click();
   await expect(page.locator('[data-test=board]')).toBeVisible({ timeout: 5000 });
@@ -1197,7 +1183,7 @@ test('4 cards: an instruction carries "#card", the hand-back comes home with a c
   const out = await label('#4373');
   r.instruction = out && { style: out.style, heads: cometHeads(out.frame).length };
   expect(out?.style, 'the card number rides the comet in the tell colour').toBe(C.tell);
-  await shot(page, 'cards-01-instruction');
+  await atRest(page);
   await landed('#4373');
   await page.evaluate(() => { (window as any).__frames = []; });
   feed.row('handback', ADA, ADA, 10, 0, 'Done');
@@ -1206,7 +1192,7 @@ test('4 cards: an instruction carries "#card", the hand-back comes home with a c
   r.handback = back && { style: back.style, markDiscs: mark };
   expect(back?.style, 'the hand-back in the hand-back colour').toBe(C.handback);
   expect(mark, 'the check rides a small disc').toBeGreaterThan(0);
-  await shot(page, 'cards-02-handback-check');
+  await atRest(page);
   await landed('#4373 ✓');
   feed.row('instruction', BEN, 'Manager', 12, 0, '[card 4374] test it');
   await label('#4374');
@@ -1246,7 +1232,7 @@ test('5 focus: a hub click zooms and dims the rest, its code events only; Esc, t
   const k0 = hubAt(f)!.op.m[0];
   r.before = { k: k0, payments: pillAlpha(f, TEAM), other: pillAlpha(f, TEAM2) };
   expect(pillAlpha(f, TEAM2)).toBe(1);
-  await shot(page, 'focus-01-off');
+  await atRest(page);
 
   // The fit with two small maps (finding: zoomed far out, the hub near or past the left edge): its zoom and hub over 6 s.
   const fitTrace: { k: number; hubX: number; hubY: number }[] = [];
@@ -1268,7 +1254,7 @@ test('5 focus: a hub click zooms and dims the rest, its code events only; Esc, t
   // The other team's files dim too.
   const otherDots = fileDots(f).filter((d) => other && Math.hypot(d.x - other.x, d.y - other.y) < 400);
   r.otherFileAlpha = otherDots.map((d) => +d.alpha.toFixed(3)).slice(0, 4);
-  await shot(page, 'focus-02-on');
+  await atRest(page);
 
   // Code events: commits for both teams; only payments' are drawn. Merges likewise.
   await page.evaluate(() => { (window as any).__frames = []; });
@@ -1385,7 +1371,7 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
     const firstDotMs = trace.find((t) => t.dots > 0)?.ms ?? null;
     const codeReads = feed.calls.slice(callsBefore).filter((c) => c.method === 'monitor.codeEvents').length;
     r[level] = { mapFileNodes: map, stepIconsOnAda: steps, cometHeads: comets, paymentsCommitDots: commits, commitDotsIn3s: in3s, firstCommitDotMs: firstDotMs, codeReadsIn8s: codeReads, stored: await page.evaluate(() => localStorage.getItem('yawble.monitor.density')) };
-    await shot(page, `density-${level}`);
+    await atRest(page);
     await until(page, (x) => commitDots(x).length, (n) => n === 0, 20_000); // the commits fade (12 s) before the next level
   }
   result.density = r;
@@ -1454,7 +1440,7 @@ test('7 reduced motion: comets are still lines with their label, no pulse, no tr
   expect(Math.max(...commitAt) - Math.min(...commitAt), 'the commit does not travel: it is at its resting place from the first frame').toBeLessThan(0.5);
   expect(landedRings, 'no landing burst').toBe(0);
   expect(starts.size, 'the running ring does not turn').toBe(1);
-  await shot(page, 'reduced-motion-1280');
+  await atRest(page);
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -1503,7 +1489,7 @@ test('8 sound: off by default (no oscillator for events), on when turned on and 
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
-// 9. The screenshot matrix, and the remote view at 375 and 1280
+// 9. Every width and theme, and the remote view at 375 and 1280
 
 function busyFeed(): Feed {
   const feed = new Feed();
@@ -1544,7 +1530,7 @@ for (const theme of ['light', 'dark'] as const)
       r.youNode = y && { x: y.x, y: y.y, inside: y.x + 24 <= box.width && y.x - 24 >= 0, count: y.count };
       expect(y, 'the You node is drawn').not.toBeNull();
       expect(y!.x + 24, 'inside the wall').toBeLessThanOrEqual(box.width);
-      await shot(page, `${tag}-focus-off`);
+      await atRest(page);
       // Focus payments (on the phone, a tap on its hub).
       r.focusTries = await focusTeam(page, TEAM, w < 700);
       await expect(page.locator('[data-test=monitor-focus]')).toBeVisible();
@@ -1555,7 +1541,7 @@ for (const theme of ['light', 'dark'] as const)
       if (w < 700) expect(Math.min(leave.width, leave.height), 'a 44 px target on the phone').toBeGreaterThanOrEqual(44);
       await still(page); // zoomed to the team
       await unhover(page);
-      await shot(page, `${tag}-focus-on`);
+      await atRest(page);
       await page.locator('[data-test=monitor-focus-leave]').click();
       // Each density: it sits at the top of the cog's settings panel, at every width.
       r.densityOutsidePanel = await page.locator('[data-test=monitor-density-calm]').count();
@@ -1565,7 +1551,7 @@ for (const theme of ['light', 'dark'] as const)
         const b = (await page.locator('[data-test=monitor-density-calm]').boundingBox())!;
         r.phoneDensityButton = { w: b.width, h: b.height, right: b.x + b.width };
         expect(b.x + b.width).toBeLessThanOrEqual(w);
-        await shot(page, `${tag}-cog-panel-density-sound`);
+        await atRest(page);
       }
       for (const level of ['calm', 'normal', 'lively']) {
         await page.locator(`[data-test=monitor-density-${level}]`).first().click();
@@ -1575,7 +1561,7 @@ for (const theme of ['light', 'dark'] as const)
         else await page.locator('[data-test=monitor-layout-close]').click();
         await expect(page.locator('[data-test=monitor-layout]')).toHaveCount(0);
         await still(page); // the wall redrawn at the new density
-        await shot(page, `${tag}-density-${level}`);
+        await atRest(page);
         if (level !== 'lively') await page.locator('[data-test=monitor-layout-toggle]').click();
       }
       clearInterval(load);
@@ -1647,7 +1633,7 @@ for (const w of [1280, 375])
     await until(page, (x) => !!youNode(x) && fileDots(x).length > 0, Boolean, 12_000);
     await still(page);
     await unhover(page);
-    await shot(page, `reduced-${w}`);
+    await atRest(page);
     clearInterval(load);
     expect(errors).toEqual([]);
     await ctx.close();
@@ -1664,7 +1650,7 @@ test('9c remote view as a Visitor (read access) at 375 and 1280: the wall draws 
     const f = await freshFrame(page);
     const r = { you: !!youNode(f), wfNode10: wfBoxes(f).some((b) => b.color === C.start), wfCalls: feed.calls.filter((c) => c.method === 'bus.deliverables').length, comets: (await frames(page)).some((x) => cometHeads(x).length > 0), files: fileDots(f).length };
     result[`visitor-${w}`] = r;
-    await shot(page, `visitor-${w}`);
+    await atRest(page);
     clearInterval(load);
     expect(r.you).toBe(true);
     expect(r.wfNode10).toBe(true);
@@ -1728,7 +1714,7 @@ for (const level of ['normal', 'lively'] as const)
     };
     result[`perf-${level}`] = stats;
     console.log('PERF', JSON.stringify(stats));
-    await shot(page, `perf-${level}-6-teams`);
+    await atRest(page);
     expect(stats.fps, 'about 60 fps').toBeGreaterThan(55);
     expect(stats.intervalMs.p95).toBeLessThan(20);
     expect(stats.jsPerFrameMs.p95).toBeLessThan(10);

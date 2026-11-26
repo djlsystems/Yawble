@@ -6,8 +6,6 @@
 //
 //   npx playwright test team-settings-phone      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
-import path from 'node:path';
-import { mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 import { settled } from './settle';
@@ -21,9 +19,8 @@ answers['integrations.apiList'] = () => [];
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), process.env.C346_SHOTS || 'C346-screens');
 
-test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
+test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 
 const IDS = ['general', 'hiring', 'state', 'repos', 'env', 'network', 'integrations', 'reset', 'delete'];
 const LABELS = ['General', 'Hiring', 'Pause and archive', 'Repositories', 'Environment', 'Network', 'Integrations', 'Reset', 'Delete'];
@@ -104,7 +101,6 @@ test('phone 390x844: a list of sections; a tap opens one under Back; Back return
   for (let i = 1; i < rows.length; i++) expect.soft(rows[i]!.top, `${rows[i]!.id} under ${rows[i - 1]!.id}`).toBeGreaterThanOrEqual(rows[i - 1]!.top + rows[i - 1]!.h - 0.5);
   await expect(page.locator('[data-test=team-general]')).toHaveCount(0);
   expect((await overflow(page)).bad, 'list: nothing wider than the screen').toEqual([]);
-  await page.screenshot({ path: path.join(SHOTS, 'team-settings-390x844-list.png') });
 
   // Each section: tap, its pane alone under Back + title, nothing too wide, Back to the list.
   for (let i = 0; i < IDS.length; i++) {
@@ -119,7 +115,6 @@ test('phone 390x844: a list of sections; a tap opens one under Back; Back return
     await settled(page);
     const o = await overflow(page);
     expect.soft(o.bad, `${id}: nothing wider than the screen`).toEqual([]);
-    if (['general', 'env', 'delete'].includes(id)) await page.screenshot({ path: path.join(SHOTS, `team-settings-390x844-${id}.png`) });
     await page.locator('[data-test=manage-back]').tap();
     await expect(root).toHaveAttribute('data-phone-screen', 'list');
     await expect(page.locator('[data-test=manage-tabs]')).toBeVisible();
@@ -146,7 +141,6 @@ test('phone 390x844: a list of sections; a tap opens one under Back; Back return
 
 test('desktop 1280x800: the tabs are one row, one line each, no list', async ({ browser }) => {
   const { page, ctx, errors } = await openSettings(browser, 1280, 800);
-  await page.screenshot({ path: path.join(SHOTS, 'team-settings-1280x800.png') });
   await expect(page.locator('.manage')).not.toHaveAttribute('data-phone-screen', /.*/);
   await expect(page.locator('[data-test=manage-back]')).toHaveCount(0);
   await expect(page.locator('[data-test=team-general]')).toBeVisible();

@@ -17,10 +17,7 @@
 // (desktop), Discover scope switch with unsaved changes, IntegrationDialog Close with unsaved changes.
 //
 //   npx playwright test confirm-dialog-sites   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-//   screenshots: $YAWBLE_TEAM_DOCS/confirm-dialog-screens (or test-results/confirm-dialog-screens)
 import { expect, test, type Browser, type Locator, type Page } from './phone/fixtures';
-import path from 'node:path';
-import { mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';
 import { buildRenderer, fakeRemote } from './phone/server';
 import { settled } from './settle';
@@ -28,7 +25,6 @@ import { settled } from './settle';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(180_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'confirm-dialog-screens');
 
 const iso = (min: number) => new Date(Date.now() + min * 60_000).toISOString();
 const trigger = (id: number, name: string) => ({
@@ -85,7 +81,6 @@ const saved: Record<string, unknown> = {};
 
 test.beforeAll(async () => {
   test.setTimeout(900_000);
-  mkdirSync(SHOTS, { recursive: true });
   const agents = answers['teams.agents']!;
   saved['teams.agents'] = agents;
   (answers as any)['teams.agents'] = (p: any, a: any) => (agents(p, a) as { member: { id: number } }[]).filter((c) => !removed.has(c.member.id));
@@ -154,8 +149,8 @@ async function openSettings(page: Page, section: 'open-skills' | 'open-integrati
 
 const box = (page: Page) => page.locator('[data-test=confirm-dialog]');
 
-/** The confirm is shown as asked, fits, has the focus, is on top; Tab / Shift+Tab stay inside. Saves a screenshot. */
-async function expectConfirm(page: Page, s: Size, site: string, message: string | RegExp, okLabel: string, shot: boolean) {
+/** The confirm is shown as asked, fits, has the focus, is on top; Tab / Shift+Tab stay inside. */
+async function expectConfirm(page: Page, s: Size, site: string, message: string | RegExp, okLabel: string) {
   await expect(box(page)).toBeVisible();
   await expect(page.locator('[data-test=confirm-message]')).toHaveText(message);
   await expect(page.locator('[data-test=confirm-ok]')).toHaveText(okLabel);
@@ -189,7 +184,6 @@ async function expectConfirm(page: Page, s: Size, site: string, message: string 
   expect.soft(m.okOnTop, `${at}: OK is what a tap hits`).toBe(true);
   expect.soft(m.pageWide, `${at}: the page does not scroll sideways`).toBe(false);
   if (s.w < 760) expect.soft(m.minButton, `${at}: buttons >= 44 px on a phone`).toBeGreaterThanOrEqual(44);
-  if (shot) await page.screenshot({ path: path.join(SHOTS, `${site}-${s.w}x${s.h}.png`) });
 
   // The focus stays inside, both ways round.
   for (const k of ['Tab', 'Tab', 'Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab']) {
@@ -340,7 +334,7 @@ async function followUp(page: Page, s: Size, kind: 'api' | 'mcp', method: string
     expect(!!call()?.p?.removeConnection, 'remote: the connection is kept').toBe(false);
     return;
   }
-  await expectConfirm(page, s, `${kind}-also-delete-connection`, question, 'Delete', true);
+  await expectConfirm(page, s, `${kind}-also-delete-connection`, question, 'Delete');
   expect(made.filter((m) => m.method === method), 'nothing removed while the follow-up is open').toHaveLength(0);
   await page.keyboard.press('Escape');
   await expect(box(page)).toHaveCount(0);
@@ -384,7 +378,7 @@ for (const s of SIZES) {
 
         // Escape
         await ask();
-        await expectConfirm(page, s, site.id, site.message, site.ok, true);
+        await expectConfirm(page, s, site.id, site.message, site.ok);
         await page.keyboard.press('Escape');
         await expect(box(page)).toHaveCount(0);
         await page.waitForTimeout(300); // nothing may be sent: the time a stray call would take to reach the fake core
@@ -395,7 +389,7 @@ for (const s of SIZES) {
 
         // Cancel
         await ask();
-        await expectConfirm(page, s, site.id, site.message, site.ok, false);
+        await expectConfirm(page, s, site.id, site.message, site.ok);
         await page.locator('[data-test=confirm-cancel]').click();
         await expect(box(page)).toHaveCount(0);
         await page.waitForTimeout(300); // nothing may be sent: the time a stray call would take to reach the fake core
@@ -414,7 +408,7 @@ for (const s of SIZES) {
 
         // OK
         await ask();
-        await expectConfirm(page, s, site.id, site.message, site.ok, false);
+        await expectConfirm(page, s, site.id, site.message, site.ok);
         await page.locator('[data-test=confirm-ok]').click();
         if (site.after) await site.after(page, s);
         else {

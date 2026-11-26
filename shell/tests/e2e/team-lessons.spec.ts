@@ -4,9 +4,8 @@
 // and lists its versions newest first; Restore on version 1 (after the confirm) sends skills.restore { id: 1 }.
 //
 //   npx playwright test team-lessons      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/team-lessons (else test-results/team-lessons).
 import { expect, test, type Browser } from './phone/fixtures';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { answers, createFakeCore } from './phone/fake-core';
 import { ORIGIN, buildRenderer, builtDir } from './phone/server';
@@ -15,7 +14,6 @@ import { settled } from './settle';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'team-lessons');
 const BODY = '## Building and testing\n- Run `npm run build` in shell before any e2e spec: specs load shell/out (2026-11-18, deliverable 12)\n' +
   '## Git\n- Fetch the team branch before merging a member\'s branch (2026-11-17, deliverable 9)\n\n```sh\nnpm run build\n```\nSee [the docs](https://example.com/docs).';
 const retros = { name: 'team_retros', description: 'Lessons from this team\'s earlier work, kept by the Manager\'s retrospectives.', roles: ['any'], body: BODY,
@@ -35,7 +33,6 @@ const saved: Record<string, unknown> = {};
 
 test.beforeAll(async () => {
   test.setTimeout(600_000);
-  mkdirSync(SHOTS, { recursive: true });
   const list = answers['skills.list']!;
   OVERRIDES['skills.list'] = (p) => [...(list(p, 'full') as unknown[]), retros];
   for (const k of Object.keys(OVERRIDES)) { saved[k] = (answers as any)[k]; (answers as any)[k] = OVERRIDES[k]; }
@@ -82,7 +79,6 @@ test('Team settings reads the Lessons line; its link opens Settings > Skills at 
   await expect(line).toHaveText(/^Lessons: 2, last updated .+ by the retro of deliverable 12$/);
   expect(sent.find((s) => s.method === 'teams.lessons')!.params).toEqual({ teamId: 1 });
   await page.locator('[data-test=team-lessons]').scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(SHOTS, 'team-settings-lessons.png') });
 
   await page.locator('[data-test=team-lessons-link]').click();
   await expect(page.locator('[data-test=team-general]')).toHaveCount(0); // the team's Settings closed
@@ -97,9 +93,7 @@ test('Team settings reads the Lessons line; its link opens Settings > Skills at 
   // Both themes (styles.css keys its variables on <html data-theme>): the person can compare the rendered text.
   const theme = (t: string) => page.evaluate((v) => document.documentElement.setAttribute('data-theme', v), t);
   await theme('light');
-  await page.screenshot({ path: path.join(SHOTS, 'skill-markdown-light.png') });
   await theme('dark');
-  await page.screenshot({ path: path.join(SHOTS, 'skill-markdown-dark.png') });
   await theme('light');
   await expect(page.locator('[data-test=skills-pane] h3')).toHaveText('team_retros');
   await expect(page.locator('[data-test=skill-last-writer]')).toContainText('Last written by the retro of deliverable 12');
@@ -110,7 +104,6 @@ test('Team settings reads the Lessons line; its link opens Settings > Skills at 
   await expect(page.locator('[data-test=skill-version-1]')).toContainText('the retro of deliverable 9');
   await page.locator('[data-test=skill-version-show-1]').click();
   await expect(page.locator('[data-test=skill-version-body-1]')).toContainText('Fetch the team branch');
-  await page.screenshot({ path: path.join(SHOTS, 'skills-versions.png') });
 
   await page.locator('[data-test=skill-version-restore-1]').click();
   await page.locator('[data-test=confirm-ok]').click();

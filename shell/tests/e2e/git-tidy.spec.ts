@@ -4,7 +4,7 @@
 //    one yes deletes them, the plan is read again and what was kept is listed with why; Realign on DeveloperAda's branch
 //    is refused (she is running) with the reason; Realign on TesterBen's shows old -> new, one yes, done.
 //  - 360 x 740 and 390 x 844 (through the team page's ⋯ menu), and 1280 x 800: nothing in the dialog scrolls sideways.
-//   npx playwright test git-tidy      (screenshots: $YAWBLE_TEAM_DOCS/git-tidy when set, else test-results/git-tidy-*.png)
+//   npx playwright test git-tidy      (measurements: test-results/git-tidy-*.json)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -14,9 +14,7 @@ test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
 const OUT = path.resolve(__dirname, '..', '..', 'test-results');
-const SHOTS = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'git-tidy') : OUT;
 const BUILT = path.resolve(__dirname, '..', '..', 'out', 'git-tidy', 'renderer');
-const shot = (page: Page, name: string) => { mkdirSync(SHOTS, { recursive: true }); return page.screenshot({ path: path.join(SHOTS, `git-tidy-${name}.png`) }); };
 const save = (name: string, v: unknown) => { mkdirSync(OUT, { recursive: true }); writeFileSync(path.join(OUT, `git-tidy-${name}.json`), JSON.stringify(v, null, 2)); };
 
 test.beforeAll(async () => {
@@ -72,7 +70,6 @@ function expectNoSideways(m: Awaited<ReturnType<typeof sideways>>) {
 
 test('1280 x 800: Tidy… plan, Delete selected with one yes, report kept and why, Realign refused and done', async ({ browser }) => {
   const { page, ctx, errors } = await gitDialog(browser, 1280, 800);
-  await shot(page, 'before-1280');
   await page.locator('[data-test=git-tidy]').click();
   const tidy = page.locator('[data-test=tidy]');
   await expect(tidy.locator('[data-test=tidy-group-merged]')).toBeVisible();
@@ -93,13 +90,11 @@ test('1280 x 800: Tidy… plan, Delete selected with one yes, report kept and wh
   const m1280 = await sideways(page);
   save('sideways-1280', m1280);
   expectNoSideways(m1280);
-  await shot(page, 'plan-1280');
 
   // Delete selected: the core's plans, then one yes.
   await tidy.locator('[data-test=tidy-delete-selected]').click();
   await expect(tidy.locator('[data-test=tidy-delete-plan]').first()).toContainText('Delete members/payments/old-cleo here and on origin');
   await expect(tidy.locator('[data-test=tidy-delete-plan]')).toHaveCount(2); // payments, payments-cloud
-  await shot(page, 'delete-plan-1280');
   await tidy.locator('[data-test=tidy-delete-yes]').click();
   await expect(tidy.locator('[data-test=tidy-report]')).toBeVisible();
   await expect(tidy.locator('[data-test=tidy-done]')).toHaveCount(2);
@@ -111,14 +106,12 @@ test('1280 x 800: Tidy… plan, Delete selected with one yes, report kept and wh
   expect(kept).toContain('feature/old-idea (payments-cloud): only on origin, nobody has it here');
   await expect(tidy.locator('[data-test=tidy-group-merged]')).toHaveCount(0);
   await expect(tidy.locator('[data-test=tidy-group-contained]')).toHaveCount(0);
-  await shot(page, 'after-delete-1280');
 
   // Realign DeveloperAda's moved branch: refused while she runs.
   await tidy.locator('[data-test="tidy-row-members/payments/developerada-moved"] [data-test=tidy-realign]').click();
   await expect(tidy.locator('[data-test=tidy-realign-shas]')).toHaveText('5bbb6ba450 → e0f2a18c0f');
   await tidy.locator('[data-test=tidy-realign-yes]').click();
   await expect(tidy.locator('[data-test=tidy-realign-error]')).toHaveText('Refused: DeveloperAda is running: realign it when the run ends.');
-  await shot(page, 'realign-refused-1280');
   await tidy.locator('[data-test=tidy-realign-cancel]').click();
 
   // Realign TesterBen's: old -> new, one yes, done; his branch is his working branch again.
@@ -128,7 +121,6 @@ test('1280 x 800: Tidy… plan, Delete selected with one yes, report kept and wh
   await expect(tidy.locator('[data-test=tidy-done]')).toHaveText('Realigned members/payments/testerben: 5bbb6ba450 → e0f2a18c0f (the old commit is recorded for recovery).');
   await expect(tidy.locator('[data-test=tidy-group-working]')).toContainText('members/payments/testerben');
   await expect(tidy.locator('[data-test=tidy-kept]').filter({ hasText: 'members/payments/developerada-moved' })).toContainText('Realign to fix');
-  await shot(page, 'after-realign-1280');
   expectNoSideways(await sideways(page));
   expect(errors).toEqual([]);
   await ctx.close();
@@ -137,7 +129,6 @@ test('1280 x 800: Tidy… plan, Delete selected with one yes, report kept and wh
 for (const [w, h] of [[360, 740], [390, 844]] as const) {
   test(`${w} x ${h}: the Tidy… plan, delete plan, report and realign do not scroll sideways`, async ({ browser }) => {
     const { page, ctx, errors } = await gitDialog(browser, w, h);
-    await shot(page, `before-${w}`);
     await page.locator('[data-test=git-tidy]').click();
     const tidy = page.locator('[data-test=tidy]');
     await expect(tidy.locator('[data-test=tidy-group-moved]')).toBeVisible();
@@ -145,11 +136,9 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
     const plan = await sideways(page);
     save(`sideways-plan-${w}`, plan);
     expectNoSideways(plan);
-    await shot(page, `plan-${w}`);
     await tidy.locator('[data-test="tidy-row-members/payments/testerben"] [data-test=tidy-realign]').click();
     await tidy.locator('[data-test=tidy-realign-confirm]').scrollIntoViewIfNeeded();
     expectNoSideways(await sideways(page));
-    await shot(page, `realign-${w}`);
     await tidy.locator('[data-test=tidy-realign-cancel]').click();
     await tidy.locator('[data-test=tidy-delete-selected]').click();
     await tidy.locator('[data-test=tidy-delete-yes]').click();
@@ -158,7 +147,6 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
     const after = await sideways(page);
     save(`sideways-after-${w}`, after);
     expectNoSideways(after);
-    await shot(page, `after-delete-${w}`);
     expect(errors).toEqual([]);
     await ctx.close();
   });
