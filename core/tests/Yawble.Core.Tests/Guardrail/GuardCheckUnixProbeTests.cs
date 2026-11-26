@@ -13,6 +13,7 @@ namespace Yawble.Core.Tests.Guardrail;
 /// must say ALLOWED there, or net.dns-varlink could never catch the escape. An empty folder (what a mask leaves) and a
 /// missing folder must say BLOCKED. No real system program: the test's own socket in its own temp folder.
 /// </summary>
+[Trait("Speed", "Slow")]
 public class GuardCheckUnixProbeTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

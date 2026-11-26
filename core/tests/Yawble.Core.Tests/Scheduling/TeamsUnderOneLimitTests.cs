@@ -13,6 +13,7 @@ namespace Yawble.Core.Tests.Scheduling;
 /// admitted run starts a real stand-in sandbox process. The same checks under real sandboxes are
 /// RealSandboxTeamsUnderOneLimitTests.
 /// </summary>
+[Trait("Speed", "Slow")]
 public class TeamsUnderOneLimitTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

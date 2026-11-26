@@ -11,6 +11,7 @@ namespace Yawble.Core.Tests;
 /// The core as the shell starts it, minus the window: start the real core executable as the shell does, read its
 /// READY line, connect over the socket or pipe, and get the version and getAvailableBackends().
 /// </summary>
+[Trait("Speed", "Slow")]
 public class CoreProcessTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

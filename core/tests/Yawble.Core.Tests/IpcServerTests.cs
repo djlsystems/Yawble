@@ -112,7 +112,7 @@ public class IpcServerTests
     [Fact]
     public async Task UnixSocketIsOwnerOnly()
     {
-        if (OperatingSystem.IsWindows()) return; // the pipe uses PipeOptions.CurrentUserOnly instead
+        if (OperatingSystem.IsWindows()) return; // the pipe has an access list instead (IpcPipeAccessTests)
         var dir = Path.Combine(Path.GetTempPath(), "yawble-test-" + Guid.NewGuid().ToString("N")[..8]);
         var path = Path.Combine(dir, "core.sock");
         var endpoint = IpcEndpoint.Create(path);

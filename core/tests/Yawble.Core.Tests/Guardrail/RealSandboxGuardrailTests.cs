@@ -77,6 +77,7 @@ public sealed class RealSandboxGuardrailCollection
 /// credentials at all. Skipped only when the sandbox itself refuses a proxy-mode request on this host.
 /// </summary>
 [Collection(RealSandboxGuardrailCollection.Name)]
+[Trait("Speed", "Slow")]
 public class RealSandboxGuardrailTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

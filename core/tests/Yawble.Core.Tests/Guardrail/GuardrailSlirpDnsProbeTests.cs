@@ -19,6 +19,7 @@ namespace Yawble.Core.Tests.Guardrail;
 /// by UDP (dns.gateway-udp), and a connect to /run/user/&lt;uid&gt;/bus (dbus.user); each must be BLOCKED. The first
 /// tests use a scripted sandbox; the last ones run the real yawble-guardcheck against the test's own listeners.
 /// </summary>
+[Trait("Speed", "Slow")]
 public class GuardrailSlirpDnsProbeTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

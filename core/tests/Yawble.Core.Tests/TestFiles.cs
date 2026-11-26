@@ -73,4 +73,45 @@ internal static class TestFiles
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetFileInformationByHandle(SafeFileHandle file, out ByHandleFileInformation info);
+
+    /// <summary>
+    /// Makes <paramref name="link"/> a Windows junction to the folder <paramref name="target"/>, with the file
+    /// system's own call (no program is started, and unlike a symbolic link a junction needs no privilege).
+    /// Returns false where the file system refuses one.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    public static bool TryCreateJunction(string link, string target)
+    {
+        const uint GenericWrite = 0x40000000, ShareAll = 7, OpenExisting = 3;
+        const uint BackupSemantics = 0x02000000, OpenReparsePoint = 0x00200000; // a folder, and the link itself
+        const uint SetReparsePoint = 0x000900A4, MountPointTag = 0xA0000003;
+
+        // REPARSE_DATA_BUFFER for a mount point: tag, data length, reserved, then the offsets and lengths (in bytes)
+        // of the two names, then the names in UTF-16, each ended by a zero character.
+        var print = System.Text.Encoding.Unicode.GetBytes(Path.GetFullPath(target));
+        var substitute = System.Text.Encoding.Unicode.GetBytes(@"\??\" + Path.GetFullPath(target));
+        var buffer = new byte[16 + substitute.Length + 2 + print.Length + 2];
+        BitConverter.TryWriteBytes(buffer.AsSpan(0), MountPointTag);
+        BitConverter.TryWriteBytes(buffer.AsSpan(4), (ushort)(buffer.Length - 8));
+        BitConverter.TryWriteBytes(buffer.AsSpan(8), (ushort)0);                        // substitute name offset
+        BitConverter.TryWriteBytes(buffer.AsSpan(10), (ushort)substitute.Length);
+        BitConverter.TryWriteBytes(buffer.AsSpan(12), (ushort)(substitute.Length + 2)); // print name offset
+        BitConverter.TryWriteBytes(buffer.AsSpan(14), (ushort)print.Length);
+        substitute.CopyTo(buffer, 16);
+        print.CopyTo(buffer, 16 + substitute.Length + 2);
+
+        Directory.CreateDirectory(link);
+        using var handle = CreateFileW(link, GenericWrite, ShareAll, 0, OpenExisting, BackupSemantics | OpenReparsePoint, 0);
+        if (!handle.IsInvalid && DeviceIoControl(handle, SetReparsePoint, buffer, (uint)buffer.Length, 0, 0, out _, 0)) return true;
+        handle.Dispose();
+        Directory.Delete(link);
+        return false;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern SafeFileHandle CreateFileW(string name, uint access, uint share, nint security, uint disposition, uint flags, nint template);
+
+    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeviceIoControl(SafeFileHandle device, uint code, byte[] input, uint inputSize, nint output, uint outputSize, out uint returned, nint overlapped);
 }

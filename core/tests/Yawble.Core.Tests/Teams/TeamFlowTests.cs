@@ -21,6 +21,7 @@ namespace Yawble.Core.Tests.Teams;
 /// calls go through the bridge, and its git commands run as a sandboxed agent's would (cwd = clone, HOME = workspace,
 /// nothing else inherited).
 /// </summary>
+[Trait("Speed", "Slow")]
 public class TeamFlowTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

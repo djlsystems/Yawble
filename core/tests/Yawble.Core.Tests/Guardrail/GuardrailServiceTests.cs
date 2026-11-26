@@ -11,6 +11,7 @@ namespace Yawble.Core.Tests.Guardrail;
 
 /// <summary>The check's IPC shape (guardrail.start / guardrail.get), its wiring, and the CLI.</summary>
 [Collection(RealSandboxGuardrailCollection.Name)]
+[Trait("Speed", "Slow")]
 public class GuardrailServiceTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

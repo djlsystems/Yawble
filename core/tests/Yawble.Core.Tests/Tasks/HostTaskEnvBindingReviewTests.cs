@@ -11,6 +11,7 @@ namespace Yawble.Core.Tests.Tasks;
 /// Host task Connection variable review fixes: masking of short, nested and multi-line values; the canonical Connection id; no Cloud Link probing of
 /// Connections through a preview. Fakes only: the in-memory credential store of <see cref="TaskFixture"/>; nothing runs.
 /// </summary>
+[Trait("Speed", "Slow")]
 public class HostTaskEnvBindingReviewTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

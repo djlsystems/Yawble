@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The repository's full test command (Linux, macOS, or Git Bash on Windows).
-# .NET build + tests, the offline sandbox release gate, the release-function tests, and the shell's typecheck, build, unit and window tests.
+# .NET build + tests, the offline sandbox release gate, the release-function and packaging tests, the code browser's
+# unit tests, and the shell's typecheck, build, unit and window tests.
 # On Linux without a display the window test runs under xvfb-run; set YAWBLE_E2E_NO_SANDBOX=1 where Chromium's
 # sandbox cannot start (containers, Ubuntu 24.04 AppArmor).
 set -euo pipefail
@@ -18,6 +19,15 @@ else echo "skipped scripts/tests/release-functions.tests.ps1: no PowerShell on P
 node --test scripts/tests/build-version-stamp.test.mjs
 # The Windows installer's NSIS hooks (the uninstaller removes the data), in a fake NSIS (no makensis, no installer).
 node --test packaging/tests/nsis-include.test.mjs
+# Where the Windows signing hook finds its tools (empty files in a temp folder stand in for them; nothing is signed).
+node --test packaging/tests/windows-signing.test.mjs
+
+# The code browser's unit tests (vitest).
+(
+  cd code-browser
+  [ -d node_modules ] || npm ci
+  npm test
+)
 
 cd shell
 [ -d node_modules ] || npm ci

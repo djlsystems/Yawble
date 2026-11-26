@@ -145,7 +145,8 @@ scripts/test-all.sh
 ```
 
 That builds, runs every .NET test project, the sandbox release gate (`core/tools/Yawble.SandboxCheck`), the release
-script tests, and in `shell/` the typecheck, build, unit tests (vitest) and window tests (Playwright + Electron).
+script and packaging tests, the code browser's unit tests (vitest, in `code-browser/`), and in `shell/` the typecheck,
+build, unit tests (vitest) and window tests (Playwright + Electron).
 On Linux without a display the window tests run under `xvfb-run`; where Chromium's own sandbox cannot start
 (containers, Ubuntu 24.04's AppArmor default) set `YAWBLE_E2E_NO_SANDBOX=1`. That switch exists only in the test
 harness.
@@ -157,6 +158,27 @@ dotnet test --project core/tests/Yawble.Core.Tests
 dotnet test --project bridge/tests/Yawble.Bridge.Tests
 cd shell && npm test && npm run test:e2e
 ```
+
+Core test classes that start real programs other than git (the core itself through `dotnet`, the bridge programs,
+stand-in and real sandboxes, host task programs) carry the trait `Speed=Slow`. A fast run leaves them out; the full
+run is the plain command above:
+
+```bash
+dotnet test --project core/tests/Yawble.Core.Tests -- --filter-not-trait "Speed=Slow"   # fast
+dotnet test --project core/tests/Yawble.Core.Tests                                      # full
+```
+
+To see where a core test run spends its time, write a TRX result file (it holds each test's duration) and print the
+slowest tests and the total per class from it. Keep result files outside the repository:
+
+```bash
+dotnet test --project core/tests/Yawble.Core.Tests -- --report-trx --report-trx-filename core.trx --results-directory ~/yawble-runs
+pwsh scripts/test-times.ps1 ~/yawble-runs/core.trx
+```
+
+The core tests run on half the logical processors and name every test that runs over 30 seconds as a
+`[Long Running Test]` line in the diagnostic log (`-- --diagnostic --diagnostic-output-directory ~/yawble-runs`);
+both are set in `core/tests/Yawble.Core.Tests/xunit.runner.json`.
 
 Tests that start real sandboxes skip themselves on a host whose sandbox backend is missing. Agent runs in tests use
 stand-in CLIs and fake model servers. The tests that check the CLIs installed on the machine (trait

@@ -17,6 +17,7 @@ namespace Yawble.Core.Tests.Scheduling;
 /// </summary>
 [Collection(RealSandboxCollection.Name)]
 [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+[Trait("Speed", "Slow")]
 public class RealSandboxTeamsUnderOneLimitTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

@@ -10,6 +10,7 @@ namespace Yawble.Core.Tests.Tasks;
 /// The tester's gap tests of host task Connection variables. Fakes only: the in-memory credential store and the temp checkout of
 /// <see cref="TaskFixture"/>; no real gh and no network.
 /// </summary>
+[Trait("Speed", "Slow")]
 public class HostTaskEnvBindingGapTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
