@@ -185,7 +185,7 @@ describe('overall time: the Timeline dialog', () => {
     expect(api.asked.find((a) => a.method === 'timeline.get')!.params).toEqual({ deliverable: 10 });
     expect(w.get('[data-test="timeline-overall-value"]').text()).toBe('2h 00m 00s');
     expect(w.find('[data-test="timeline-open"]').exists()).toBe(true);
-    expect(w.get('[data-test="timeline-started"]').text()).toMatch(/^first message \d\d:\d\d · first card started \d\d:\d\d · 10m before it started$/);
+    expect(w.get('[data-test="timeline-started"]').text()).toMatch(/^first message (?:\S+ \d+ )?\d\d:\d\d · first card started (?:\S+ \d+ )?\d\d:\d\d · 10m before it started$/);
     const rows = w.findAll('[data-test="timeline-row"]');
     expect(rows).toHaveLength(7);
     expect(rows[0].text()).toContain('All cards');
@@ -228,10 +228,11 @@ describe('overall time: the Timeline dialog', () => {
     w.unmount();
   });
 
+  // A time on another day than the first carries its date ("Nov 26 00:39"), so each time may have one.
   it('a done card: planned · started · done and how long before it started; its own row', async () => {
     const { w, api } = await dialog({ kind: 'card', id: 5 });
     expect(api.asked.find((a) => a.method === 'timeline.get')!.params).toEqual({ card: 5 });
-    expect(w.get('[data-test="timeline-started"]').text()).toMatch(/^planned \d\d:\d\d · started \d\d:\d\d · done \d\d:\d\d · 10m before it started$/);
+    expect(w.get('[data-test="timeline-started"]').text()).toMatch(/^planned (?:\S+ \d+ )?\d\d:\d\d · started (?:\S+ \d+ )?\d\d:\d\d · done (?:\S+ \d+ )?\d\d:\d\d · 10m before it started$/);
     expect(w.get('[data-test="timeline-span"]').text()).toContain('(done)');
     expect(w.get('[data-test="timeline-overall-value"]').text()).toBe('1h 00m 00s');
     expect(w.findAll('[data-test="timeline-row"]')).toHaveLength(1);
