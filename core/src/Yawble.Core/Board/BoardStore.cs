@@ -298,13 +298,12 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
 
     public int TrailCount(long cardId) => (int)Scalar("SELECT count(*) FROM board_trail WHERE card_id = $c;", ("$c", cardId));
 
-    /// <summary>A deleted team's cards and their trails go with it.</summary>
-    public void DeleteTeam(string team)
-    {
-        Exec("DELETE FROM board_trail WHERE card_id IN (SELECT id FROM board_cards WHERE team = $t COLLATE NOCASE);", ("$t", team));
-        Exec("DELETE FROM board_timeline WHERE card_id IN (SELECT id FROM board_cards WHERE team = $t COLLATE NOCASE);", ("$t", team));
-        Exec("DELETE FROM board_cards WHERE team = $t COLLATE NOCASE;", ("$t", team));
-    }
+    /// <summary>A deleted team's cards go with it, and their trails and timelines: all of them, or none.</summary>
+    public void DeleteTeam(string team) =>
+        Together("delete_team", [("$t", team)],
+            "DELETE FROM board_trail WHERE card_id IN (SELECT id FROM board_cards WHERE team = $t COLLATE NOCASE);",
+            "DELETE FROM board_timeline WHERE card_id IN (SELECT id FROM board_cards WHERE team = $t COLLATE NOCASE);",
+            "DELETE FROM board_cards WHERE team = $t COLLATE NOCASE;");
 
     /// <summary>A removed member's cards become unassigned.</summary>
     public void Unassign(string team, string member) =>
@@ -346,11 +345,13 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
             ("$ar", (object?)i.ArchivedAt ?? DBNull.Value), ("$dt", (object?)i.DispatchedTeam ?? DBNull.Value),
             ("$dw", (object?)i.DispatchedDeliverable ?? DBNull.Value), ("$da", (object?)i.DispatchedAt ?? DBNull.Value), ("$now", Now()), ("$id", i.Id));
 
+    /// <summary>Deletes an archived item and the record of its dispatches: both, or neither.</summary>
     public bool DeleteItem(long id)
     {
         if (Item(id) is not { ArchivedAt: not null }) return false;
-        Exec("DELETE FROM backlog_dispatches WHERE item_id = $id;", ("$id", id));
-        return Exec("DELETE FROM backlog_items WHERE id = $id AND archived_at IS NOT NULL;", ("$id", id)) > 0;
+        return Together("delete_item", [("$id", id)],
+            "DELETE FROM backlog_dispatches WHERE item_id = $id AND EXISTS (SELECT 1 FROM backlog_items WHERE id = $id AND archived_at IS NOT NULL);",
+            "DELETE FROM backlog_items WHERE id = $id AND archived_at IS NOT NULL;") > 0;
     }
 
     /// <summary>Puts a live item between two others (drag and drop): the midpoint of their positions.</summary>
@@ -509,6 +510,25 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
         using var lease = Use();
         using var cmd = Command(lease.Connection, sql, args);
         return cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Runs the statements as one unit of work (its own transaction, or a savepoint on this thread's batch): when one
+    /// fails, none of them has happened. Returns how many rows the last one changed.
+    /// </summary>
+    private int Together(string name, (string, object)[] args, params string[] statements)
+    {
+        using var lease = Use();
+        using var work = lease.Begin(name);
+        var changed = 0;
+        foreach (var sql in statements)
+        {
+            using var cmd = Command(lease.Connection, sql, args);
+            cmd.Transaction = work.Transaction;
+            changed = cmd.ExecuteNonQuery();
+        }
+        work.Commit();
+        return changed;
     }
 
     private long Scalar(string sql, params (string, object)[] args)
