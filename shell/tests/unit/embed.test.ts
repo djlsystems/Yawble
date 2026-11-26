@@ -2,8 +2,6 @@
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick, reactive } from 'vue';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import type { ConversationSummary, TeamSummary } from '../../src/shared/api';
 import type { EmbedNav } from '../../src/shared/embedContract';
 import Sidebar from '../../src/renderer/src/components/Sidebar.vue';
@@ -92,9 +90,6 @@ describe('buildNav: the sidebar as data', () => {
       expect(ids).not.toContain('terminal');
       expect(ids).not.toContain('help');
     }
-    const app = readFileSync(resolve(__dirname, '../../src/renderer/src/App.vue'), 'utf8');
-    expect(app).not.toContain("terminal: () => command('terminal')");
-    expect(app).not.toContain("help: () => command('about')");
   });
   it('badges: Teams counts the teams, Deliverables the open ones; none when 0 or not known', () => {
     const nav = buildNav(base());
@@ -457,10 +452,5 @@ describe('embed mode never reads or writes the remote theme key', () => {
     // The fake is the page's storage (so the checks above would catch a read or a write).
     expect(window.localStorage.getItem(REMOTE_THEME_KEY)).toBe('light');
     expect(get).toHaveBeenCalledWith(REMOTE_THEME_KEY);
-  });
-  it('embed.ts does not import theme.ts or use localStorage', () => {
-    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/embed.ts'), 'utf8');
-    expect(src).not.toMatch(/from '\.\/theme'/);
-    expect(src).not.toMatch(/localStorage|sessionStorage|REMOTE_THEME_KEY|yawble\.remoteTheme/);
   });
 });

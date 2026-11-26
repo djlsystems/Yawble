@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The repository's full test command (Linux, macOS, or Git Bash on Windows).
 # .NET build + tests, the offline sandbox release gate, the release-function and packaging tests, the code browser's
-# unit tests, and the shell's typecheck, build, unit and window tests.
+# unit tests, and the shell's typecheck, lint, build, unit and window tests.
 # On Linux without a display the window test runs under xvfb-run; set YAWBLE_E2E_NO_SANDBOX=1 where Chromium's
 # sandbox cannot start (containers, Ubuntu 24.04 AppArmor).
 set -euo pipefail
@@ -32,6 +32,7 @@ node --test packaging/tests/windows-signing.test.mjs
 cd shell
 [ -d node_modules ] || npm ci
 npm run typecheck
+npm run lint
 npm run build
 npm test
 if [ "$(uname -s)" = "Linux" ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then

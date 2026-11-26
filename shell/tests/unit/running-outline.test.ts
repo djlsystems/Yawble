@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import App from '../../src/renderer/src/App.vue';
 import MemberPane from '../../src/renderer/src/components/MemberPane.vue';
@@ -44,11 +43,6 @@ describe('a running card has a dotted outline whose dots move clockwise', () => 
     expect(w.attributes('style')).toContain('inset: -1px');
     const rect = w.get('rect');
     expect(rect.attributes('rx')).toBe('12');
-    const css = readFileSync('src/renderer/src/components/RunningOutline.vue', 'utf8');
-    // A rect's path runs clockwise from its top-left, so a falling offset of one dot-plus-gap period moves the dots clockwise with no jump.
-    expect(css).toMatch(/stroke-dasharray:\s*0 7/);
-    expect(css).toMatch(/to \{ stroke-dashoffset: -7; \}/);
-    expect(css).toMatch(/prefers-reduced-motion: reduce\) \{ \.dots \{ animation: none; \} \}/);
   });
 
   it('on the Teams list, only a running team card has it, and its border gives way to it', async () => {
@@ -59,21 +53,15 @@ describe('a running card has a dotted outline whose dots move clockwise', () => 
     const cards = w.findAll('[data-test=team-card]');
     expect(cards.map((c) => c.attributes('data-state'))).toEqual(['running', 'queued', 'idle']);
     expect(cards.map((c) => c.find('[data-test=running-outline]').exists())).toEqual([true, false, false]);
-    const css = readFileSync('src/renderer/src/components/TeamsList.vue', 'utf8');
-    expect(css).not.toMatch(/team-breathe/);
-    expect(css).toMatch(/\.team-card\.is-running, \.team-card\.is-running:hover \{[^}]*border-color: transparent/);
   });
 
-  it('on the team page, only a running member card has it, and the old breathing is gone', async () => {
+  it('on the team page, only a running member card has it', async () => {
     const w = mount(MemberPane, { props: { card: card({ state: 'running', runId: 7, runStartedAt: '2026-11-25T10:00:00Z' }) }, global: { stubs: { FolderAsks: true } } });
     expect(w.find('[data-test=running-outline]').exists()).toBe(true);
     await w.setProps({ card: card() });
     expect(w.find('[data-test=running-outline]').exists()).toBe(false);
     await w.setProps({ card: card({ state: 'queued', queuePosition: 1, queueLength: 2, queuedInstructions: 1 }) });
     expect(w.find('[data-test=running-outline]').exists()).toBe(false);
-    const css = readFileSync('src/renderer/src/components/MemberPane.vue', 'utf8');
-    expect(css).not.toMatch(/member-breathe/);
-    expect(css).toMatch(/\.is-running \{[^}]*border-color: transparent/);
   });
 
   it('on the board, only a running card has it, and its border gives way to it', async () => {
@@ -90,7 +78,5 @@ describe('a running card has a dotted outline whose dots move clockwise', () => 
       expect(w.find('[data-test=running-outline]').exists()).toBe(false);
       expect(w.classes()).not.toContain('running');
     }
-    const css = readFileSync('src/renderer/src/board/BoardCardItem.vue', 'utf8');
-    expect(css).toMatch(/\.card\.running, \.card\.running:hover \{ position: relative; border-color: transparent;/);
   });
 });

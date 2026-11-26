@@ -8,12 +8,9 @@ import { shortSha, type CodeEvent } from './codemap';
 import CommitText from '../components/CommitText.vue';
 
 /**
- * THE TIMELINE across the bottom of the Monitor: from `from` to now, a tick for each bus message in its tone (the
- * ones that need the person or end something stand taller), and under them the members' steps, a column of each
- * moment's count (file changes in their own colour), and a diamond at the top for each code event (a commit, a merge
- * into the team branch, a landing on main, a push). The right edge is now. Hovering says what happened there;
- * clicking, or dragging and letting go, asks to replay from that moment (`seek`). In a replay the playhead shows
- * how far it has got.
+ * The timeline under the Monitor's wall, from `from` to now: a tick for each bus message, the members' steps as
+ * columns of counts, and a diamond for each code event. Hovering says what happened there; clicking or dragging asks
+ * to replay from that moment (`seek`); in a replay the playhead shows how far it has got.
  */
 const props = withDefaults(defineProps<{ from: number; to: number; rows: readonly FeedRow[]; steps: readonly StepRow[]; events?: readonly CodeEvent[]; playhead: number | null; live: boolean }>(), { events: () => [] });
 const emit = defineEmits<{ seek: [at: number] }>();

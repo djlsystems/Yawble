@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CoreInfo, YawbleApi } from '../../src/shared/api';
 
-// The tester's break tests for the remote view's access. Fakes only: no core, no link, no network.
+// Edge cases of the remote view's access. Fakes only: no core, no link, no network.
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     cols = 80;

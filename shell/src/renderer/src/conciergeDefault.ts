@@ -4,7 +4,7 @@ import type { ConciergeDefaults, YawbleApi } from '../../shared/api';
 /**
  * The saved Concierge default agent (Settings > Concierge, concierge.defaults): the agent a new chat in the window starts
  * on when it is ready (App.vue defaultCli). Shared so a change saved on the Concierge tab applies to the next new chat at
- * once. null: none saved, or an older core without concierge.defaults (the first ready agent, as before).
+ * once. null: none saved, or an older core without concierge.defaults (then the first ready agent).
  */
 export const savedConciergeAgent = ref<string | null>(null);
 

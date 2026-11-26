@@ -10,9 +10,10 @@
     "build": "npm run build:main && npm run build:renderer",
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
-    "typecheck": "tsc -p tsconfig.main.json --noEmit && vue-tsc -p tsconfig.renderer.json --noEmit && npm run typecheck:tests",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && vue-tsc -p tsconfig.renderer.json --noEmit && npm run typecheck:tests && npm run typecheck:e2e",
     "typecheck:tests": "vue-tsc -p tsconfig.tests.json --noEmit",
     "typecheck:e2e": "vue-tsc -p tsconfig.e2e.json --noEmit",
+    "lint": "eslint src tests",
     "start": "electron .",
     "test": "vitest run",
     "test:e2e": "playwright test"
@@ -32,16 +33,22 @@
     "vue": "^3.5.45"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.65.0",
     "@types/markdown-it": "14.1.2",
     "@types/node": "^22.19.11",
     "@vitejs/plugin-vue": "^6.0.10",
     "@vue/test-utils": "^2.5.1",
     "electron": "^45.2.3",
+    "eslint": "^10.15.0",
+    "eslint-plugin-vue": "^10.12.1",
+    "globals": "^17.14.0",
     "happy-dom": "^21.0.4",
     "typescript": "^6.0.0",
+    "typescript-eslint": "^8.74.0",
     "vite": "^8.3.6",
     "vitest": "^5.1.0",
+    "vue-eslint-parser": "^10.4.2",
     "vue-tsc": "^3.3.14"
   }
 }

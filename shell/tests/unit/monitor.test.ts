@@ -260,7 +260,7 @@ describe('the Monitor view', () => {
     w.unmount();
   });
   it('an activity row\'s face follows its member\'s state: running turns, idle when the member is unknown', async () => {
-    let state = 'running';
+    const state = 'running';
     const api = {
       call: async (method: string) => {
         if (method === 'app.overview') return { slots: { running: 1, limit: 4, queued: 0 }, teams: [{ id: 1, name: 'payments', repoPath: null, members: 1, running: 1, queued: 0 }] };
@@ -358,7 +358,7 @@ describe('the Monitor view', () => {
     const w = mount(MonitorView, { props: { api, pollMs: 60_000 } });
     await flushPromises();
     const lit = () => ['monitor-autofit', 'monitor-pin'].filter((t) => w.get(`[data-test=${t}]`).classes().includes('on'));
-    expect(lit()).toEqual(['monitor-autofit']); // Auto fit, as before
+    expect(lit()).toEqual(['monitor-autofit']); // Auto fit
     await w.get('[data-test=monitor-fit]').trigger('click');
     expect(lit()).toEqual(['monitor-pin']);
     expect(localStorage.getItem('yawble.monitor.camera')).toBe('pinned');
@@ -581,16 +581,6 @@ describe('Team spacing', () => {
     return hs.flatMap((p, i) => hs.slice(i + 1).map((q) => Math.round(Math.hypot(p.x - q.x, p.y - q.y))));
   };
 
-  /** The least distance between two teams' drawn things (each part's box), for every pair of teams: as the team-spacing e2e spec measures it. */
-  const partGaps = (scene: MonitorScene) => {
-    const cl = scene.clusters();
-    const apart = (a: { x0: number; y0: number; x1: number; y1: number }, b: typeof a) => {
-      const dx = Math.max(0, b.x0 - a.x1, a.x0 - b.x1), dy = Math.max(0, b.y0 - a.y1, a.y0 - b.y1);
-      return dx || dy ? Math.hypot(dx, dy) : -1; // -1: they overlap
-    };
-    return cl.flatMap((a, i) => cl.slice(i + 1).map((b) => Math.min(...a.parts.flatMap((p) => b.parts.map((q) => apart(p, q))))));
-  };
-
   it('at the default, two teams\' clusters (members, deliverable nodes, code map) sit close but do not overlap', () => {
     const scene = settledWall(2);
     const cl = scene.clusters();
@@ -614,7 +604,6 @@ describe('Team spacing', () => {
   });
 
   it('settles to the same gap every run, whatever the birth spots and the order things arrive in', () => {
-    // Before the fix, 3 teams' nearest gap measured at 4-248 and 2 teams' at -23 to 157 from run to run.
     for (const count of [2, 3]) {
       const nearest: number[] = [];
       for (const seed of [1, 42, 555]) for (const stagger of [0, 37]) {

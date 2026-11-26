@@ -302,9 +302,8 @@ describe('discover checklist', () => {
 
   it('runs a walk with progress and Cancel, then loads the checklist', async () => {
     let state = 'running';
-    let loaded = false;
     const f = fakeApi({
-      'integrations.checklist': () => { if (!loaded) throw new Error('gh is not set up yet: detect or enable it first'); return checklist(); },
+      'integrations.checklist': () => { throw new Error('gh is not set up yet: detect or enable it first'); },
       'integrations.discoverStatus': () => (state === 'running' ? { state, found: 12, seconds: 4 } : { state }),
       'integrations.discover': () => ({ state: 'running', started: true, found: 0 }),
       'integrations.discoverCancel': () => { state = 'cancelled'; return { ok: true }; },

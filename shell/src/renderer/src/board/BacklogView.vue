@@ -13,13 +13,11 @@ import { useNarrow } from '../narrowScreen';
 import { openDeliverablesPage, type BacklogRequest } from '../deliverables/page';
 
 /**
- * The Backlog: the person's list of work not yet given to a team, in priority order. An item
- * is a SPEC. It is pending until the person has read it and marks it ready; a ready item is dispatched to a team's
- * Manager (or to a new team made for it), which cuts it into cards. When that work is declared complete the item reads
- * "declared"; only the person marks it implemented. Every dispatch is kept with its deliverable, cards and usage.
+ * The Backlog: the person's list of work not yet given to a team, in priority order. An item is a spec: pending until
+ * the person marks it ready, then dispatched to a team's Manager, "declared" when that work is declared complete, and
+ * implemented only when the person says so.
  */
-// teamsLoading: the app's first overview (the teams to dispatch to) has not arrived yet.
-// focus: open with this item selected (an Item link on the Deliverables page; an archived one in the archive).
+// teamsLoading: the app's first overview has not arrived yet. focus: open with this item selected.
 const props = defineProps<{ teams: TeamSummary[]; teamsLoading?: boolean; api?: YawbleApi; pollMs?: number; focus?: BacklogRequest | null }>();
 const emit = defineEmits<{ openTeam: [id: number]; board: [teamId: number | null] }>();
 const api = resolveApi(props.api);

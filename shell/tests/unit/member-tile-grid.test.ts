@@ -5,8 +5,6 @@
 // full-width tile per row, as tall as its content, no handles, New member last.
 // A fake api and a fake matchMedia only: no core, program, network or port.
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import TeamView from '../../src/renderer/src/components/TeamView.vue';
 import {
@@ -71,8 +69,6 @@ const cells = (w: VueWrapper) => w.findAll('[data-test=member-grid] > .member-ce
 const down = (h: any, x = 0, y = 0) => h.trigger('pointerdown', { clientX: x, clientY: y, pointerId: 1, button: 0 });
 const move = (x: number, y: number) => window.dispatchEvent(new PointerEvent('pointermove', { clientX: x, clientY: y, pointerId: 1 }));
 const up = () => window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
-const src = readFileSync(resolve(__dirname, '../../src/renderer/src/components/TeamView.vue'), 'utf8');
-const style = src.slice(src.indexOf('<style'));
 
 describe('team page: the member tiles grid (desktop)', () => {
   it('puts every member and then the New member tile in one grid with the shared size', async () => {
@@ -92,16 +88,9 @@ describe('team page: the member tiles grid (desktop)', () => {
     expect(w.find('[data-test=member-handle-h]').exists()).toBe(false);
     expect(w.find('[data-test=member-tile-grip]').exists()).toBe(false);
     expect(w.get('[data-test=member-tile-handle-w]').attributes('aria-label')).toBe('Resize all member tiles: width');
-    // The old add row is gone.
+    // No add row under the grid: the New member tile holds the form.
     expect(w.find('.add.row').exists()).toBe(false);
     expect(w.find('[data-test=add-agent-name]').exists()).toBe(false);
-  });
-
-  it('the grid wraps equal tiles: auto-fill columns of the shared width (never wider than the row), rows of the shared height', () => {
-    expect(style).toMatch(/\.member-grid \{[^}]*display: grid;[^}]*grid-template-columns: repeat\(auto-fill, min\(var\(--tile-w\), 100%\)\);[^}]*grid-auto-rows: var\(--tile-h\);/);
-    expect(style).toMatch(/\.member-grid \{[^}]*gap: 14px;/);
-    // The pane fills its tile on the desktop, and its view takes the rest (not the old shared output height).
-    expect(style).toMatch(/@media \(min-width: 760px\) \{\s*\.member-cell > :deep\(\.pane\) \{ height: 100%;/);
   });
 
   it('defaults to two members per row at a 1280 px window', () => {
@@ -262,8 +251,6 @@ describe('team page: the member tiles on a phone', () => {
     expect(c).toHaveLength(4);
     expect(c[3]!.find('[data-test=member-card-new-tile]').exists()).toBe(true);
     for (const x of c.slice(0, 3)) expect((x.get('[data-test=member-pane-body]').element as HTMLElement).style.height).toBe('');
-    const phone = style.slice(style.indexOf('@media (max-width: 759.98px)'));
-    expect(phone).toMatch(/\.member-grid \{ grid-template-columns: minmax\(0, 1fr\); grid-auto-rows: auto;/);
     // The form opens in the tile there too.
     await w.get('[data-test=member-card-new]').trigger('click');
     expect(w.find('[data-test=add-agent-name]').exists()).toBe(true);

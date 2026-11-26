@@ -117,6 +117,13 @@ describe('no hard-coded colours in components', () => {
     expect(found, 'use a variable from styles.css (add a semantic one there if none fits)').toEqual([]);
   });
 
+  it('no component wraps the theme selector in :global(...)', () => {
+    // Scoped CSS compiles `:global(:root[data-theme="dark"]) .x` to the bare `:root[data-theme=dark]`: the rule then
+    // styles the whole window, not .x.
+    const found = allVue.filter((f) => /:global\(:root/.test(readFileSync(f.abs, 'utf8'))).map((f) => f.rel);
+    expect(found).toEqual([]);
+  });
+
   it('every variable a component reads is defined (no fallback hides a missing one)', () => {
     const defined = new Set([...`${stylesCss}\n${codeBrowserCss}\n${terminalCss}`.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
     const missing = allVue.filter((f) => !isMonitor(f.rel) && !(f.rel in AllowList)).flatMap((f) => {

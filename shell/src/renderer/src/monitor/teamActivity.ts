@@ -6,12 +6,8 @@ import { readStep, type StepRow } from './steps';
 import { timeOf } from './timeline';
 
 /**
- * ONE TEAM'S ACTIVITY, for the team board: the same lines the Monitor's activity list shows (MonitorModel's activity,
- * from monitor.messages and monitor.steps), kept for this team only, and handed out per member: a member's lines are
- * the ones the Monitor shows when that member is picked (what it did, and what it was told).
- *
- * The feeds are the Monitor's, which carry every team: the newest messages at the start and what follows, and the
- * steps of the last StepMinutes; other teams' rows are dropped. Nothing is drawn, so nothing is played live.
+ * One team's activity, for the team board: the lines the Monitor's activity list shows (from monitor.messages and
+ * monitor.steps), kept for this team only and handed out per member. Nothing is drawn, so nothing is played live.
  */
 export const TeamActivityKeep = 400;
 export const StepMinutes = 240;

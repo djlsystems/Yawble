@@ -7,9 +7,8 @@
 // teams.deliverableExpiry { teamId, days: 5 }. A Visitor's pane has no Extend.
 //
 //   npx playwright test deliverable-expiry      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/deliverable-expiry (else test-results/deliverable-expiry).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore, type Access } from './phone/fake-core';
 import { ORIGIN, buildRenderer, builtDir } from './phone/server';
@@ -18,9 +17,8 @@ import { settled } from './settle';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'deliverable-expiry');
 
-test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
+test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 
 async function open(browser: Browser, access: Access = 'full') {
   const core = createFakeCore();
@@ -65,7 +63,6 @@ test('the Teams list tile rows read expired for #9, with its last activity as th
   await expect(row).toBeVisible();
   await expect(row.locator('[data-test=team-deliverable-expired]')).toHaveText(/expired/);
   await expect(row).toHaveAttribute('data-status', 'expired');
-  await page.screenshot({ path: path.join(SHOTS, 'teams-list-expired.png') });
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -90,13 +87,11 @@ test("the Deliverables page's pane: #9 Expired with no Extend; an expiring one s
   await expect(pane.locator('[data-test=deliverable-pane-status]')).toHaveText('Expired');
   await expect(pane.locator('[data-test=deliverable-pane-extend]')).toHaveCount(0); // an ended one has no Extend
   await expect(pane.locator('[data-test=deliverable-pane-actions]')).toHaveCount(0);
-  await page.screenshot({ path: path.join(SHOTS, 'deliverables-page-expired.png') });
   // The page's idle one with an expiry is in the other team (#16, expires in 20 h).
   await page.locator('[data-test=deliverables-team-filter]').selectOption('2');
   await page.locator('[data-test=deliverables-row][data-wf="16"]').click();
   await expect(pane).toHaveAttribute('data-id', '16');
   await expect(pane.locator('[data-test=deliverable-pane-status]')).toHaveAttribute('title', /Expires in (19|20)h/);
-  await page.screenshot({ path: path.join(SHOTS, 'deliverables-page-extend.png') });
   await pane.locator('[data-test=deliverable-pane-extend]').click();
   await expect(page.locator('[data-test=confirm-message]')).toHaveText('Extend #16? Its expiry clock starts again.');
   await page.locator('[data-test=confirm-ok]').click();
@@ -111,7 +106,6 @@ test('Needs you on the Kanban board: #12 will expire tomorrow on question 3, wit
   await expect(asks).toBeVisible({ timeout: 15_000 });
   await expect(asks.locator('[data-test=deliverable-expiry-text]')).toHaveText('#12 will expire tomorrow; it waits on your answer to question 3');
   await asks.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(SHOTS, 'needs-you-extend.png') });
   await asks.getByRole('button', { name: /Extend/ }).click();
   await expect.poll(() => sent.filter((s) => s.method === 'bus.deliverableExtend').map((s) => s.params)).toEqual([{ teamId: 1, deliverable: 12 }]);
   await expect(asks.locator('[data-test=deliverable-expiry-text]')).toHaveCount(0);
@@ -131,7 +125,6 @@ test('Team settings: Expire idle deliverables after 3 days; saving 5 sends teams
   await expect(page.locator('[data-test=team-deliverable-expiry-saved]')).toBeVisible();
   expect(sent.filter((s) => s.method === 'teams.deliverableExpiry').at(-1)!.params).toEqual({ teamId: 1, days: 5 });
   await page.locator('[data-test=team-deliverable-expiry]').scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(SHOTS, 'team-settings-expiry.png') });
   expect(errors).toEqual([]);
   await ctx.close();
 });

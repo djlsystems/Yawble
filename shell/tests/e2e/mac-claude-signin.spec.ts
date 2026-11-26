@@ -7,9 +7,8 @@
 // core's own macOS texts (Agents/CliSignIn.cs, SignInCatalog.Claude). 1280x800 and 375x812, light and dark.
 //
 //   $env:PW_CHANNEL='chrome'; npx playwright test mac-claude-signin --workers=1   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/mac-claude-signin (else test-results/mac-claude-signin).
 import { expect, test, type Browser } from './phone/fixtures';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { answers, createFakeCore } from './phone/fake-core';
 import { ORIGIN, buildRenderer, builtDir } from './phone/server';
@@ -18,7 +17,6 @@ import { settled } from './settle';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(120_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'mac-claude-signin');
 
 // The core's words (SignInCatalog.Claude on macOS).
 const SIGNED_IN = 'Signed in on this computer (the login Keychain item "Claude Code-credentials"). Agents use this sign-in through the app\'s gateway, '
@@ -40,7 +38,7 @@ const macGrok = {
   signIn: { status: 'signed-in', detail: 'Signed in on this computer (/Users/alice/.grok/auth.json).', files: [], environment: {} },
 };
 
-test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
+test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 
 async function open(browser: Browser, size: { width: number; height: number }, scheme: 'light' | 'dark', signedIn: boolean) {
   answers['agents.detect'] = () => [macClaude(signedIn), macGrok];
@@ -93,7 +91,6 @@ for (const { label, size } of SIZES) {
       const all = await page.locator('[data-test=agent-tiles]').innerText();
       expect(all).not.toMatch(/cannot run on macOS|Claude members cannot|cannot run here yet/);
       await tile.scrollIntoViewIfNeeded();
-      await page.screenshot({ path: path.join(SHOTS, `agents-mac-claude-signed-in-${label}-${scheme}.png`), fullPage: true });
       expect(errors).toEqual([]);
       await ctx.close();
     });
@@ -112,7 +109,6 @@ for (const { label, size } of SIZES) {
       const all = await page.locator('[data-test=agent-tiles]').innerText();
       expect(all).not.toMatch(/cannot run on macOS|Claude members cannot/);
       await tile.scrollIntoViewIfNeeded();
-      await page.screenshot({ path: path.join(SHOTS, `agents-mac-claude-not-signed-in-${label}-${scheme}.png`), fullPage: true });
       expect(errors).toEqual([]);
       await ctx.close();
     });

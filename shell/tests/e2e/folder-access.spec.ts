@@ -10,9 +10,8 @@
 //  - Text typed and not saved: "Unsaved changes", and closing asks "Discard?" (Cancel keeps the dialog, Discard closes it).
 //
 //   npx playwright test folder-access --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/folder-access (else test-results/folder-access).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { answers, createFakeCore } from './phone/fake-core';
 import { ORIGIN, buildRenderer, builtDir } from './phone/server';
@@ -20,7 +19,6 @@ import { ORIGIN, buildRenderer, builtDir } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(150_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'folder-access');
 
 /** The fake core's policy for TesterBen (member 3): the global policy, its override and loosening, merged roughly as the core does. */
 function policyFake() {
@@ -106,17 +104,15 @@ async function openPolicy(page: Page) {
   await expect(page.locator('[data-test=folder-access]')).toBeVisible();
 }
 
-const shot = (page: Page, name: string) => page.screenshot({ path: path.join(SHOTS, `${name}.png`) });
 const rw = (page: Page) => page.locator('[data-test=folders-readwrite] [data-test=folder-row]');
 
-test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
+test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 
 const SIZES = [{ name: '1280', size: { width: 1280, height: 800 } }, { name: '375', size: { width: 375, height: 812 } }];
 for (const { name, size } of SIZES) {
   for (const theme of ['light', 'dark'] as const) {
     test(`folder access, save model and honest results at ${name} (${theme})`, async ({ browser }) => {
       const { page, ctx, errors, sent, state } = await open(browser, size, theme);
-      const tag = `${name}-${theme}`;
       await openPolicy(page);
       // The remote view: text only, no Browse….
       await expect(page.locator('[data-test=folder-add-path]')).toBeVisible();
@@ -124,7 +120,6 @@ for (const { name, size } of SIZES) {
       await expect(rw(page)).toHaveCount(2);
       await expect(page.locator('[data-test=folders-readwrite] [data-source=global]')).toContainText('C:/scratch');
       await expect(page.locator('[data-test=policy-advanced]')).not.toHaveAttribute('open', '');
-      await shot(page, `01-policy-${tag}`);
       // Nothing in the Policy tab makes the dialog scroll sideways (a phone included).
       const sideways = await page.locator('[role=dialog] .body').evaluate((b) => b.scrollWidth - b.clientWidth);
       expect(sideways).toBeLessThanOrEqual(1);
@@ -137,7 +132,6 @@ for (const { name, size } of SIZES) {
       await expect(page.locator('[data-test=folder-confirm-item]')).toHaveText(['C:\\work\\shared']);
       expect(sent.some((s) => s.method === 'policy.saveLoosen')).toBe(false);
       await page.locator('[data-test=folder-confirm]').scrollIntoViewIfNeeded();
-      await shot(page, `02-add-confirm-${tag}`);
       await page.locator('[data-test=folder-confirm]').click();
       await expect(page.locator('[data-test=settings-saved]')).toContainText('Read/write now:');
       await expect(page.locator('[data-test=settings-saved]')).toContainText('C:\\work\\shared');
@@ -147,9 +141,7 @@ for (const { name, size } of SIZES) {
       await expect(page.locator('[data-test=row-filesystem-readwrite]')).toHaveAttribute('data-changed', 'true');
       expect(state.loosen).toEqual({ filesystem: { readwrite: ['C:\\work\\shared'] } });
       await page.locator('[data-test=settings-saved]').scrollIntoViewIfNeeded();
-      await shot(page, `03-added-${tag}`);
       await page.locator('[data-test=row-filesystem-readwrite]').scrollIntoViewIfNeeded();
-      await shot(page, `04-effective-highlight-${tag}`);
 
       // Nothing typed: Close closes at once. Reopen: still there.
       await page.locator('[data-test=modal-close]').click();
@@ -171,7 +163,6 @@ for (const { name, size } of SIZES) {
       await expect(page.locator('[data-test=folder-warning]')).toContainText('"shared" is not a full path');
       await expect(page.locator('[data-test=folder-confirm]')).toHaveText('Confirm anyway');
       await page.locator('[data-test=folder-confirm]').scrollIntoViewIfNeeded();
-      await shot(page, `05-relative-warning-${tag}`);
       await page.locator('[data-test=folder-cancel]').click();
       await page.locator('[data-test=folder-add-path]').fill('');
 
@@ -188,7 +179,6 @@ for (const { name, size } of SIZES) {
       await expect(page.locator('[data-test=loosen-unsaved]')).toHaveText('Unsaved changes');
       await page.locator('[data-test=modal-close]').click();
       await expect(page.locator('[data-test=confirm-message]')).toHaveText('Policy has unsaved changes. Discard?');
-      await shot(page, `06-discard-${tag}`);
       await page.locator('[data-test=confirm-cancel]').click();
       await expect(page.locator('[data-test=folder-access]')).toBeVisible();
       await page.locator('[data-test=modal-close]').click();

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // "Environment from a Connection" in the host task editor, and the in-use note in Connections.
 import { flushPromises, mount } from '@vue/test-utils';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { stopConfirmStubs, stubConfirm } from './confirm-stub';
 afterEach(() => { stopConfirmStubs(); });
 import ConnectionsPanel from '../../src/renderer/src/components/ConnectionsPanel.vue';

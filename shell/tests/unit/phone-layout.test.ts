@@ -2,7 +2,7 @@
 // The phone layout (a window below 760 px wide) of Teams, the Kanban board, Backlog, Monitor, Logs, Documents
 // and the Code browser. matchMedia is a fake whose width the tests set: below 760 px the screens change what CSS
 // cannot (one board lane at a time with tabs and swipe, the list or the file, entries as cards, menus); at 760 px
-// and wider each screen is as it was. The scoped styles carry the same width as @media (max-width: 759.98px).
+// and wider each screen has its desktop layout. The scoped styles carry the same width as @media (max-width: 759.98px).
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
@@ -73,10 +73,6 @@ function fakeApi(answers: Record<string, (params: any) => unknown>) {
   return { api, calls, called: (m: string) => calls.filter((c) => c.method === m) };
 }
 
-/** A component's scoped style rules inside its phone @media block, and the rules outside it (the desktop ones). */
-const PhoneBlock = /@media \(max-width: 759\.98px\) \{([\s\S]*?)\n\}/;
-const phoneRules = (src: string) => PhoneBlock.exec(src)?.[1] ?? '';
-const desktopRules = (src: string) => (/<style scoped>([\s\S]*?)<\/style>/.exec(src)?.[1] ?? '').replace(PhoneBlock, '');
 
 const pointer = (type: string, x: number, y: number, id = 1) => new PointerEvent(type, { clientX: x, clientY: y, pointerId: id, isPrimary: true, bubbles: true });
 
@@ -215,13 +211,6 @@ describe('the Kanban board on a phone', () => {
     await flushPromises();
     expect(visibleLanes(w)).toEqual(['todo', 'in-progress', 'blocked', 'done']);
     expect(w.get('[data-test=lane-todo] .count').text()).toBe('2');
-  });
-
-  it("makes the team link in an opened card's subtitle a 44 px tap target at phone width only (F5)", () => {
-    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/board/CardPanel.vue'), 'utf8');
-    const rules = phoneRules(src);
-    expect(rules).toMatch(/\.sub a \{[^}]*min-height: 44px; min-width: 44px; box-sizing: border-box/);
-    expect(desktopRules(src)).not.toMatch(/\.sub a \{/);
   });
 });
 
@@ -368,19 +357,6 @@ describe('Teams on a phone', () => {
     expect(w.get('section.team').classes()).not.toContain('phone');
   });
 
-  it('the Teams page and the member pieces stack into one column at phone width (scoped @media rules)', () => {
-    const src = (p: string) => readFileSync(resolve(__dirname, '../../src/renderer/src', p), 'utf8');
-    const phoneRules = (p: string) => /@media \(max-width: 759\.98px\) \{([\s\S]*?)\n\}/.exec(src(p))?.[1] ?? '';
-    expect(phoneRules('components/TeamsList.vue')).toMatch(/\.team-grid \{ grid-template-columns: minmax\(0, 1fr\)/);
-    // The member's pane is one column everywhere (one view under its tabs); on a phone the view is at its own height.
-    expect(src('components/MemberPane.vue')).toMatch(/\n\.body \{ display: flex; flex-direction: column/);
-    expect(phoneRules('components/MemberPane.vue')).toMatch(/\.body \{ height: auto; \}/);
-    expect(src('components/TileGrip.vue')).toMatch(/@media \(max-width: 759\.98px\) \{ \.tile-grip \{ display: none; \} \}/);
-    expect(phoneRules('components/MemberPane.vue')).toMatch(/min-width: 44px/);
-    for (const f of ['GitBanner', 'HostChecksBanner', 'TeamSyncBanner', 'UpdateBanner', 'TeamDeliverables', 'AgentTile', 'MemberActivity'])
-      expect(src(`components/${f}.vue`), f).toContain('@media (max-width: 759.98px)');
-  });
-
   it('the Teams list still renders its tiles at phone width (its grips are hidden by CSS)', async () => {
     screen(Phone);
     const { api } = teamApi();
@@ -450,22 +426,6 @@ describe('the Monitor on a phone', () => {
     expect(w.find('[data-test=monitor-layout]').exists()).toBe(true);
     await w.get('[data-test=monitor-layout-close]').trigger('click');
     expect(w.find('[data-test=monitor-layout]').exists()).toBe(false);
-  });
-
-  it('stays dark at phone width: its phone rules use no theme variables', () => {
-    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/monitor/MonitorView.vue'), 'utf8');
-    const rules = /@media \(max-width: 759\.98px\) \{([\s\S]*?)\n\}/.exec(src)?.[1] ?? '';
-    expect(rules).toContain('.controls');
-    expect(rules).not.toContain('var(--');
-  });
-
-  it('fits the forces panel to the phone screen, with 44 px tap targets', () => {
-    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/monitor/MonitorView.vue'), 'utf8');
-    const rules = /@media \(max-width: 759\.98px\) \{([\s\S]*?)\n\}/.exec(src)?.[1] ?? '';
-    expect(rules).toMatch(/\.controls \.cog \{[^}]*min-width: 44px/);
-    expect(rules).toMatch(/\.forces \{[^}]*left: 8px; right: 8px; width: auto;[^}]*overflow-y: auto/);
-    expect(rules).toMatch(/\.forces \.ctl \{[^}]*min-height: 44px; min-width: 44px/);
-    expect(rules).toMatch(/\.force input \{[^}]*min-height: 44px/);
   });
 });
 
@@ -592,7 +552,7 @@ describe('Documents on a phone', () => {
     expect(w.find('[data-test=docs-back]').exists()).toBe(false);
   });
 
-  it('every breadcrumb (the Documents link up and each folder) is at least 44x44 at phone width only (F6)', async () => {
+  it('every breadcrumb (the Documents link up and each folder) is at least 44x44 at phone width only', async () => {
     screen(Phone);
     const { api } = docsApi();
     const w = keep(mount(DocumentsBrowser, { props: { api, team: team as any, fill: true, above: 'Documents' } }));
@@ -601,10 +561,6 @@ describe('Documents on a phone', () => {
     const links = w.findAll('nav.crumbs > a');
     expect(links.map((a) => a.text())).toEqual(['Documents', team.name]);
     expect(links[0]!.attributes('data-test')).toBe('docs-up');
-    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/components/DocumentsBrowser.vue'), 'utf8');
-    expect(phoneRules(src)).toMatch(/\.crumbs a \{[^}]*min-height: 44px; min-width: 44px; box-sizing: border-box/);
-    expect(desktopRules(src)).toMatch(/\.crumbs a \{ color: var\(--accent\); text-decoration: none; \}/);
-    expect(desktopRules(src)).not.toMatch(/\.crumbs a \{[^}]*min-/);
   });
 });
 

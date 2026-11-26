@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { defineComponent, h, nextTick, ref, withDirectives } from 'vue';
 import { applyRemoteAccess, READ_ONLY_TITLE, vChange } from '../../src/renderer/src/remoteAccess';
 
-// Break tests for the fix that keeps a button's own :disabled when access changes. Fakes only: a tiny screen with
+// A button keeps its own :disabled and :title when access changes. Fakes only: a tiny screen with
 // one v-change button whose own :disabled and :title the test drives.
 
 afterEach(() => applyRemoteAccess('full'));
@@ -129,7 +129,7 @@ describe('a button that mounts while access is read', () => {
   });
 });
 
-describe('the screen\'s :title changes while access is read (same kind of fault as finding 1, for titles)', () => {
+describe('the screen\'s :title changes while access is read', () => {
   it('gives back the screen\'s current title, not the one from before read', async () => {
     const s = screen({ disabled: false, title: 'Before' });
     applyRemoteAccess('read');

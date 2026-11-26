@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
-// Gaps in phone-team-more-menu.test.ts, through the whole App at 375 px. Each of the five
+// The team page's ⋯ menu through the whole App at 375 px. Each of the five
 // ⋯ items (Documents, Deliverables, Triggers, Git, Settings) closes the menu on the tap; Deliverables opens the Deliverables page
 // filtered to the team, the others their own dialog, one at a time; the drawer's Team group still offers Documents (its
 // dialog) and Deliverables (the page); widening to 1280 px
-// shows the desktop header unchanged with no ⋯. A fake matchMedia gives the width; the API is a scripted fake.
+// shows the desktop header with no ⋯. A fake matchMedia gives the width; the API is a scripted fake.
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';

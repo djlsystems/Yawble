@@ -1,18 +1,10 @@
 import { reactive, readonly } from 'vue';
 
 /**
- * Which tab each member's pane on the team page shows: its Report (what it last said, the default), its Activity list
- * or its terminal. Kept per member (team name + member name) in this app's storage, a convenience only. Reactive: the team page and any entry
- * point (the Monitor, the palette, the remote view) read and set the same state.
- *
- * focusMemberTerminal is the entry points' one call: it switches that member to Terminal and leaves a request the team
- * page takes when it shows that team (it scrolls the pane into view and clears the request with takeMemberFocus).
- * Opening the team page itself is the caller's part.
- *
- * A phone keeps its own, unstored choice: at most one member's terminal is open (it is the whole screen),
- * so opening one there sets every other member's terminal back to the Report, and the team page opens with no terminal
- * open (TeamView forgets its team's phone terminal when it closes). The remembered choice above applies at desktop widths only;
- * a phone neither reads nor changes it.
+ * Which tab each member's pane on the team page shows: Report (the default), Activity or Terminal. Kept per member in
+ * this app's storage and shared by every entry point. focusMemberTerminal switches a member to Terminal and leaves a
+ * request the team page takes when it shows that team. A phone keeps its own, unstored choice: at most one member's
+ * terminal is open there, as the whole screen.
  */
 export type MemberView = 'report' | 'activity' | 'terminal';
 /** The tabs, in their order. */

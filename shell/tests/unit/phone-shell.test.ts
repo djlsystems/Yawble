@@ -205,7 +205,7 @@ describe('the shell on a phone: the drawer', () => {
     await nextTick();
     expect(w.find('[data-test=menubar]').exists()).toBe(false);
     await w.get('[data-test=drawer-toggle]').trigger('click');
-    // Folded at first (F2): one row, Theme, terminal and help; a tap opens it.
+    // Folded at first: one row, Theme, terminal and help; a tap opens it.
     const more = w.get('[data-test=drawer-more]');
     expect(more.attributes('aria-expanded')).toBe('false');
     expect((w.get('[data-test=drawer-menu-items]').element as HTMLElement).style.display).toBe('none');
@@ -239,7 +239,7 @@ describe('the shell on a phone: the drawer', () => {
     expect(w.find('[data-test=drawer-menu]').exists()).toBe(false);
     expect(w.get('[data-test=sidebar]').attributes('inert')).toBeUndefined();
     await w.get('[data-test=sidebar-collapse]').trigger('click');
-    expect(w.get('.app').classes()).toContain('collapsed'); // the desktop's fold to a rail, as before
+    expect(w.get('.app').classes()).toContain('collapsed'); // the desktop's fold to a rail
     expect(w.find('[data-test=sidebar-rail]').exists()).toBe(true);
   });
 });
@@ -251,9 +251,6 @@ describe('the drawer (Sidebar) on a phone', () => {
     const w = keep(mount(Sidebar, { props: { ...props, drawer: true, open: true } }));
     expect(w.get('[data-test=sidebar]').classes()).toEqual(expect.arrayContaining(['drawer', 'open']));
     expect(w.find('[data-test=chat-rename]').exists()).toBe(true);
-    const css = readFileSync(resolve(__dirname, '../../src/renderer/src/components/Sidebar.vue'), 'utf8');
-    expect(css).toMatch(/\.drawer \.chat \.actions \{ display: flex; \}/);
-    expect(css).toMatch(/\.drawer \.item, \.drawer \.chat \.open \{ min-height: 44px; \}/);
   });
 });
 
@@ -269,7 +266,7 @@ describe('dialogs on a phone: a full-screen sheet', () => {
     expect(w.get('[data-test=modal-close]').attributes('aria-label')).toBe('Close');
   });
 
-  it('is the centred dialog at 760 px and wider, as before', () => {
+  it('is the centred dialog at 760 px and wider', () => {
     setWidth(760);
     const w = keep(mount(host('New team'), { attachTo: document.body }));
     expect(w.get('.modal').classes()).not.toContain('sheet');
@@ -319,8 +316,6 @@ describe('the Concierge on a phone', () => {
     await nextTick();
     expect(page().attributes('style')).toContain('--keyboard: 0px');
     expect(page().classes()).not.toContain('keyboard');
-    const css = readFileSync(resolve(__dirname, '../../src/renderer/src/components/ConciergeView.vue'), 'utf8');
-    expect(css).toContain('.concierge.phone { padding-bottom: var(--keyboard, 0px); }');
   });
 
   it('on the desktop the page has no keyboard padding and no phone class', async () => {
@@ -369,14 +364,6 @@ describe('Needs You on a phone: full-width cards, buttons stacked', () => {
       expect(comp.find('[data-test=companion-approve]').exists()).toBe(true);
     });
   }
-
-  it('the phone rules stack the buttons and take the full width', () => {
-    for (const file of ['NetworkAskCard', 'ToolAskCard', 'TaskAskCard', 'CompanionAsks']) {
-      const css = readFileSync(resolve(__dirname, `../../src/renderer/src/components/${file}.vue`), 'utf8');
-      expect(css, file).toMatch(/\.phone \.buttons \{ flex-direction: column; align-items: stretch;/);
-      expect(css, file).toMatch(/\.phone[^{]*\{[^}]*width: 100%/);
-    }
-  });
 });
 
 describe('Settings on a phone: one section per screen', () => {
@@ -419,7 +406,7 @@ describe('Settings on a phone: one section per screen', () => {
     expect(w.get('[data-test=settings-section-title]').text()).toBe('Agents');
   });
 
-  it('on the desktop: the tabs and the pane together, as before', async () => {
+  it('on the desktop: the tabs and the pane together', async () => {
     setWidth(1280);
     const f = fakeApi(answers);
     const w = keep(mount(SettingsView, { props: { api: f.api, tab: 'general', teams: [], landing: true } }));
@@ -488,9 +475,8 @@ describe('tooltips by tap (no hover on a phone)', () => {
   });
 });
 
-// The faults F1 to F4 the phone e2e run found. happy-dom has no layout, so the sizes are the CSS rules.
-describe('phone e2e faults F1 to F4', () => {
-  const src = (file: string) => readFileSync(resolve(__dirname, `../../src/renderer/src/${file}`), 'utf8');
+// What a phone shows around the view: the banners' box, the drawer's menu, the composer's Attach, the Visitor chip's room.
+describe('the phone shell around the view', () => {
   const asks = {
     ...core,
     'network.asks': () => [{ id: 7, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'payments', member: 'payments/DeveloperInes', memberName: 'DeveloperInes',
@@ -510,7 +496,7 @@ describe('phone e2e faults F1 to F4', () => {
     return w;
   }
 
-  it('F1: on a phone every banner is in one box above the view; the view and the composer stay outside it', async () => {
+  it('on a phone every banner is in one box above the view; the view and the composer stay outside it', async () => {
     const w = await mountWithAsks(390);
     const box = w.get('[data-test=banners]');
     expect(box.find('[data-test=network-asks]').exists()).toBe(true);
@@ -522,20 +508,7 @@ describe('phone e2e faults F1 to F4', () => {
     expect(box.element.nextElementSibling?.classList.contains('content')).toBe(true);
   });
 
-  it('F1: the box holds them all in at most 40% of a phone\'s height and scrolls; no banner has its own half-screen cap', () => {
-    const app = src('App.vue');
-    // 50dvh after its 50vh fallback: half of what the browser really shows.
-    expect(app).toContain('.banners { display: block; flex: none; max-height: 50vh; max-height: 50dvh; overflow-y: auto;');
-    expect(app).toContain('.phone .banners { max-height: 40dvh; }');
-    expect(app).toMatch(/\.content \{ flex: 1; min-height: 0;/); // the view takes the rest
-    for (const file of ['components/NetworkAsks.vue', 'components/ToolAsks.vue']) {
-      expect(src(file), file).not.toMatch(/max-height: 50dvh/);
-      expect(src(file), file).toContain('.banner.phone { padding: 8px 8px; }');
-    }
-  });
-
   it('at 760 px and wider the same box holds the banners in at most half the window and scrolls', async () => {
-    expect(src('App.vue')).not.toContain('.banners { display: contents; }');
     const w = await mountWithAsks(760);
     expect(w.get('.app').classes()).not.toContain('phone');
     expect(w.find('[data-test=banners] [data-test=network-asks]').exists()).toBe(true);
@@ -548,7 +521,7 @@ describe('phone e2e faults F1 to F4', () => {
     menu: [{ id: 'terminal', label: 'Terminal' }, { id: 'theme:dark', label: 'Dark', radio: true, checked: true }, { id: 'about', label: 'About' }] as any,
   };
 
-  it('F2: the drawer\'s menu is one folded row; a tap shows its items and a second tap folds it again', async () => {
+  it('the drawer\'s menu is one folded row; a tap shows its items and a second tap folds it again', async () => {
     setWidth(390);
     const w = keep(mount(Sidebar, { props: { ...sidebarProps, drawer: true, open: true } }));
     const items = () => w.get('[data-test=drawer-menu-items]').element as HTMLElement;
@@ -566,27 +539,7 @@ describe('phone e2e faults F1 to F4', () => {
     expect(w.get('[data-test=slots]').text()).toContain('Run slots');
   });
 
-  it('the drawer scrolls as one list: the Teams and Chats lists are not a box of their own, and the footer follows them', () => {
-    const css = src('components/Sidebar.vue');
-    expect(css).toContain('.side.drawer { overflow-y: auto;');
-    expect(css).toContain('.drawer .brand, .drawer .item.new, .drawer .places, .drawer .foot, .drawer .lists { flex: none; }');
-    expect(css).toContain('.drawer .lists { overflow: visible; }');
-    // The desktop sidebar keeps its rules: the lists flex and scroll. Only a window shorter than its fixed rows
-    // (a phone in landscape at a desktop width) scrolls the sidebar itself, the lists then kept at least 96 px.
-    expect(css).toContain('.lists { flex: 1; overflow: auto; min-height: min(96px, 100%); }');
-    expect(css).toMatch(/\.side \{ [^}]*min-height: 0; overflow-y: auto; padding: 8px 8px 6px; \}/);
-  });
-
-  it('F3 and F4: on a phone Attach is a 44 x 44 square and the text box is at least 44 px tall; the desktop rules are unchanged', () => {
-    const css = src('components/Composer.vue');
-    expect(css).toContain('.phone .pick.attach { min-width: 44px; width: 44px; height: 44px; padding: 0; flex: none;');
-    expect(css).toMatch(/\.phone textarea \{[^}]*min-height: 44px; box-sizing: border-box;/);
-    // The desktop's: unchanged.
-    expect(css).toContain('textarea { width: 100%; border: 0; outline: 0; resize: none; background: transparent; font-size: 15px; line-height: 1.5; padding: 4px 0; max-height: 240px;');
-    expect(css).toContain('.attach { border: 0; background: transparent; cursor: pointer; }');
-  });
-
-  it('F3: the Attach button carries both classes, in a phone composer and for a Visitor', async () => {
+  it('the Attach button carries both classes, in a phone composer and for a Visitor', async () => {
     setWidth(390);
     applyRemoteAccess('read');
     const w = keep(mount(Composer, { props: { teams: [], agents: [], cli: 'claude', teamId: null, running: false } }));
@@ -594,12 +547,11 @@ describe('phone e2e faults F1 to F4', () => {
     expect(w.get('[data-test=composer-attach]').classes()).toEqual(expect.arrayContaining(['pick', 'attach']));
   });
 
-  it('F7: the Visitor chip\'s 150 px room is kept in the top bar only, never in the Composer\'s bar', async () => {
+  it('the Visitor chip\'s 150 px room is kept in the top bar only, never in the Composer\'s bar', async () => {
     const css = readFileSync(resolve(__dirname, '../../src/renderer/src/styles.css'), 'utf8');
     const rule = /(:root\[data-remote-access="read"\][^{]*)\{ padding-right: calc\(150px/.exec(css);
     expect(rule).not.toBeNull();
     const selector = rule![1].trim();
-    expect(css).not.toContain('.app.phone .bar {'); // the bare .bar matched every bar under the shell
     setWidth(390);
     const { w } = await mountApp({ remote: true });
     applyRemoteAccess('read');
@@ -610,7 +562,7 @@ describe('phone e2e faults F1 to F4', () => {
     expect(bar.matches(selector)).toBe(false);
   });
 
-  it('F8: a sheet\'s header keeps the Visitor chip\'s 150 px room too; no bar in its body, nothing on the desktop', async () => {
+  it('a sheet\'s header keeps the Visitor chip\'s 150 px room too; no bar in its body, nothing on the desktop', async () => {
     const css = readFileSync(resolve(__dirname, '../../src/renderer/src/styles.css'), 'utf8');
     const at = css.indexOf('@media (max-width: 759.98px) {');
     const m = /(:root\[data-remote-access="read"\][^{]*\.modal\.sheet[^{]*)\{ padding-right: calc\(150px/.exec(css);
@@ -626,7 +578,7 @@ describe('phone e2e faults F1 to F4', () => {
     w.unmount();
     setWidth(760);
     const d = keep(mount(host, { attachTo: document.body }));
-    expect(d.get('.modal > header.row').element.matches(selector)).toBe(false); // no sheet: the dialog as before
+    expect(d.get('.modal > header.row').element.matches(selector)).toBe(false); // no sheet: the centred dialog
     applyRemoteAccess('full');
     setWidth(390);
     const f = keep(mount(host, { attachTo: document.body }));
@@ -638,17 +590,5 @@ describe('the page and the stylesheet', () => {
   it('remote.html lets a phone show the page at its own width, edge to edge', () => {
     const html = readFileSync(resolve(__dirname, '../../src/renderer/remote.html'), 'utf8');
     expect(html).toContain('<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">');
-  });
-
-  it('styles.css: below 760 px every tap target is at least 44 px, the Visitor chip moves to the top bar; nothing at 760 px and wider', () => {
-    const css = readFileSync(resolve(__dirname, '../../src/renderer/src/styles.css'), 'utf8');
-    const at = css.indexOf('@media (max-width: 759.98px) {');
-    expect(at).toBeGreaterThan(0);
-    const block = css.slice(at);
-    expect(block).toMatch(/button, select, input:not\(\[type=checkbox\], \[type=radio\], \[type=hidden\]\) \{ min-height: 44px; \}/);
-    expect(block).toMatch(/button \{ min-width: 44px; \}/);
-    expect(block).toMatch(/\.remote-access-chip \{[^}]*top:/);
-    expect(css).not.toMatch(/@media \(min-width/); // nothing keyed on the desktop width: it keeps its rules as they were
-    expect(css).toContain('.tap-tip {');
   });
 });

@@ -417,7 +417,6 @@ export class WebsiteHost {
   private guard<T>(page: Page, call: () => Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       let done = false;
-      let timer: unknown;
       const hook = (e: NavEvent) => { if (e.t === 'gone') fail(new Error('the page crashed; open it again')); };
       const cleanup = () => { done = true; page.hooks.delete(hook); this.clock.clearTimeout(timer); };
       const fail = (err: Error) => {
@@ -434,7 +433,7 @@ export class WebsiteHost {
         return;
       }
       page.hooks.add(hook);
-      timer = this.clock.setTimeout(() => fail(new Error('the page did not answer in time; it was closed')), limit);
+      const timer = this.clock.setTimeout(() => fail(new Error('the page did not answer in time; it was closed')), limit);
       let started: Promise<T>;
       try {
         started = Promise.resolve(call());
@@ -566,7 +565,7 @@ export class WebsiteHost {
       existing.win.focus();
       return { ok: true };
     }
-    let host = r.siteUrl;
+    let host: string;
     try {
       host = new URL(r.siteUrl).hostname;
     } catch {

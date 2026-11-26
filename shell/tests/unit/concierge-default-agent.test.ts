@@ -64,8 +64,8 @@ describe('a new chat and the saved Concierge default agent', () => {
     savedConciergeAgent.value = null;
   });
 
-  // F1 (fixed): the window used to send the first ready agent whatever was saved.
-  it('F1: with "grok" saved and claude ready first, a new chat is sent on grok', async () => {
+  // A new chat goes to the saved default agent, not to the first ready one.
+  it('with "grok" saved and claude ready first, a new chat is sent on grok', async () => {
     const core = fakeCore('grok');
     const cli = await sentCli(core);
     expect(cli === 'grok' || cli == null).toBe(true);

@@ -336,7 +336,7 @@ describe('folder access helpers', () => {
     const v: any = { global: { filesystem: {} }, implicit: { readwrite: [], readonly: [], denied: [] }, override: {},
       loosen: { filesystem: { readwrite: ['J:\\link'] } },
       effective: { readwrite: ['D:\\real\\target'], readonly: [], denied: [], loosened: ['filesystem.readwrite + D:\\real\\target'] } };
-    // Not known yet: the spelling does not match, so the entry also shows as not added (as before).
+    // Not known yet: the spelling does not match, so the entry also shows as not added.
     expect(folderRows(v, 'readwrite').map((r) => [r.path, r.own, !!r.covered])).toEqual([['D:\\real\\target', 'D:\\real\\target', false], ['J:\\link', 'J:\\link', true]]);
     // With the core's answer for the entry: one row, and Remove takes out the stored spelling.
     const resolved = (list: string, e: string) => (list === 'readwrite' && e === 'J:\\link' ? 'D:\\real\\target' : undefined);

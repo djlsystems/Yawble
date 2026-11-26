@@ -1,5 +1,5 @@
 import { reactive, ref } from 'vue';
-import type { AgentModelList, AgentProfileRow, MemberRow, YawbleApi } from '../../shared/api';
+import type { AgentModelList, AgentProfileRow, YawbleApi } from '../../shared/api';
 import { modelOptions, type ModelOption } from './modelOptions';
 
 /**

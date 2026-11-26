@@ -13,7 +13,7 @@
 //   empty middle       - the distance from the hubs' centroid to the nearest drawn thing.
 //
 //   npx playwright test team-spacing --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots and results go to $YAWBLE_TEAM_DOCS/team-spacing and deliverable-nodes.
+// The results go to $YAWBLE_TEAM_DOCS/team-spacing and deliverable-nodes (else test-results).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -28,11 +28,11 @@ const SPACING_DIR = path.join(DOCS, 'team-spacing');
 const NODES_DIR = path.join(DOCS, 'deliverable-nodes');
 test.beforeAll(async () => {
   test.setTimeout(600_000);
-  for (const d of [SPACING_DIR, NODES_DIR]) ensureDir(path.join(d, 'screens'));
+  for (const d of [SPACING_DIR, NODES_DIR]) ensureDir(d);
   await buildRenderer();
 });
 
-const INK = '#e2e8f0', INK_DIM = '#94a3b8', BLOCKED = '#fb923c', DONE = '#34d399';
+const INK = '#e2e8f0', INK_DIM = '#94a3b8', DONE = '#34d399';
 const FILE_COLORS = ['#7dd3fc', '#a3e635', '#2dd4bf'];
 const TEAMS = ['alpha', 'bravo', 'charlie'];
 const MEMBERS: Record<string, string[]> = {
@@ -56,7 +56,7 @@ const ALL_WFS = TEAMS.flatMap((_, i) => wfsOf(i));
 const titleOf = (id: number) => ALL_WFS.find((w) => w.id === id)!.title;
 
 /**
- * The rule cards 405 / 409 state, written out here to check what is drawn: "#id title", "Backlog item " dropped, 30 chars
+ * The label rule, written out here to check what is drawn: "#id title", "Backlog item " dropped, 30 chars
  * with "…"; only "#id" when the WINDOW is phone-wide (under 760: the window, not the canvas) and zoomed out under 0.6.
  * A crowded label may also fall back to "#id" or be left out (placeDeliverableLabels): see labelCheck.
  */
@@ -134,7 +134,7 @@ function seedWall(feed: Feed, n: number) {
     });
     // A wide map: 6 folders of 4 files, one commit per folder.
     for (let f = 0; f < FOLDERS; f++) {
-      // Inside the code map's 2 minute file life (main 6dcc8eb): 35-60 s ago, so the map stays for the whole test.
+      // Inside the code map's 2 minute file life: 35-60 s ago, so the map stays for the whole test.
       const at = feed.iso(60_000 - f * 5_000);
       const sha = `${ti}${f}`.padEnd(40, 'a');
       feed.events.push({
@@ -308,8 +308,8 @@ const hit = (a: WBox, b: WBox, slack = 1) => a.x < b.x + b.w - slack && b.x < a.
 /**
  * The label rules on one frame, in world px with the page's own text widths:
  *   overlaps   - a label over another label, any deliverable square, a member's disc (r + 5) or name, or a map folder / file dot
- *                (map things and folder names of the label's own team listed apart as ownMapOverlaps; by the
- *                Manager's decision those are faults too and the tests assert both).
+ *                (map things and folder names of the label's own team listed apart as ownMapOverlaps; those
+ *                are faults too and the tests assert both).
  *   roomMissed - a label left out (or cut to "#id") although one of the scene's own spots (under, above, to a side; full,
  *                then "#id") is clear of everything drawn in the final frame; checking against the final frame is lenient
  *                (later labels only take room after), so a hit here is a real fault.
@@ -389,7 +389,7 @@ async function labelCheck(page: Page, f: Frame, n: number, windowPx: number) {
     for (const text of p.texts) {
       const w = tw[ti++]!, h = font * 1.2, { x, y } = p.s, r = WF_R;
       const spots: [number, boolean][] = [[x - w / 2, false], [x - w / 2, true], [x - r, false], [x + r - w, false], [x - r, true], [x + r - w, true]];
-      // A 2 px margin on top of the scene's 1 px slack, so a near miss of my estimates is not called a fault.
+      // A 2 px margin on top of the scene's 1 px slack, so a near miss of the estimates is not called a fault.
       const free = spots.find(([sx, above]) => { const b = { x: sx, y: above ? y - r - 3 - h : y + r + 3, w, h, what: '' }; return !block.some((o) => hit(b, o, -2)); });
       if (free) { roomMissed.push(`#${p.id} "${text}" fits ${free[1] ? 'above' : 'under'} at x ${Math.round(free[0] - x)}`); break; }
     }
@@ -511,11 +511,10 @@ async function tipWhen(page: Page, want: (t: string) => boolean, timeout = 1500)
   await expect.poll(async () => want((t = await tipText(page))), { timeout, intervals: [50] }).toBe(true).catch(() => {});
   return t;
 }
-/** A screenshot once the fonts are in and the layout is at rest (data-settled). */
-async function snap(page: Page, file: string) {
+/** Waits until the fonts are in and the layout is at rest (data-settled). */
+async function atRest(page: Page) {
   await page.evaluate(() => document.fonts.ready.then(() => true));
   if (await page.locator('[data-test=monitor-canvas]').count()) await expect(page.locator('[data-test=monitor-canvas]')).toHaveAttribute('data-settled', 'true', { timeout: 20_000 });
-  await page.screenshot({ path: file });
 }
 
 /** Waits until every team's hub, its 5 deliverable squares and its map are drawn and the wall is at rest; returns a frame then. */
@@ -523,7 +522,7 @@ async function settle(page: Page, n: number, timeout = 20_000): Promise<Frame> {
   await expect.poll(async () => {
     const f = await lastFrame(page);
     return TEAMS.slice(0, n).every((t) => hubAt(f, t)) && squaresOf(f).length >= n * 5 && mapThings(f).length >= n * (FOLDERS + FOLDERS * FILES);
-  }, { timeout, intervals: [100] }).toBe(true).catch(() => {}); // as before: what is drawn is measured even if not all of it is
+  }, { timeout, intervals: [100] }).toBe(true).catch(() => {}); // what is drawn is measured even if not all of it is
   await still(page); // the spacing measure can take its full 12-24 moves on a crowded wall
   return freshFrame(page);
 }
@@ -608,7 +607,7 @@ for (const theme of ['dark', 'light'] as const) for (const w of [1280, 375]) for
     const hubMove = Math.round(Math.max(...TEAMS.slice(0, n).map((t) => { const a = hubAt(f, t)!, b = hubAt(f2, t)!; return Math.hypot(a.x - b.x, a.y - b.y); })));
     results.spacing[`${theme}-${w}-${n}`] = { ...m, hubsOnScreen: screen, later: { gap: m2.gap, zoom: m2.zoom, hubMove } };
     console.log(`spacing ${theme} ${w} ${n} teams:`, JSON.stringify({ ...m }));
-    await snap(page, path.join(SPACING_DIR, 'screens', `spacing-${theme}-${w}-${n}teams.png`));
+    await atRest(page);
     expect(m.mapCount, 'each team gets exactly its own map (6 folders + 24 files) by nearest hub').toEqual(Array(n).fill(FOLDERS * (FILES + 1)));
     expect(m.gap, 'clusters do not overlap').toBeGreaterThan(0);
     expect(m.gap, 'clusters sit close').toBeLessThan(160);
@@ -642,7 +641,7 @@ test('the spacing setting: the cog shows Team spacing (0.25-3, step 0.05, defaul
     min: await input.getAttribute('min'), max: await input.getAttribute('max'), step: await input.getAttribute('step'), value: await input.inputValue(), shown: await label.locator('.val').innerText(),
   };
   expect(r.dialog).toEqual({ name: 'Team spacing', help: 'How far apart the teams sit.', min: '0.25', max: '3', step: '0.05', value: '1', shown: '1.00×' });
-  await snap(page, path.join(SPACING_DIR, 'screens', 'cog-1280-dark.png'));
+  await atRest(page);
 
   // Live: 2x, under Auto fit.
   await expect(page.locator('[data-test=monitor-autofit]')).toHaveAttribute('aria-pressed', 'true');
@@ -666,7 +665,7 @@ test('the spacing setting: the cog shows Team spacing (0.25-3, step 0.05, defaul
   for (const k of Object.keys(at1.dist)) expect(at2.dist[k]! / at1.dist[k]!, `${k} about twice as far`).toBeGreaterThan(1.6);
   r.stored2 = await page.evaluate(() => localStorage.getItem('yawble.monitor.layout'));
   expect(JSON.parse(r.stored2).spacing).toBe(2);
-  await snap(page, path.join(SPACING_DIR, 'screens', 'spacing-2x-autofit-1280-dark.png'));
+  await atRest(page);
 
   // Pinned (Fit once, then pinned): 3x moves the teams off; Fit brings them back.
   await page.locator('[data-test=monitor-fit]').click();
@@ -675,15 +674,15 @@ test('the spacing setting: the cog shows Team spacing (0.25-3, step 0.05, defaul
   const zPinned = zoomOf(await freshFrame(page));
   await sliderSet(page, 3);
   f = await settle(page, 3);
-  r.pinned3 = { zoom: +zoomOf(f).toFixed(3), zoomBefore: +zPinned.toFixed(3), hubs: await hubsOnScreen(page, f, 3), ...measure(f, 3) };
-  await snap(page, path.join(SPACING_DIR, 'screens', 'spacing-3x-pinned-1280-dark.png'));
+  r.pinned3 = { zoomBefore: +zPinned.toFixed(3), hubs: await hubsOnScreen(page, f, 3), ...measure(f, 3) };
+  await atRest(page);
   await page.locator('[data-test=monitor-fit]').click();
   await still(page);
   f = await freshFrame(page);
   r.fitAfter3 = { zoom: +zoomOf(f).toFixed(3), hubs: await hubsOnScreen(page, f, 3) };
   expect(r.fitAfter3.hubs.every((h: any) => h.inside), 'Fit refits to the 3x layout').toBe(true);
   expect(r.fitAfter3.zoom, 'Fit zoomed out for 3x').toBeLessThan(r.pinned3.zoomBefore);
-  await snap(page, path.join(SPACING_DIR, 'screens', 'spacing-3x-fit-1280-dark.png'));
+  await atRest(page);
 
   // 0.25: the tightest.
   await sliderSet(page, 0.25);
@@ -691,7 +690,7 @@ test('the spacing setting: the cog shows Team spacing (0.25-3, step 0.05, defaul
   r.at025 = measure(f, 3);
   await page.locator('[data-test=monitor-fit]').click();
   await still(page);
-  await snap(page, path.join(SPACING_DIR, 'screens', 'spacing-0.25x-fit-1280-dark.png'));
+  await atRest(page);
 
   // Kept over a reload.
   await sliderSet(page, 1.5);
@@ -733,14 +732,14 @@ test('the spacing setting at 375 light: the phone cog shows Team spacing and mov
   const a = measure(f, 3);
   await openCog(page);
   await expect(page.locator('[data-test=monitor-layout] label.force').filter({ hasText: 'Team spacing' })).toBeVisible();
-  await snap(page, path.join(SPACING_DIR, 'screens', 'cog-375-light.png'));
+  await atRest(page);
   await sliderSet(page, 2);
   await page.locator('[data-test=monitor-layout-close]').click();
   f = await settle(page, 3);
   const b = measure(f, 3);
   const hubs = await hubsOnScreen(page, f, 3);
   results.spacing.phone = { at1: a, at2: b, hubs };
-  await snap(page, path.join(SPACING_DIR, 'screens', 'spacing-2x-375-light.png'));
+  await atRest(page);
   expect(b.dist['alpha-bravo']! / a.dist['alpha-bravo']!).toBeGreaterThan(1.6);
   expect.soft(hubs.every((h) => h.inside), 'Auto fit keeps the hubs on the phone wall').toBe(true);
   expect(errors).toEqual([]);
@@ -750,7 +749,7 @@ test('the spacing setting at 375 light: the phone cog shows Team spacing and mov
 // =====================================================================================================================
 // No panel; the node labels.
 
-/** A deliverable node click opens the Deliverables page with that deliverable's pane (the old dialog is gone). */
+/** A deliverable node click opens the Deliverables page with that deliverable's pane. */
 const wfOpened = (page: Page, id: number) => page.locator(`[data-test=deliverables-view] [data-test=deliverable-pane][data-id="${id}"]`);
 
 for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'open'], ['dark', 375, 'open'], ['light', 375, 'open'], ['dark', 1280, 'collapsed'], ['light', 1280, 'collapsed']] as const) {
@@ -759,7 +758,7 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
     const tag = `${theme}-${w}${activity === 'collapsed' ? '-noactivity' : ''}`;
     results.nodes[`labels-${tag}`] = r;
     const { page, ctx, errors } = await open(browser, { w, theme, teams: 3, activity });
-    let f = await settle(page, 3);
+    const f = await settle(page, 3);
     const k = zoomOf(f);
     const box = await canvasBox(page);
     const labels = wfLabels(f);
@@ -772,7 +771,7 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
     r.maxLen = Math.max(...labels.map((l) => l.text.length));
     r.panelWords = f.ops.filter((o) => o.op === 'text' && /deliverables/i.test(o.text!)).map((o) => o.text);
     r.check = await labelCheck(page, f, 3, w);
-    await snap(page, path.join(NODES_DIR, 'screens', `labels-${tag}.png`));
+    await atRest(page);
     // Every deliverable keeps at least its hover title.
     const hv = await hoverAll(page);
     r.hover = { squares: hv.bySquare.length, ids: hv.ids.length, fullTitles: hv.full.length, missing: ALL_WFS.map((x) => x.id).filter((id) => !hv.full.includes(id)), misses: hv.misses };
@@ -785,7 +784,7 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
     expect.soft(r.panelWords, 'no DELIVERABLES panel on the wall').toEqual([]);
     expect.soft(r.check.overlaps, 'no label over a label, square, member disc or name, or another team\'s map').toEqual([]);
     expect.soft(r.check.roomMissed, 'no label left out or cut short when it had room').toEqual([]);
-    // By the Manager's decision a label over its own team's map (folder, file dot, folder name) is a fault too.
+    // A label over its own team's map (folder, file dot, folder name) is a fault too.
     expect.soft(r.check.ownMapOverlaps, 'no label over its own team\'s map').toEqual([]);
 
     // Where the panel was (260 out from the hub, away from the middle): hover and click do nothing deliverable-ish.
@@ -820,7 +819,7 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
     }
     r.hoverTip = tip;
     expect(tip, 'the hover shows the full title').toContain(`#${target} ${titleOf(target)}`);
-    await snap(page, path.join(NODES_DIR, 'screens', `hover-${tag}.png`));
+    await atRest(page);
     {
       const s = await node();
       await page.mouse.move(box.x + s.x, box.y + s.y);
@@ -848,7 +847,7 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
     await expect(wfOpened(page, target)).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-test=deliverables-team-filter]')).toHaveValue('2');
     await expect(page.locator('[role=dialog]')).toHaveCount(0);
-    await snap(page, path.join(NODES_DIR, 'screens', `click-opens-${tag}.png`));
+    await atRest(page);
     console.log(`nodes ${tag}:`, JSON.stringify(r));
     expect(errors).toEqual([]);
     await ctx.close();
@@ -866,7 +865,7 @@ test('labels: 375 zoomed out: only "#id"; zoomed in: "#id title" again; labels s
   await still(page); // the labels placed at the new zoom
   f = await freshFrame(page);
   r.out = { zoom: +zoomOf(f).toFixed(3), labels: wfLabels(f).map((l) => l.text), px: wfLabels(f).map((l) => +(l.font * zoomOf(f)).toFixed(2)) };
-  await snap(page, path.join(NODES_DIR, 'screens', 'phone-zoomed-out.png'));
+  await atRest(page);
   r.outCheck = await labelCheck(page, f, 3, 375);
   expect.soft(r.outCheck.overlaps, 'phone zoomed out: no overlaps').toEqual([]);
   expect.soft(r.outCheck.roomMissed, 'phone zoomed out: nothing left out that had room').toEqual([]);
@@ -879,7 +878,7 @@ test('labels: 375 zoomed out: only "#id"; zoomed in: "#id title" again; labels s
   await still(page);
   f = await freshFrame(page);
   r.in = { zoom: +zoomOf(f).toFixed(3), labels: wfLabels(f).map((l) => l.text) };
-  await snap(page, path.join(NODES_DIR, 'screens', 'phone-zoomed-in.png'));
+  await atRest(page);
   expect(r.in.zoom).toBeGreaterThanOrEqual(0.6);
   if (r.in.labels.length) expect(r.in.labels.some((t: string) => t.includes(' ')), 'titles back zoomed in').toBe(true);
   results.nodes.phoneZoom = r;
@@ -905,7 +904,6 @@ test('labels: 1280 wide zoomed out (Activity hidden, wall over 760): titles stay
     const zoom = zoomOf(f);
     steps.push({ zoom: +zoom.toFixed(3), squares: check.squares, drawn: labels.length, withTitle: labels.filter((l) => l.text.includes(' ')).length, wrongTitle: labels.filter((l) => l.text.includes(' ') && l.text !== expectLabel(l.id, zoom, 1280)).map((l) => l.text), idOnly: labels.filter((l) => !l.text.includes(' ')).map((l) => l.id), dropped: check.dropped, overlaps: check.overlaps, ownMap: check.ownMapOverlaps, roomMissed: check.roomMissed, px: Math.min(...labels.map((l) => +(l.font * zoomOf(f)).toFixed(2))) });
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    if (i === 5) await snap(page, path.join(NODES_DIR, 'screens', 'wide-zoomed-out.png'));
   }
   const fit = steps.find((s) => s.zoom < 0.6)!;
   const far = steps.at(-1)!;
@@ -915,10 +913,9 @@ test('labels: 1280 wide zoomed out (Activity hidden, wall over 760): titles stay
   expect(fit, 'a zoom under 0.6 reached').toBeTruthy();
   // Titles kept: no label is cut to "#id" by the phone rule on a wide wall. A label that is "#id" or left out must have had
   // no room (roomMissed below); the rest carry their title.
-  // This was "at least 10 of the 15 keep a title", which failed about half the runs with the scene right each
-  // time (no overlaps, nothing left out that had room). The deliverable nodes are born at a random offset beside their member
-  // (scene.ts rebuild), so the forces settle a different layout each run, and how many 30-character titles find room at
-  // zoom ~0.37 went from 8 to 12. So every node is accounted for instead: it shows exactly its wide-wall title, or it is
+  // The deliverable nodes are born at a random offset beside their member (scene.ts rebuild), so the forces settle a
+  // different layout each run, and 8 to 12 of the 30-character titles find room at zoom ~0.37. A count of titles would
+  // fail by chance, so every node is accounted for: it shows exactly its wide-wall title, or it is
   // "#id" or left out (and roomMissed proves it had no room). At least one title is drawn: the phone rule would cut all.
   expect(fit.squares, 'all 15 deliverable nodes drawn').toBe(ALL_WFS.length);
   expect.soft(fit.withTitle + fit.idOnly.length + fit.dropped.length, `every node titled, "#id" or left out at zoom ${fit.zoom}`).toBe(fit.squares);
@@ -965,7 +962,7 @@ test('labels: focus: the other teams\' labels dim; the focused team\'s stay full
   };
   results.nodes.focus = r;
   console.log('nodes focus:', JSON.stringify(r));
-  await snap(page, path.join(NODES_DIR, 'screens', 'focus-dims.png'));
+  await atRest(page);
   expect(Math.min(...mine)).toBeGreaterThan(0.9);
   if (others.length) expect(Math.max(...others), 'other teams dimmed').toBeLessThan(0.6);
   expect(errors).toEqual([]);
@@ -985,7 +982,7 @@ test('labels: reduced motion: the labels and nodes do not animate (no turning ar
   const r = { maxMove: +Math.max(...moved).toFixed(3), turningArcs: arcs(fs2[0]!), sameText: a.every((l) => b.some((x) => x.id === l.id && x.text === l.text)) };
   results.nodes.reduced = r;
   console.log('nodes reduced:', JSON.stringify(r));
-  await snap(page, path.join(NODES_DIR, 'screens', 'reduced-motion.png'));
+  await atRest(page);
   expect(r.maxMove, 'labels still').toBeLessThan(0.5);
   expect(r.turningArcs, 'no turning arc').toBe(0);
   expect(r.sameText).toBe(true);
@@ -1012,7 +1009,7 @@ test('labels: a deliverable that completes flashes green and leaves, one closed 
   }, { timeout: 12_000, intervals: [150] }).toBe(true).catch(() => {});
   const all: Frame[] = await page.evaluate(() => (window as any).__frames);
   const flashFrames = all.filter((f) => f.ops.some((o) => o.op === 'stroke' && o.style === DONE && o.items?.some((i) => i.t === 'arc' && Math.abs(i.a1 - i.a0 - Math.PI * 2) < 0.01))).length;
-  await snap(page, path.join(NODES_DIR, 'screens', 'completed-and-closed.png'));
+  await atRest(page);
   const rows = (await page.locator('[data-test=monitor-row]').allInnerTexts()).map((t) => t.replace(/\s+/g, ' '));
   const r = { greenBox: greens, greyBox: greys, flashFrames, labelsGone: gone, rowsBefore, rowsAfter: rows.length, doneRows: rows.filter((t) => /finished the work/.test(t)).slice(0, 4) };
   results.nodes.ends = r;

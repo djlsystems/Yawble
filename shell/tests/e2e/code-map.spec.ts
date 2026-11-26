@@ -10,7 +10,7 @@
 // a landing #34d399 rings (width 3), a push a #38bdf8 arc of 1.4 rad. Hovering a node gives the DOM tip.
 //
 //   npx playwright test code-map --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots and the frame times go to $YAWBLE_TEAM_DOCS/code-map (else test-results/code-map).
+// The results and the frame times go to $YAWBLE_TEAM_DOCS/code-map (else test-results/code-map).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -331,11 +331,10 @@ async function until<T>(page: Page, get: (f: Frame) => T, ok: (v: T) => boolean,
   return v!;
 }
 
-/** A screenshot once the fonts are in and the layout is at rest (data-settled). */
-async function shot(page: Page, name: string) {
+/** Waits until the fonts are in and the layout is at rest (data-settled). */
+async function atRest(page: Page) {
   await page.evaluate(() => document.fonts.ready.then(() => true));
   if (await page.locator('[data-test=monitor-canvas]').count()) await expect(page.locator('[data-test=monitor-canvas]')).toHaveAttribute('data-settled', 'true', { timeout: 20_000 });
-  await page.screenshot({ path: path.join(SHOTS, `${name}.png`) });
 }
 
 /** The deliverable's instructions, read at the start: the members' touches belong to deliverable 10. */
@@ -426,19 +425,19 @@ test('map: the tree grows over a deliverable, a Write pops, edits bright, reads 
   expect(tip).toContain('src/refund/model.ts');
   expect(tip).toMatch(/by (Developer Ada, Tester Ben|Tester Ben, Developer Ada)/);
   expect(tip).toContain('not committed yet');
-  await shot(page, '01-map-overlap-hover');
+  await atRest(page);
   await unhover(page);
   const readTip = await hoverFile(page, (x) => fileDots(x).find((d) => d.color === C.read));
   expect(readTip).toMatch(/docs\/refunds\.md read/);
   await unhover(page);
-  await shot(page, '02-map-grown');
+  await atRest(page);
 
   // 3. The deliverable ends ('done' row): its files leave the map.
   feed.row('done', null, 'Manager', 10, 0, 'Partial refunds delivered');
   const left = await until(page, (x) => fileDots(x).length, (n) => n === 0);
   expect(left, 'files go when the deliverable ends').toBe(0);
   expect(folders(await lastFrame(page))).toHaveLength(0);
-  await shot(page, '03-map-after-done');
+  await atRest(page);
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -463,7 +462,7 @@ test('map: a large map collapses to its busiest 8 folders, "+N" per folder and "
   expect(dashed(f, 9), 'one "+N folders" node').toHaveLength(1);
   expect(fileDots(f).length, 'at most 48 file nodes for the team').toBe(48);
   expect(dashed(f, 7), 'a "+N" on each of the 8 folders (each has more files than drawn)').toHaveLength(8);
-  await shot(page, '04-map-collapsed');
+  await atRest(page);
   // Zoom in (the wheel) so the labels show, and read the "+N" texts: drawn + counted = the 8 folders' 80 files.
   const box = (await page.locator('[data-test=monitor-canvas]').boundingBox())!;
   const ring = dashed(f, 7)[0]!;
@@ -489,7 +488,7 @@ test('map: a large map collapses to its busiest 8 folders, "+N" per folder and "
     result.collapse = { ...(result.collapse as object), moreTip: tip };
     expect(tip).toMatch(/^\+\d+ in src\/mod\d\d \d+ files? touched src\/mod\d\d\/file\d\.ts/);
   }
-  await shot(page, '04b-map-collapsed-zoomed');
+  await atRest(page);
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -531,7 +530,7 @@ test('events: a commit dot travels to the hub (hover: message + sha) and correct
   expect(track[0]!.dm, 'the dot starts at the member').toBeLessThan(8);
   expect(track.at(-1)!.dh, 'and rests by the hub (46 off it)').toBeLessThan(50);
   expect(Math.abs(track.at(-1)!.dh - 46)).toBeLessThan(1);
-  await shot(page, '05-commit-dot');
+  await atRest(page);
   f = await lastFrame(page);
   const cd = commitDots(f)[0]!;
   const tip = await hoverWorld(page, cd.op, cd.x, cd.y);
@@ -541,7 +540,7 @@ test('events: a commit dot travels to the hub (hover: message + sha) and correct
   expect(tip).not.toContain('a1b2c3d4');
   // The tip counts the files the dot gathered (3: the deleted old.ts is not on the map); the Activity line says 4.
   expect(tip).toMatch(/a1b2c3d · 3 files/);
-  await shot(page, '06-commit-hover');
+  await atRest(page);
   await unhover(page);
 
   // The map takes the commit as the truth: old.ts gone, name.ts moved to renamed.ts, model.ts no longer "new", all ringed.
@@ -583,7 +582,7 @@ test('events: a commit dot travels to the hub (hover: message + sha) and correct
   feed.event({ kind: 'merge-team', member: ADA, branch: 'members/payments/developerada', sha: 'b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1', message: "Merge DeveloperAda's work", files: [{ path: 'src/refund/partial.ts', status: 'A' }], into: 'team/payments' });
   await watch((last) => seen.merge.length > 3 && last.merge.length === 0); // the merge's rings have run out
   const mergeSeen = [...seen.merge];
-  await shot(page, '07-merge');
+  await atRest(page);
   feed.event({ kind: 'landed', member: null, branch: 'team/payments', sha: 'c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2', message: 'Land team/payments on main', files: [{ path: 'src/refund/partial.ts', status: 'A' }], into: 'main', deliverableId: null });
   await watch((last) => seen.landedRings > 0 && last.landed.length === 0);
   feed.event({ kind: 'push', member: null, branch: 'main', sha: 'c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2', message: 'Pushed main to origin', files: [], branches: ['main'], deliverableId: null });
@@ -597,7 +596,7 @@ test('events: a commit dot travels to the hub (hover: message + sha) and correct
   await expect(act.filter({ hasText: 'merged into the team' }).first()).toContainText('b2c3d4e');
   await expect(act.filter({ hasText: 'landed on main' }).first()).toContainText('c3d4e5f Land team/payments on main');
   await expect(act.filter({ hasText: 'pushed' }).first()).toContainText('main');
-  await shot(page, '08-events-activity');
+  await atRest(page);
   // The Timeline marks them: hovering its right end lists the code events there.
   const tl = page.locator('[data-test=monitor-timeline]');
   const tb = (await tl.boundingBox())!;
@@ -608,7 +607,7 @@ test('events: a commit dot travels to the hub (hover: message + sha) and correct
   result.timelineCode = words;
   expect(words.join(' | ')).toMatch(/pushed: main/);
   expect(words.join(' | ')).toMatch(/landed on main: c3d4e5f/);
-  await shot(page, '09-timeline-code');
+  await atRest(page);
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -654,8 +653,6 @@ test('replay: the timeline plays the map and the events in order', async ({ brow
     mapSizes.push({ t: Date.now() - t0, n: fileDots(lf).length });
     if (!(await page.locator('[data-test=monitor-replaying]').isVisible())) return true;
     // Mid-replay shots are taken as they come (the replay moves on; waiting for the wall to rest would miss what it draws).
-    if (order.length === 0 && mapSizes.length === 1) await page.screenshot({ path: path.join(SHOTS, '10-replay-start.png') });
-    if (order.includes('committed') && !order.includes('pushed')) await page.screenshot({ path: path.join(SHOTS, '11-replay-commit.png') });
     return false;
   }, { timeout: 25_000, intervals: [150] }).toBe(true).catch(() => {});
   result.replay = { order, commitDotSeen, mergeSeen, landedSeen, pushSeen, mapStart: mapSizes[0], mapMax: Math.max(...mapSizes.map((m) => m.n)), ms: Date.now() - t0 };
@@ -716,7 +713,7 @@ test('reduced motion (emulated): nothing travels or pops, no bursts; the map jus
   const f = await lastFrame(page);
   expect(fileDots(f).every((d) => ringsAt(f, d.x, d.y, d.r + 2.2) > 0), 'the map updated: both committed').toBe(true);
   await expect(page.locator('[data-test=monitor-row]').filter({ hasText: 'landed on main' })).toHaveCount(1);
-  await shot(page, '12-reduced-motion');
+  await atRest(page);
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -745,7 +742,7 @@ test('remote view: a Visitor (read access) gets the same map through monitor.* r
   expect(asked[0]!.params.team, 'first asked for all teams').toBeUndefined();
   expect(asked.slice(1).every((c) => typeof c.params.team === 'string'), 'then per team').toBe(true);
   expect(asked.filter((c) => !c.params.team), 'the refused form is not asked again').toHaveLength(1);
-  await shot(page, '13-remote-visitor');
+  await atRest(page);
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -795,7 +792,7 @@ test('performance: a several-hundred-file fixture (4 teams x 150 files, live edi
   result.perf = stats;
   console.log('PERF', JSON.stringify(stats));
   writeFileSync(path.join(SHOTS, 'perf-frames.json'), JSON.stringify({ stats, gaps: gaps.map((g) => +g.toFixed(2)), work: work.map((w) => +w.toFixed(2)) }));
-  await shot(page, '14-perf-600-files');
+  await atRest(page);
   expect(drawn, 'the 240-node budget across the maps').toBeLessThanOrEqual(240);
   expect(drawn).toBeGreaterThan(150);
   expect(stats.fps, 'about 60 fps').toBeGreaterThan(55);

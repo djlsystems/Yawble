@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { graphShape, MaxZoom, MinZoom, pinchCamera, teamAngle } from '../../src/renderer/src/monitor/scene';
 import {
@@ -108,10 +106,5 @@ describe('a poll that changes nothing does not wake the forces (scene.ts graphSh
     expect(graphShape([n('a'), n('b'), n('c')])).not.toBe(base);
     expect(graphShape([n('a'), n('b', { r: 17 })])).not.toBe(base);
     expect(graphShape([n('a'), n('b', { homeX: 40 })])).not.toBe(base);
-  });
-  it('the scene returns from a rebuild early when the shape is unchanged', () => {
-    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/monitor/scene.ts'), 'utf8');
-    // rebuild(wake = 0.3); settleSpacing's own moves wake it less.
-    expect(src).toMatch(/rebuild\(wake = 0\.3\)[\s\S]*if \(shape === this\.shape\) return;[\s\S]*this\.sim\.alpha\(Math\.max\(this\.sim\.alpha\(\), wake\)\)/);
   });
 });

@@ -6,7 +6,7 @@
 // visualViewport), the Visitor chip, the dark Monitor and its forces panel, the 759 / 760 px edges and rotation.
 //
 //   npx playwright test phone-remote            (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/phone-screens (else test-results/phone-screens); the audit to test-results/phone-audit.ndjson (node tests/e2e/phone/summary.mjs prints it).
+// The audit goes to test-results/phone-audit.ndjson (node tests/e2e/phone/summary.mjs prints it).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -17,14 +17,12 @@ import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'phone-screens');
 // One line per audit (each worker appends; Playwright empties test-results at the start of a run).
 const RESULTS = path.resolve(__dirname, '..', '..', 'test-results', 'phone-audit.ndjson');
 const results = { push(r: { screen: string; size: string; audit: Audit }) { mkdirSync(path.dirname(RESULTS), { recursive: true }); appendFileSync(RESULTS, JSON.stringify(r) + '\n'); } };
 
 test.beforeAll(async () => {
   test.setTimeout(600_000);
-  mkdirSync(SHOTS, { recursive: true });
   await buildRenderer();
 });
 
@@ -63,10 +61,9 @@ async function open(browser: Browser, size: Size, o: OpenOpts = {}) {
 
 const tag = (size: Size) => `${size.w}x${size.h}`;
 
-/** Screenshot + audit; soft-fails on overflow, an off-screen control (outside a sideways scroller) or a small control. */
+/** The audit of one screen; soft-fails on overflow, an off-screen control (outside a sideways scroller) or a small control. */
 async function check(page: Page, screen: string, size: Size, o: { allowSmall?: (c: Audit['small'][number]) => boolean; full?: boolean } = {}) {
   await settled(page);
-  await page.screenshot({ path: path.join(SHOTS, `${screen}-${tag(size)}.png`), fullPage: o.full ?? false });
   const a = await audit(page);
   results.push({ screen, size: tag(size), audit: a });
   expect.soft(a.overflow, `${screen} @${tag(size)}: page scrolls sideways (${a.scrollWidth} > ${a.width}); widest: ${a.wide.join(', ')}`).toBe(false);
@@ -110,7 +107,7 @@ for (const size of PHONES) {
       expect.soft(thread && thread.height, 'the chat thread has room on screen with asks pending').toBeGreaterThan(80);
       expect.soft(composer && composer.y + composer.height, 'the composer is on screen with asks pending').toBeLessThanOrEqual(size.h + 1);
       expect.soft(composer && composer.height, 'the composer is not squeezed').toBeGreaterThan(40);
-      // F1 re-verify: both banners together take at most 40% of the height (one box, data-test=banners) and scroll.
+      // Both banners together take at most 40% of the height (one box, data-test=banners) and scroll.
       const banners = async (name: string) => {
         const bb = await page.locator('[data-test=banners]').boundingBox();
         results.push({ screen: `${name}-banners-px`, size: tag(size), audit: { bannersH: bb?.height ?? -1 } as unknown as Audit });
@@ -124,7 +121,6 @@ for (const size of PHONES) {
         await expect(page.locator(sel).first()).toBeVisible();
         await settled(page);
         await banners(name);
-        await page.screenshot({ path: path.join(SHOTS, `${name}-with-asks-${tag(size)}.png`) });
         const b = await page.locator(sel).first().boundingBox();
         const shown = b ? Math.max(0, Math.min(b.y + b.height, size.h) - Math.max(b.y, 0)) : 0;
         expect.soft(shown, `${name} with asks pending: px of the screen left on screen`).toBeGreaterThan(size.h / 3);
@@ -164,7 +160,6 @@ for (const size of PHONES) {
       await settled(page);
       const r = (await page.locator('[data-test=composer]').boundingBox())!;
       const send = (await page.locator('[data-test=composer-send]').boundingBox())!;
-      await page.screenshot({ path: path.join(SHOTS, `concierge-keyboard-${tag(size)}.png`) });
       expect.soft(r.y + r.height, 'composer bottom above the keyboard').toBeLessThanOrEqual(size.h - 320 + 1);
       expect.soft(r.y, 'composer top on screen').toBeGreaterThanOrEqual(0);
       expect.soft(send.y + send.height, 'Send above the keyboard').toBeLessThanOrEqual(size.h - 320 + 1);
@@ -184,7 +179,6 @@ for (const size of PHONES) {
       await page.locator('[data-test=team-open-payments]').click();
       await expect(page.locator('[data-test=team-title]')).toBeVisible();
       await check(page, 'team', size);
-      await page.screenshot({ path: path.join(SHOTS, `team-full-${tag(size)}.png`), fullPage: true });
       // On a phone a member's Code is in its pane's ⋯ menu (member-more): open the first one that has a clone.
       const code = page.locator('[data-test=open-code]:visible').first();
       if (!(await code.isVisible().catch(() => false))) {
@@ -214,7 +208,6 @@ for (const size of PHONES) {
         await page.locator(`[data-test=lane-tab-${lane}]`).click();
         await expect(page.locator(`[data-test=lane-tab-${lane}]`)).toHaveAttribute('aria-selected', 'true');
         await check(page, lane === 'blocked' ? 'board-needs-you' : `board-${lane}`, size);
-        if (lane === 'blocked') await page.screenshot({ path: path.join(SHOTS, `board-needs-you-full-${tag(size)}.png`), fullPage: true });
       }
       // Swipe right twice from Done: Needs You, then In Progress (a real finger: touch pointer events on the lanes).
       const swipe = async (dx: number) => page.locator('[data-test=board-lanes]').evaluate((el, dx) => {
@@ -297,7 +290,6 @@ for (const size of PHONES) {
       await page.locator('[data-test=settings] nav button, [data-test=settings] .sections button').first().click();
       await expect(page.locator('[data-test=settings-pane]')).toBeVisible();
       await check(page, 'settings-section', size);
-      await page.screenshot({ path: path.join(SHOTS, `settings-section-full-${tag(size)}.png`), fullPage: true });
       expect(errors).toEqual([]);
     });
 
@@ -330,8 +322,8 @@ for (const size of PHONES) {
       await check(page, 'visitor-board', size);
     });
 
-    // F7 re-verify: the Visitor's 150 px top-bar padding is kept in the shell's top bar only.
-    test('Visitor (read-only) F7: the composer matches full access, the chip clears the top bar, Documents and Logs bars', async ({ browser }) => {
+    // The Visitor's 150 px top-bar padding is kept in the shell's top bar only.
+    test('Visitor (read-only): the composer matches full access, the chip clears the top bar, Documents and Logs bars', async ({ browser }) => {
       // On a phone the team and agent pickers fold out above the bar (one button opens them).
       const composerBar = async (page: Page) => { await page.locator('[data-test=composer-pickers-toggle]').click(); return page.locator('[data-test=composer] .bar').evaluate((bar) => {
         const r = (sel: string) => { const e = bar.closest('[data-test=composer]')!.querySelector(sel); const b = e ? (e.closest('.pick') ?? e).getBoundingClientRect() : null; return b ? { x: b.x, w: b.width, h: b.height, right: b.right } : null; };
@@ -344,8 +336,7 @@ for (const size of PHONES) {
       const { page, errors } = await open(browser, size, { access: 'read', asks: false });
       await expect(page.locator('[data-test=remote-access-chip]')).toBeVisible();
       const v = await composerBar(page);
-      results.push({ screen: 'f7-composer', size: tag(size), audit: { full: f, visitor: v } as unknown as Audit });
-      await page.screenshot({ path: path.join(SHOTS, `reverify2-visitor-${tag(size)}.png`) });
+      results.push({ screen: 'visitor-composer', size: tag(size), audit: { full: f, visitor: v } as unknown as Audit });
       expect.soft(Math.round(v.team!.w), 'Visitor team picker width = full access').toBe(Math.round(f.team!.w));
       expect.soft(Math.round(v.agent!.w), 'Visitor agent picker width = full access').toBe(Math.round(f.agent!.w));
       expect.soft(v.team!.w, 'team picker >= 44').toBeGreaterThanOrEqual(44);
@@ -354,7 +345,7 @@ for (const size of PHONES) {
       expect.soft(Math.abs(v.send!.right - v.barRight), `Send at the bar's right end (send ${v.send!.right}, bar ${v.barRight})`).toBeLessThanOrEqual(2);
       expect.soft(v.padR, "the Composer's bar has no 150 px padding").not.toBe(`150px`);
       expect.soft(v.sw, 'no sideways scroll').toBeLessThanOrEqual(v.iw);
-      await check(page, 'reverify2-visitor-concierge', size);
+      await check(page, 'visitor-concierge', size);
       // The chip clears the top bar's title and menu button.
       const overlap = await page.evaluate(() => {
         const chip = document.querySelector('[data-test=remote-access-chip]')!.getBoundingClientRect();
@@ -383,7 +374,7 @@ for (const size of PHONES) {
       expect.soft(parseFloat(d.padR), 'Documents bar padding-right under 150').toBeLessThan(150);
       expect.soft(d.sw, 'Documents bar does not overflow').toBeLessThanOrEqual(d.cw + 1);
       expect.soft(d.maxRight, 'Documents bar controls inside the bar').toBeLessThanOrEqual(d.barRight + 1);
-      await check(page, 'reverify2-visitor-documents', size);
+      await check(page, 'visitor-documents', size);
       await nav(page, 'nav-logs');
       await expect(page.locator('[data-test=logs] .bar').first()).toBeVisible();
       await settled(page);
@@ -392,14 +383,14 @@ for (const size of PHONES) {
       expect.soft(parseFloat(l.padR), 'Logs bar padding-right under 150').toBeLessThan(150);
       expect.soft(l.sw, 'Logs bar does not overflow').toBeLessThanOrEqual(l.cw + 1);
       expect.soft(l.maxRight, 'Logs bar controls inside the bar').toBeLessThanOrEqual(l.barRight + 1);
-      await check(page, 'reverify2-visitor-logs', size);
+      await check(page, 'visitor-logs', size);
       // Logs is a page (no sheet, so no Close for the Visitor chip to cover).
       expect(errors).toEqual([]);
     });
 
-    // F8 re-verify: every phone sheet a Visitor can open keeps Close and its title clear of the chip; with
-    // full access the sheet header is as before (6 px right padding, Close at the right edge).
-    test('F8: every sheet - Close and title clear of the Visitor chip; full-access header unchanged', async ({ browser }) => {
+    // Every phone sheet a Visitor can open keeps Close and its title clear of the chip; with full access the sheet
+    // header has 6 px right padding and Close at the right edge.
+    test('every sheet - Close and title clear of the Visitor chip; with full access Close is at the right edge', async ({ browser }) => {
       test.setTimeout(240_000);
       const sheetInfo = (page: Page) => page.evaluate(() => {
         const sheets = [...document.querySelectorAll<HTMLElement>('.modal.sheet')];
@@ -455,8 +446,7 @@ for (const size of PHONES) {
           const info = await sheetInfo(page);
           (seen[o.name] ??= {})[access] = info ?? 'not a sheet';
           if (!info) continue;
-          results.push({ screen: `f8-sheet-${o.name}-${access}`, size: tag(size), audit: info as unknown as Audit });
-          await page.screenshot({ path: path.join(SHOTS, `reverify3-${access === 'read' ? 'visitor' : 'full'}-${o.name}-${tag(size)}.png`) });
+          results.push({ screen: `sheet-${o.name}-${access}`, size: tag(size), audit: info as unknown as Audit });
           const where = `${o.name} sheet (${access}) @${tag(size)}`;
           expect.soft(info.sw, `${where}: sideways scroll`).toBeLessThanOrEqual(info.iw);
           expect.soft(info.close[2] + 'x' + info.close[3], `${where}: Close 44x44`).toBe('44x44');
@@ -517,7 +507,7 @@ async function luminance(page: Page, sel: string): Promise<number> {
   });
 }
 
-test.describe('break tests: the 759 / 760 px edges and rotation', () => {
+test.describe('the 759 / 760 px edges and rotation', () => {
   for (const w of [759, 760]) {
     test(`${w} px wide: ${w < 760 ? 'the phone layout' : 'the desktop layout'}, no sideways scroll`, async ({ browser }) => {
       const size = { w, h: 900 };
@@ -530,7 +520,6 @@ test.describe('break tests: the 759 / 760 px edges and rotation', () => {
       for (const [id, name] of [['nav-board', 'board'], ['nav-monitor', 'monitor'], ['nav-teams', 'teams']] as const) {
         if (phone) await nav(page, id); else await page.locator(`[data-test=sidebar] [data-test=${id}]`).first().click();
         await settled(page);
-        await page.screenshot({ path: path.join(SHOTS, `edge-${name}-${w}.png`) });
         const a = await audit(page);
         results.push({ screen: `edge-${name}`, size: `${w}x900`, audit: a });
         expect.soft(a.overflow, `${name} @${w}: sideways scroll ${a.scrollWidth} > ${a.width}; ${a.wide.join(', ')}`).toBe(false);
@@ -563,7 +552,6 @@ test.describe('break tests: the 759 / 760 px edges and rotation', () => {
         // Landscape: 844 x 390 is wider than 760 (the desktop layout); 740 x 360 is not (still the phone layout).
         const landPhone = size.h < 760;
         await resized(page, size.h, size.w);
-        await page.screenshot({ path: path.join(SHOTS, `rotate-${name}-${size.h}x${size.w}.png`) });
         const land = await audit(page);
         results.push({ screen: `rotate-${name}`, size: `${size.h}x${size.w}`, audit: land });
         expect.soft(land.overflow, `${name} landscape ${size.h}x${size.w}: sideways scroll ${land.scrollWidth}; ${land.wide.join(', ')}`).toBe(false);
@@ -574,7 +562,6 @@ test.describe('break tests: the 759 / 760 px edges and rotation', () => {
         const back = await audit(page);
         results.push({ screen: `rotate-back-${name}`, size: tag(size), audit: back });
         expect.soft(back.overflow, `${name} back to portrait: sideways scroll ${back.scrollWidth}; ${back.wide.join(', ')}`).toBe(false);
-        await page.screenshot({ path: path.join(SHOTS, `rotate-back-${name}-${tag(size)}.png`) });
       }
       expect(errors).toEqual([]);
     });
@@ -642,9 +629,8 @@ for (const size of SE) {
             expect.soft(i.h, `${where(screen)}: ${i.what} height`).toBeGreaterThanOrEqual(44);
           }
         };
-        const SHOTS_SE = path.join(path.dirname(SHOTS), 'phone-se-screens');
-        mkdirSync(SHOTS_SE, { recursive: true });
-        const shot = (screen: string) => page.screenshot({ path: path.join(SHOTS_SE, `${screen}-${tag(size)}.png`) });
+        // Each page opened below is closed for the next: its script errors are kept for the check at the end.
+        const seen: string[] = [];
         let { page, ctx, errors } = await open(browser, size, { asks: false });
 
         // Backlog: the list, then the search-and-sort fold open (its fields).
@@ -652,18 +638,18 @@ for (const size of SE) {
         await expect(page.locator('[data-test=backlog-row]').first()).toBeVisible();
         await settled(page);
         let m = await measure(page, ['[data-test=backlog-row]'], { head: '[data-test=backlog-phone-head], .backlog-place .head' });
-        rec('backlog', m); judge('backlog', m); await shot('backlog');
+        rec('backlog', m); judge('backlog', m);
         const tools = page.locator('[data-test=backlog-tools-toggle]');
         if (await tools.count()) { await tools.click(); await settled(page); }
         m = await measure(page, ['[data-test=backlog-row]'], { search: '[data-test=backlog-search]' });
-        rec('backlog-tools', m); judge('backlog-tools', m, { at: false }); await shot('backlog-tools');
+        rec('backlog-tools', m); judge('backlog-tools', m, { at: false });
         expect.soft(m.inputs.some((i) => /backlog-search/.test(i.what)), `${where('backlog-tools')}: the search field shown`).toBe(true);
 
         // Team, without and with the sync bar: the Tell row is the first content row; the first member card measured too.
         // Three states: an integration ask and a Manager decision pending (above the members), the same with the sync bar,
         // and nothing pending (the members right under Tell).
         for (const [screen, sync, needsYou] of [['team', false, true], ['team-sync', true, true], ['team-quiet', false, false], ['team-quiet-sync', true, false]] as const) {
-          if (screen !== 'team') { await ctx.close(); ({ page, ctx, errors } = await open(browser, size, { asks: false, sync, needsYou })); }
+          if (screen !== 'team') { seen.push(...errors); await ctx.close(); ({ page, ctx, errors } = await open(browser, size, { asks: false, sync, needsYou })); }
           await nav(page, 'nav-teams');
           await page.locator('[data-test=team-open-payments]').click();
           await expect(page.locator('[data-test=team-title]')).toBeVisible();
@@ -671,7 +657,7 @@ for (const size of SE) {
           await expect(page.locator('[data-test=agent-Manager]')).toBeAttached();
           await settled(page);
           m = await measure(page, ['.tell.row'], { title: '[data-test=team-title]', sync: '[data-test=team-sync]', tell: '.tell.row', member: '[data-test=agent-Manager]' });
-          rec(screen, m); judge(screen, m); await shot(screen);
+          rec(screen, m); judge(screen, m);
           expect.soft(m.rows.tell && m.rows.tell.bottom - m.rows.tell.top, `${where(screen)}: the Tell row is one 44 px row`).toBeLessThanOrEqual(56);
           // Asks and decisions pending go above the members on purpose (Needs you first): there the members are recorded only.
           if (!portrait && !needsYou) expect.soft(m.rows.member && m.rows.member.top < size.h, `${where(screen)}: a member card on screen in landscape (top ${m.rows.member?.top})`).toBe(true);
@@ -680,6 +666,7 @@ for (const size of SE) {
           const mb = await page.locator('[data-test=agent-Manager]').boundingBox();
           rec(`${screen}-member-scrolled`, m, { memberAfterScroll: mb && { top: Math.round(mb.y), bottom: Math.round(mb.y + mb.height) } });
         }
+        seen.push(...errors);
         await ctx.close();
         ({ page, ctx, errors } = await open(browser, size, { asks: false }));
 
@@ -688,19 +675,19 @@ for (const size of SE) {
         await expect(page.locator('[data-test=documents-view]')).toBeVisible();
         await settled(page);
         m = await measure(page, ['[data-test^=documents-team-]'], { title: '[data-test=documents-view] h2' });
-        rec('documents-root', m); judge('documents-root', m); await shot('documents-root');
+        rec('documents-root', m); judge('documents-root', m);
         await page.locator('[data-test=documents-team-payments]').click();
         await expect(page.locator('[data-test=docs-browser]')).toBeVisible();
         await settled(page);
         const firstDoc = ['[data-test=docs-list] [data-test^="doc-"]:not([data-test^="doc-delete"])', '[data-test=docs-list] li'];
         m = await measure(page, firstDoc, { bar: '[data-test=docs-browser] > .bar' });
-        rec('documents-folder', m); judge('documents-folder', m); await shot('documents-folder');
+        rec('documents-folder', m); judge('documents-folder', m);
         const add = page.locator('[data-test=docs-add]');
         if (await add.isVisible().catch(() => false)) await add.click();
         await page.locator('[data-test=docs-new-file]').first().click();
         await expect(page.locator('[data-test=docs-name]')).toBeVisible();
         m = await measure(page, firstDoc, { name: '[data-test=docs-name]' });
-        rec('documents-new-file', m); judge('documents-new-file', m, { at: false }); await shot('documents-new-file');
+        rec('documents-new-file', m); judge('documents-new-file', m, { at: false });
         expect.soft(m.inputs.some((i) => /docs-name/.test(i.what)), `${where('documents-new-file')}: the name field shown`).toBe(true);
 
         // Settings: the list, then each section; Guardrails scrolled to its bottom; Skills with a skill picked.
@@ -712,7 +699,7 @@ for (const size of SE) {
         };
         await openSettings();
         m = await measure(page, ['[data-test=settings] [role=tab]']);
-        rec('settings', m); judge('settings', m); await shot('settings');
+        rec('settings', m); judge('settings', m);
         for (const id of ['open-general', 'open-agents', 'open-skills', 'open-global-policy', 'open-integrations', 'open-system']) {
           const tab = page.locator(`[data-test=settings] [data-test=${id}]`);
           if (!(await tab.isVisible().catch(() => false))) {
@@ -731,11 +718,11 @@ for (const size of SE) {
           await settled(page);
           m = await measure(page, ['[data-test=settings-pane] > section > *:not(.section-head)', '[data-test=settings-pane] > * > *:not(.section-head)', '[data-test=settings-pane] > *'],
             { head: '[data-test=settings] .section-head', back: '[data-test=settings-back]' });
-          rec(screen, m); judge(screen, m); await shot(screen);
+          rec(screen, m); judge(screen, m);
           if (id === 'open-global-policy') {
             // Scroll the page's scroller to the bottom: "‹ Settings" still on screen and tappable.
             const r = await page.locator('[data-test=settings-pane]').evaluate((pane) => {
-              let s: HTMLElement | null = pane;
+              let s: HTMLElement | null = pane as HTMLElement;
               while (s && !(/(auto|scroll)/.test(getComputedStyle(s).overflowY) && s.scrollHeight > s.clientHeight + 1)) s = s.parentElement;
               const sc = s ?? document.scrollingElement as HTMLElement;
               sc.scrollTop = sc.scrollHeight;
@@ -750,7 +737,6 @@ for (const size of SE) {
               return { top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height), tappable: !!hit && (b === hit || b.contains(hit)) };
             });
             rec('settings-guardrails-bottom', await measure(page, []), { scroll: r, back });
-            await shot('settings-guardrails-bottom');
             {
               expect.soft(r.max, `${where('guardrails')}: Guardrails is longer than the screen (to test the scroll)`).toBeGreaterThan(0);
               expect.soft(back && back.top >= 0 && back.bottom <= size.h && back.tappable, `${where('guardrails')}: ‹ Settings on screen and tappable at the bottom (${JSON.stringify(back)}, ${JSON.stringify(r)})`).toBe(true);
@@ -769,13 +755,12 @@ for (const size of SE) {
             const sm = await measure(page, ['[data-test=skills-pane]']);
             rec('settings-skill-picked', sm, { pane });
             judge('settings-skill-picked', sm);
-            await shot('settings-skill-picked');
             expect.soft(pane.top >= 0 && pane.top < size.h - 40 && pane.title, `${where('skill picked')}: the skill's detail in view (${JSON.stringify(pane)})`).toBe(true);
             const sb = page.locator('[data-test=skills-back]');
             if (await sb.isVisible().catch(() => false)) await sb.click();
           }
         }
-        expect(errors).toEqual([]);
+        expect([...seen, ...errors]).toEqual([]);
         await ctx.close();
       });
     }

@@ -33,7 +33,7 @@ export interface WorkflowVersion {
 export interface WorkflowSaveResult { id: number; key: string; version: number; ok: boolean; draft: boolean; check: Check }
 export interface WorkflowVersionRow { version: number; ok: boolean; createdAt: string }
 export interface ExportResult { fileName: string; json: string }
-/** workflows.delete (DeveloperNoah's core card): refused with code in_use while a member uses the workflow. */
+/** workflows.delete: refused with code in_use while a member uses the workflow. */
 export interface WorkflowDeleteResult { deleted: true }
 
 export interface SchemaSummary { name: string; description: string; latestVersion: number; builtIn: boolean; updatedAt: string }

@@ -1,11 +1,11 @@
-// Rotations rotate.spec.ts does not cover, in WebKit on the remote view.
+// Rotations with something open, and back and forth, in WebKit on the remote view (rotate.spec.ts turns each page once).
 //  - back and forth twice (portrait -> landscape -> portrait -> landscape -> portrait) on a phone and an iPad;
 //  - a rotation with a modal / phone sheet open (a team's Settings dialog);
 //  - a rotation with the phone drawer open.
 // After every turn: no horizontal overflow, the app root exactly as tall as the viewport, the layout for the new width
 // (phone below PHONE_BREAKPOINT, the desktop sidebar from it), and an open modal inside the viewport.
 //
-//   npx playwright test rotate-tester      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+//   npx playwright test rotate-with-dialogs      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Needs Playwright's WebKit browser on the computer: npx playwright install webkit
 import { devices, expect, test, type Page } from './fixtures';
 import { PHONE_BREAKPOINT } from '../../../src/renderer/src/phone';

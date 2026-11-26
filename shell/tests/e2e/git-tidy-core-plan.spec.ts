@@ -1,14 +1,13 @@
-// Gap tests for the Git dialog's "Tidy…" against a plan shaped exactly like the
-// CORE's git.tidyPlan answer (UiRpc.TidyPlanJson: repo "main", baseBranch, notes, proof on every class, commits on moved
-// and origin-only rows) instead of fake-core's own plan. The fixture is the card's fixture team: a cherry-picked member
+// The Git dialog's "Tidy…" against a plan shaped exactly like the core's git.tidyPlan answer (UiRpc.TidyPlanJson: repo
+// "main", baseBranch, notes, proof on every class, commits on moved and origin-only rows) instead of fake-core's own
+// plan. The fixture team has a cherry-picked member
 // branch, a member clone reset to main (moved), a scratch/ branch, a merged branch, an origin-only branch, a working one.
 //  - the yes of a Realign is bound to the commits shown (expectOld / expectNew, which the core checks: code "stale")
 //  - a moved row shows the commits a realign drops (the core sends them), and the plan's notes are shown
 //  - deleting a contained branch sends no unmergedOk; the main repository goes as "main" or no repo
 //  - 1280 x 800 and 390 x 844: nothing scrolls sideways
-//   npx playwright test git-tidy-core-plan     (screenshots: $YAWBLE_TEAM_DOCS/git-tidy/core-plan-*.png)
+//   npx playwright test git-tidy-core-plan
 import { expect, test, type Browser, type Page } from './phone/fixtures';
-import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { answers } from './phone/fake-core';
 import { buildRenderer, fakeRemote } from './phone/server';
@@ -16,10 +15,7 @@ import { buildRenderer, fakeRemote } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const OUT = path.resolve(__dirname, '..', '..', 'test-results');
-const SHOTS = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'git-tidy') : OUT;
 const BUILT = path.resolve(__dirname, '..', '..', 'out', 'git-tidy-core-plan', 'renderer');
-const shot = (page: Page, name: string) => { mkdirSync(SHOTS, { recursive: true }); return page.screenshot({ path: path.join(SHOTS, `core-plan-${name}.png`), fullPage: true }); };
 
 const TEAM_SHA = '5bbb6ba450df8fe26f82ff2d9171b7d234fd2db1';
 const CLONE_SHA = 'e0f2a18c0ffee1234567890abcdef0123456789a';
@@ -107,7 +103,6 @@ test('1280 x 800, core-shaped plan: every class shown, contained proof, containe
   const m = await sideways(page);
   expect(m.doc).toBeLessThanOrEqual(m.vw);
   expect(m.past).toEqual([]);
-  await shot(page, 'core-plan-1280');
   await tidy.locator('[data-test=tidy-delete-selected]').click();
   await tidy.locator('[data-test=tidy-delete-yes]').click();
   await expect(tidy.locator('[data-test=tidy-report]')).toBeVisible();
@@ -121,17 +116,15 @@ test('1280 x 800, core-shaped plan: every class shown, contained proof, containe
   const asked = dels.filter((d) => !d.p.confirm).map((d) => `${d.p.branches.join(',')}:${d.p.remote}`).sort();
   expect(asked).toEqual(['members/fixture/old-cleo:false', 'members/fixture/testerkofi:true']);
   const kept = await tidy.locator('[data-test=tidy-kept]').allInnerTexts();
-  await shot(page, 'core-plan-after-delete-1280');
   expect(kept.some((k) => k.startsWith('members/fixture/developerines') && k.includes('working branch'))).toBe(true);
   expect(errors).toEqual([]);
   await ctx.close();
 });
 
 test('the Realign yes is bound to the commits shown (expectOld / expectNew go to git.branchRealign)', async ({ browser }) => {
-  const { page, ctx, tidy } = await tidyAt(browser, 1280, 800);
+  const { ctx, tidy } = await tidyAt(browser, 1280, 800);
   await tidy.locator('[data-test="tidy-row-members/fixture/developermarlo"] [data-test=tidy-realign]').click();
   await expect(tidy.locator('[data-test=tidy-realign-shas]')).toHaveText('5bbb6ba450 → e0f2a18c0f');
-  await shot(page, 'realign-confirm-1280');
   await tidy.locator('[data-test=tidy-realign-yes]').click();
   await expect(tidy.locator('[data-test=tidy-done]')).toContainText('Realigned members/fixture/developermarlo');
   const call = seen.find((s) => s.method === 'git.branchRealign');
@@ -143,9 +136,8 @@ test('the Realign yes is bound to the commits shown (expectOld / expectNew go to
 });
 
 test('a moved row shows the commits a realign drops, with the core proof', async ({ browser }) => {
-  const { page, ctx, tidy } = await tidyAt(browser, 1280, 800);
+  const { ctx, tidy } = await tidyAt(browser, 1280, 800);
   const row = tidy.locator('[data-test="tidy-row-members/fixture/developermarlo"]');
-  await shot(page, 'moved-row-1280');
   await expect(row, 'the dropped commit').toContainText('Retry the upload three times');
   await expect(row, 'the core proof').toContainText('nothing is lost by realigning it');
   await ctx.close();
@@ -162,11 +154,10 @@ test('the core refusal "running" is shown as Refused with the core message', asy
     seen.push({ method: 'git.branchRealign', p });
     throw Object.assign(new Error('DeveloperMarlo is running (run 42), so its clone may still move: realign after the run ends. Nothing changed.'), { code: 'running' });
   };
-  const { page, ctx, tidy } = await tidyAt(browser, 1280, 800);
+  const { ctx, tidy } = await tidyAt(browser, 1280, 800);
   await tidy.locator('[data-test="tidy-row-members/fixture/developermarlo"] [data-test=tidy-realign]').click();
   await tidy.locator('[data-test=tidy-realign-yes]').click();
   await expect(tidy.locator('[data-test=tidy-realign-error]')).toHaveText('Refused: DeveloperMarlo is running (run 42), so its clone may still move: realign after the run ends. Nothing changed.');
-  await shot(page, 'realign-refused-1280');
   await ctx.close();
 });
 
@@ -175,23 +166,20 @@ test('390 x 844, core-shaped plan: plan, realign and report do not scroll sidewa
   let m = await sideways(page);
   expect(m.doc).toBeLessThanOrEqual(m.vw);
   expect(m.past).toEqual([]);
-  await shot(page, 'core-plan-390');
   await tidy.locator('[data-test="tidy-row-members/fixture/developermarlo"] [data-test=tidy-realign]').click();
   await tidy.locator('[data-test=tidy-realign-confirm]').scrollIntoViewIfNeeded();
   m = await sideways(page);
   expect(m.past).toEqual([]);
-  await shot(page, 'realign-390');
   await tidy.locator('[data-test=tidy-realign-yes]').click();
   await expect(tidy.locator('[data-test=tidy-report]')).toBeVisible();
   m = await sideways(page);
   expect(m.doc).toBeLessThanOrEqual(m.vw);
   expect(m.past).toEqual([]);
-  await shot(page, 'after-realign-390');
   expect(errors).toEqual([]);
   await ctx.close();
 });
 
-// ---- Re-check after DeveloperInes's fix d0347c4 (F2 stale flow, F3 confirm + origin-only/own-work, F4 notes above the list).
+// ---- A stale yes, the confirm with origin-only and own-work rows, and the notes above the list.
 const NEW_TEAM = '6666666666ffffffffff0000000000000000aaaa';
 const NEW_CLONE = '7777777777000000000011111111111111112222';
 /** The core's stale refusal text (TeamRepos.Tidy.cs GitBranchRealignAsync), as the window gets it. */
@@ -204,7 +192,7 @@ function movedTo(team: string, clone: string, cls = 'moved') {
   return p;
 }
 
-test('F2: a stale refusal shows "Refused: <reason>", re-reads the plan and binds a new yes to the new commits', async ({ browser }) => {
+test('a stale refusal shows "Refused: <reason>", re-reads the plan and binds a new yes to the new commits', async ({ browser }) => {
   let plans = 0;
   let moved = false;
   answers['git.tidyPlan'] = () => { plans++; return moved ? movedTo(NEW_TEAM, NEW_CLONE) : corePlan(); };
@@ -213,7 +201,7 @@ test('F2: a stale refusal shows "Refused: <reason>", re-reads the plan and binds
     if (p.expectOld !== NEW_TEAM || p.expectNew !== NEW_CLONE) { moved = true; throw Object.assign(new Error(STALE), { code: 'stale' }); }
     return { oldSha: NEW_TEAM, newSha: NEW_CLONE, branch: 'members/fixture/developermarlo', repo: 'main', member: p.member, changed: true };
   };
-  const { page, ctx, tidy, errors } = await tidyAt(browser, 1280, 800);
+  const { ctx, tidy, errors } = await tidyAt(browser, 1280, 800);
   const before = plans;
   await tidy.locator('[data-test="tidy-row-members/fixture/developermarlo"] [data-test=tidy-realign]').click();
   await tidy.locator('[data-test=tidy-realign-yes]').click();
@@ -221,7 +209,6 @@ test('F2: a stale refusal shows "Refused: <reason>", re-reads the plan and binds
   expect(plans, 'the plan is read again after "stale"').toBeGreaterThan(before);
   await expect(tidy.locator('[data-test=tidy-realign-shas]'), 'the confirm reshows the new commits').toHaveText('6666666666 → 7777777777');
   await tidy.locator('[data-test=tidy-realign-confirm]').scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(SHOTS, 'core-plan-realign-stale-1280.png') });
   await tidy.locator('[data-test=tidy-realign-yes]').click();
   await expect(tidy.locator('[data-test=tidy-done]')).toContainText('Realigned members/fixture/developermarlo');
   const calls = seen.filter((s) => s.method === 'git.branchRealign');
@@ -232,7 +219,7 @@ test('F2: a stale refusal shows "Refused: <reason>", re-reads the plan and binds
   await ctx.close();
 });
 
-test('F2: a stale refusal where the branch is no longer moved closes the confirm and reports the refusal', async ({ browser }) => {
+test('a stale refusal where the branch is no longer moved closes the confirm and reports the refusal', async ({ browser }) => {
   let moved = false;
   answers['git.tidyPlan'] = () => (moved ? movedTo(CLONE_SHA, CLONE_SHA, 'working') : corePlan());
   answers['git.branchRealign'] = (p) => { seen.push({ method: 'git.branchRealign', p }); moved = true; throw Object.assign(new Error(STALE), { code: 'stale' }); };
@@ -244,8 +231,8 @@ test('F2: a stale refusal where the branch is no longer moved closes the confirm
   await ctx.close();
 });
 
-test('F3: the Realign confirm lists the commits it drops and the core proof', async ({ browser }) => {
-  const { page, ctx, tidy } = await tidyAt(browser, 1280, 800);
+test('the Realign confirm lists the commits it drops and the core proof', async ({ browser }) => {
+  const { ctx, tidy } = await tidyAt(browser, 1280, 800);
   const row = tidy.locator('[data-test="tidy-row-members/fixture/developermarlo"]');
   await expect(row.locator('[data-test=tidy-commits]')).toContainText('aa11bb22cc Retry the upload three times');
   await expect(row).toContainText("A realign drops these from the team's copy (not in DeveloperMarlo's clone):");
@@ -255,18 +242,17 @@ test('F3: the Realign confirm lists the commits it drops and the core proof', as
   await expect(box.locator('[data-test=tidy-realign-commits]')).toContainText('aa11bb22cc Retry the upload three times');
   await expect(box.locator('[data-test=tidy-realign-proof]')).toContainText('nothing is lost by realigning it (git cherry main: - aa11bb22cc)');
   await box.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(SHOTS, 'core-plan-realign-confirm-box-1280.png') });
   await ctx.close();
 });
 
-test('F3: origin-only and own-work rows list their commits under "Commits not in <base>:"', async ({ browser }) => {
+test('origin-only and own-work rows list their commits under "Commits not in <base>:"', async ({ browser }) => {
   answers['git.tidyPlan'] = () => {
     const p = corePlan();
     p.repos[0].branches.push({ name: 'members/fixture/old-own', where: ['local', 'origin'], class: 'own-work', teamSha: '8888888888aaaaaaaaaa',
       commits: [{ sha: '8888888888aaaaaaaaaa0000000000000000000', subject: 'Half-done export' }], proof: '1 commit(s) not in main: needs a look' } as any);
     return p;
   };
-  const { page, ctx, tidy } = await tidyAt(browser, 1280, 800);
+  const { ctx, tidy } = await tidyAt(browser, 1280, 800);
   const oo = tidy.locator('[data-test="tidy-row-feature/origin-only-thing"]');
   await expect(oo).toContainText('Commits not in main:');
   await expect(oo.locator('[data-test=tidy-commits]')).toContainText('4444444444 Try a new cache');
@@ -274,12 +260,11 @@ test('F3: origin-only and own-work rows list their commits under "Commits not in
   await expect(own).toContainText('Commits not in main:');
   await expect(own.locator('[data-test=tidy-commits]')).toContainText('8888888888 Half-done export');
   await own.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(SHOTS, 'core-plan-own-work-origin-only-1280.png') });
   await ctx.close();
 });
 
-test('F4: the notes and "Merged and contained are measured against <base>" are shown above the list', async ({ browser }) => {
-  const { page, ctx, tidy } = await tidyAt(browser, 1280, 800);
+test('the notes and "Merged and contained are measured against <base>" are shown above the list', async ({ browser }) => {
+  const { ctx, tidy } = await tidyAt(browser, 1280, 800);
   await expect(tidy.locator('[data-test=tidy-note]')).toHaveText(NOTE);
   await expect(tidy.locator('[data-test=tidy-base]')).toHaveText('Merged and contained are measured against main.');
   const order = await tidy.evaluate((el) => {
@@ -288,6 +273,5 @@ test('F4: the notes and "Merged and contained are measured against <base>" are s
   });
   expect(order.note).toBeLessThan(order.first);
   expect(order.base).toBeLessThan(order.first);
-  await shot(page, 'notes-base-1280');
   await ctx.close();
 });

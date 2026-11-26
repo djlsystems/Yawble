@@ -6,7 +6,7 @@ import { MiniMap } from '@vue-flow/minimap';
 import '@vue-flow/core/dist/style.css';
 import '@vue-flow/controls/dist/style.css';
 import '@vue-flow/minimap/dist/style.css';
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { confirmDialog } from '../../confirm';
 import { jsonProblem, pretty } from '../../workflows/api';
 import {

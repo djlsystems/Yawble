@@ -350,7 +350,7 @@ describe('the Flowchart tab', () => {
     await w.get('[data-test=flow-delete-edge]').trigger('click');
     await flushPromises();
     expect(stepOf(w, 'mark')!.next).toBeNull();
-    expect(edgeIds(w)).toContain('mark->next'); // a null next outside a loop ends the run: the edge now goes to the end node
+    expect(edgeIds(w)).toContain('mark->next'); // a null next outside a loop ends the run: the edge goes to the end node
     expect(w.get('[data-test=vf-edge][data-id="mark->next"]').attributes('data-target')).toBe('__end');
 
     await pick(w, 'keep');

@@ -1,6 +1,5 @@
 // Team Settings on a phone (a list of sections, one section under a sticky
 // Back + title) and the phone sheet's Close, in headless Chrome against the FAKE core of phone-remote.spec.ts.
-// (The sideways-scrolling tab row an older spec tested is gone.)
 //  - 360x740 and 390x844: the list's nine rows are one line, >= 44 px, full width, label not cut; every section opens
 //    alone under the head with its title; in the list and in every section nothing in the dialog is wider than the
 //    screen, neither the page nor the sheet's body scrolls sideways (long env names/values, long repository paths).
@@ -12,8 +11,6 @@
 //
 //   npx playwright test team-settings-list-rows   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
-import path from 'node:path';
-import { mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 import { settled } from './settle';
@@ -21,7 +18,6 @@ import { settled } from './settle';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(120_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), process.env.C347_SHOTS || 'C347-verify');
 const IDS = ['general', 'hiring', 'state', 'repos', 'env', 'network', 'integrations', 'reset', 'delete'];
 const LABELS = ['General', 'Hiring', 'Pause and archive', 'Repositories', 'Environment', 'Network', 'Integrations', 'Reset', 'Delete'];
 const PANES: Record<string, string> = {
@@ -49,7 +45,6 @@ const saved: Record<string, unknown> = {};
 test.beforeAll(async () => {
   test.setTimeout(900_000);
   for (const k of Object.keys(OVERRIDES)) { saved[k] = (answers as any)[k]; (answers as any)[k] = OVERRIDES[k]; }
-  mkdirSync(SHOTS, { recursive: true });
   await buildRenderer();
 });
 test.afterAll(() => { for (const k of Object.keys(saved)) { if (saved[k] === undefined) delete (answers as any)[k]; else (answers as any)[k] = saved[k]; } });
@@ -108,7 +103,6 @@ const overflow = (page: Page) => page.evaluate(() => {
   return { bad, docW: document.documentElement.scrollWidth, vw, pageX, bodyX };
 });
 
-const shot = (page: Page, name: string) => page.screenshot({ path: path.join(SHOTS, name) });
 
 for (const [w, h] of [[360, 740], [390, 844]] as const) {
   test.describe(`phone ${w}x${h}`, () => {
@@ -119,7 +113,6 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
       await expect(root).toHaveAttribute('data-phone-screen', 'list');
       await expect(page.locator('[data-test=manage-error]')).toHaveCount(0);
       const m = await rowInfo(page);
-      await shot(page, `list-${w}x${h}.png`);
       expect(m.rows.map((r) => r.id)).toEqual(IDS);
       expect(m.rows.map((r) => r.text)).toEqual(LABELS);
       for (const r of m.rows) {
@@ -144,7 +137,6 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
         const o = await overflow(page);
         expect.soft(o.bad, `${id}: nothing sticks out`).toEqual([]);
         expect.soft([o.docW <= o.vw, o.pageX, o.bodyX], `${id}: no sideways scroll`).toEqual([true, 0, 0]);
-        await shot(page, `section-${id}-${w}x${h}.png`);
         await page.locator('[data-test=manage-back]').tap();
         await expect(root).toHaveAttribute('data-phone-screen', 'list');
       }
@@ -198,7 +190,6 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
       await expect.poll(() => body.evaluate((b) => b.scrollTop), 'the wheel scrolled the section').toBeGreaterThan(0);
       await settled(page);
       expect.soft((await head()).top, 'head top after a wheel scroll').toBe(h0.top);
-      await shot(page, `env-scrolled-${w}x${h}.png`);
 
       // Back works scrolled down, and the next section starts at its top.
       await page.locator('[data-test=manage-back]').tap();
@@ -245,7 +236,6 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
             onTop: hit === c || c.contains(hit), titleClipped: h2.scrollWidth > h2.clientWidth + 1, titleOverClose: hr.right > cr.left + 0.5 };
         });
         seen[id] = info;
-        await shot(page, `sheet-${id}-${w}x${h}.png`);
         const where = `${id} @${w}x${h} (${info.title})`;
         expect.soft(info.size, `${where}: Close size`).toBe('44x44');
         expect.soft(info.inView, `${where}: Close inside the screen`).toBe(true);
@@ -261,7 +251,7 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
         await expect(page.locator('.modal.sheet'), `${where}: Close closes the sheet`).toHaveCount(before - 1);
         while (await page.locator('.modal.sheet').count()) await page.locator('.modal.sheet [data-test=modal-close]').last().click();
       }
-      console.log(`C347 sheets @${w}x${h}: ${JSON.stringify(seen)}`);
+      console.log(`sheets @${w}x${h}: ${JSON.stringify(seen)}`);
       for (const id of ['open-manage', 'open-triggers', 'open-git']) expect.soft(typeof seen[id], `${id} opened a sheet`).toBe('object');
       expect(errors).toEqual([]);
       await ctx.close();

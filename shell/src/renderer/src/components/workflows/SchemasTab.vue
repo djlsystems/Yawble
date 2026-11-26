@@ -17,7 +17,7 @@ import SchemaTree from './SchemaTree.vue';
 // enum, the schemas it refers to); a built-in one, and every schema for a Visitor, is read-only (Tree and JSON). Your own
 // schema opens on Design (add, remove and reorder fields; each one's name, type, required, description and enum values)
 // with JSON beside it: both edit one schema, and JSON that does not parse is refused without losing the form. Save goes
-// through schemas.save, checked as before; a save that would break a saved workflow is refused (schema_breaks) with its
+// through schemas.save, which checks the schema; a save that would break a saved workflow is refused (schema_breaks) with its
 // list of workflows and steps. "Used in" lists the workflows (schemas.usage) with the variables and steps that use it.
 const props = defineProps<{ api: YawbleApi }>();
 const s = workflowsApi(props.api);

@@ -9,12 +9,9 @@ import { usePhone } from '../phone';
 import { groupAsks } from '../networkAskGroups';
 
 /**
- * The waiting network asks in Needs you (network.asks, pending only): one card per team, member and registrable domain
- * (one member's crl3.digicert.com and ocsp.digicert.com are one item, answered together; networkAskGroups.ts). Refreshed on
- * network.asksChanged (an ask raised or answered, here or in another view) and on a slow poll (the count of a repeated
- * refusal changes without an event). `banner`: the window-wide strip above every view (App.vue); otherwise a plain list
- * (the Board's Needs You lane), filtered by the Board's team and member names. An older core without network.asks
- * shows nothing.
+ * The waiting network asks in Needs you (network.asks): one card per team, member and registrable domain
+ * (networkAskGroups.ts). Refreshed on network.asksChanged and on a slow poll. banner: the window-wide strip above every
+ * view; otherwise a plain list (the Board's Needs You lane), filtered by team and member.
  */
 const props = defineProps<{ api: YawbleApi; pollMs?: number; banner?: boolean; team?: string; member?: string }>();
 const emit = defineEmits<{ count: [n: number] }>();
@@ -31,7 +28,7 @@ let again = false;
 async function load() {
   if (loading) { again = true; return; }
   loading = true;
-  let ok = true;
+  let ok: boolean;
   try {
     do {
       again = false;

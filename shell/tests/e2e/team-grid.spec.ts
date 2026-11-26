@@ -7,9 +7,8 @@
 // full-width tile per row, no handles, New member last.
 //
 //   npx playwright test team-grid      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/team-grid (else test-results/team-grid).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore, type Access } from './phone/fake-core';
 import { ORIGIN, buildRenderer, builtDir } from './phone/server';
@@ -18,9 +17,8 @@ import { settled } from './settle';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'team-grid');
 
-test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
+test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 
 type Opts = { w?: number; h?: number; theme?: 'light' | 'dark'; access?: Access; tiles?: { w: number; h: number } };
 
@@ -110,7 +108,6 @@ async function drag(page: Page, sel: string, dx: number, dy: number) {
 test('1280: two equal tiles per row by default, New member last, handles on every tile', async ({ browser }) => {
   const { page, ctx, errors } = await open(browser);
   const cs = await cells(page);
-  await page.screenshot({ path: path.join(SHOTS, 'desktop-1280-default.png'), fullPage: true });
   expect(cs.length, 'three members + New member').toBe(4);
   expect(cs[cs.length - 1].isNew, 'New member is the last tile').toBe(true);
   expect(cs.filter((c) => c.isNew).length).toBe(1);
@@ -141,7 +138,6 @@ test('1280: w and h handles resize every tile together; kept in yawble.memberTil
   for (const c of cs) expect(c.w).toBe(280);
   expect(rows(cs), '3 x 280 + 28 = 868 fits in 964: three per row').toBe(2);
   expect(cs[0].y).toBe(cs[2].y);
-  await page.screenshot({ path: path.join(SHOTS, 'desktop-1280-280x440.png'), fullPage: true });
   // The Teams list's size is its own.
   expect(await page.evaluate(() => localStorage.getItem('yawble.teamTiles'))).toBe(teamsBefore);
   await page.reload();
@@ -170,7 +166,6 @@ for (const theme of ['light', 'dark'] as const) {
     // The default, the narrowest at the default height, and the smallest tile (min w and min h).
     for (const tiles of [{ w: 460, h: 340 }, { w: 280, h: 340 }, { w: 280, h: 200 }]) {
       const { page, ctx, errors } = await open(browser, { theme, tiles });
-      await page.screenshot({ path: path.join(SHOTS, `desktop-1280-${tiles.w}x${tiles.h}-${theme}.png`), fullPage: true });
       const m = await page.evaluate(() => [...document.querySelectorAll('[data-test=member-cell]')].map((c) => {
         const cell = c.getBoundingClientRect();
         const pane = c.querySelector('.pane') as HTMLElement;
@@ -233,7 +228,6 @@ for (const theme of ['light', 'dark'] as const) {
           const menu = cell.locator('[data-test=member-more-menu]');
           await expect(menu).toBeVisible();
           await settled(page);
-          await page.screenshot({ path: path.join(SHOTS, `desktop-1280-${tiles.w}x${tiles.h}-menu${i}-${theme}.png`) });
           const vis = await menu.evaluate((el) => {
             const r = el.getBoundingClientRect();
             const pts = [[r.left + 4, r.top + 4], [r.right - 4, r.top + 4], [r.left + 4, r.bottom - 4], [r.right - 4, r.bottom - 4], [(r.left + r.right) / 2, (r.top + r.bottom) / 2]];
@@ -255,7 +249,6 @@ for (const theme of ['light', 'dark'] as const) {
 
 test('1280: New member opens the form; validation, Adding…, a refused add keeps the form, Cancel and Escape, an add closes it', async ({ browser }) => {
   const { page, ctx, errors, adds, hold, release, refuse } = await open(browser);
-  const tile = page.locator('[data-test=member-card-new-tile]');
   await page.locator('[data-test=member-card-new]').click();
   const form = page.locator('[data-test=add-agent-form]');
   await expect(form).toBeVisible();
@@ -272,7 +265,6 @@ test('1280: New member opens the form; validation, Adding…, a refused add keep
     });
     expect.soft(inside, `${b} inside the New member tile`).toBe(true);
   }
-  await tile.screenshot({ path: path.join(SHOTS, 'new-member-form.png') });
   // Escape cancels.
   await page.locator('[data-test=add-agent-name]').fill('Developer Priya');
   await page.keyboard.press('Escape');
@@ -299,7 +291,6 @@ test('1280: New member opens the form; validation, Adding…, a refused add keep
   await expect(add).toContainText('Adding…');
   await expect(add).toBeDisabled();
   await expect(page.locator('[data-test=add-agent-cancel]')).toBeDisabled();
-  await tile.screenshot({ path: path.join(SHOTS, 'new-member-adding.png') });
   release();
   await expect(form).toHaveCount(0);
   expect(adds.length).toBe(2);
@@ -321,7 +312,6 @@ test('remote Visitor at 1280: same grid, New member last and disabled with the r
   await btn.click({ force: true });
   await expect(page.locator('[data-test=add-agent-form]')).toHaveCount(0);
   expect(core.calls).not.toContain('members.add');
-  await page.screenshot({ path: path.join(SHOTS, 'desktop-1280-visitor.png'), fullPage: true });
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -330,7 +320,6 @@ for (const theme of ['light', 'dark'] as const) {
   test(`phone 375 ${theme}: one full-width tile per row, no handles, New member last, a saved size ignored`, async ({ browser }) => {
     const { page, ctx, errors } = await open(browser, { w: 375, h: 812, theme, tiles: { w: 280, h: 200 } });
     const cs = await cells(page);
-    await page.screenshot({ path: path.join(SHOTS, `phone-375-${theme}.png`), fullPage: true });
     const gridW = await page.evaluate(() => Math.round(document.querySelector('[data-test=member-grid]')!.getBoundingClientRect().width));
     expect(cs.length).toBe(4);
     expect(cs[3].isNew, 'New member last').toBe(true);
@@ -352,7 +341,6 @@ for (const theme of ['light', 'dark'] as const) {
       const hh = await page.locator(`[data-test=${s}]`).evaluate((e) => e.getBoundingClientRect().height);
       expect.soft(hh, `${s} 44 px`).toBeGreaterThanOrEqual(44);
     }
-    await page.locator('[data-test=member-card-new-tile]').screenshot({ path: path.join(SHOTS, `phone-375-new-form-${theme}.png`) });
     expect(errors).toEqual([]);
     await ctx.close();
   });
@@ -392,7 +380,6 @@ for (const theme of ['light', 'dark'] as const) {
         const menu = cell.locator('[data-test=member-more-menu]');
         await expect(menu).toBeVisible();
         await settled(page);
-        await page.screenshot({ path: path.join(SHOTS, `menu-over-grips-${vw}-280x200-menu${i}-${theme}.png`) });
         const o = await menu.evaluate((el, idx) => {
           const m = el.getBoundingClientRect();
           const own = el.closest('.member-cell')!;

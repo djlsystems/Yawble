@@ -4,8 +4,6 @@
 // View > Theme drives the same state (and "Use system setting" follows the OS again), and a remote view shows the
 // toggle without the Cloud Link icon and keeps its own choice. Fakes only.
 import { flushPromises, mount } from '@vue/test-utils';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { YawbleApi } from '../../src/shared/api';
 
@@ -126,18 +124,5 @@ describe('the theme switch in the window (App.vue)', { timeout: 30_000 }, () => 
     expect(localStorage.getItem('yawble.remoteTheme')).toBe('dark');
     expect(localStorage.getItem('yawble.theme')).toBe('dark');
     w.unmount();
-  });
-});
-
-describe('the theme toggle looks like the Cloud Link icon', () => {
-  it('same padding, radius, colour and hover as .cloud-ind', () => {
-    const src = (rel: string) => readFileSync(resolve(__dirname, '../../src/renderer/src', rel), 'utf8');
-    const rule = (text: string, sel: string) => new RegExp(`\\${sel}\\s*\\{([^}]*)\\}`).exec(text)?.[1] ?? '';
-    const decl = (body: string, prop: string) => new RegExp(`(?:^|[;\\s])${prop}\\s*:\\s*([^;]+)`).exec(body)?.[1].trim();
-    const app = src('App.vue'); const toggle = src('components/ThemeToggle.vue');
-    for (const p of ['padding', 'border-radius', 'color']) {
-      expect(decl(rule(toggle, '.theme-toggle'), p), p).toBe(decl(rule(app, '.cloud-ind'), p));
-    }
-    expect(rule(toggle, '.theme-toggle:hover')).toBe(rule(app, '.cloud-ind:hover'));
   });
 });

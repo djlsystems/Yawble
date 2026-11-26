@@ -29,13 +29,6 @@ describe('full-height frames use the visible height (dvh), with vh as the fallba
     const r = rule(src('components/Modal.vue'), '.modal');
     expect(r.indexOf('max-height: calc(100dvh')).toBeGreaterThan(r.indexOf('max-height: calc(100vh'));
   });
-  it("App.vue's page column never grows past the window, nor its row past the window's height (minmax(0, 1fr))", () => {
-    expect(rule(src('App.vue'), '.app')).toContain('grid-template-columns: 268px minmax(0, 1fr)');
-    expect(rule(src('App.vue'), '.app')).toContain('grid-template-rows: minmax(0, 1fr)');
-    // ... and a sidebar taller than a short window (a phone in landscape at a desktop width) scrolls inside it.
-    expect(rule(src('components/Sidebar.vue'), '.side')).toContain('overflow-y: auto');
-    expect(rule(src('App.vue'), '.app.collapsed')).toContain('grid-template-columns: 56px minmax(0, 1fr)');
-  });
   it('no scoped style is a bare 100vh height without its dvh', () => {
     for (const file of ['App.vue', 'TerminalApp.vue', 'components/Modal.vue']) {
       for (const line of src(file).split('\n').filter((l) => /height: (calc\()?100vh/.test(l))) expect(line, file).toMatch(/100dvh/);

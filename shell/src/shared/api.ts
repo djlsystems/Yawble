@@ -52,15 +52,12 @@ export interface AvailableBackend {
   warnings: string[];
 }
 
-// The in-app guardrail check (core: Guardrail/GuardrailService.cs). The core answers one IPC request at a
-// time per connection and a check takes seconds, so the window starts it and polls:
+// The in-app guardrail check (core: Guardrail/GuardrailService.cs). A check takes seconds, so the window starts it and polls:
 //   guardrail.start {team?, member?} -> GuardrailStarted     (omit both: the global policy alone)
 //   guardrail.get   {team?, member?} -> GuardrailState       (the last report survives a restart)
 //   guardrail.stop  {team?, member?} -> GuardrailStopped     (withdraws a queued check, or stops its sandbox)
-// The check is a run of the member through the core's sandbox launcher: a member's check waits for a global run slot
-// (state 'running' while queued too), shows in runs.list and can be stopped with runs.stop; guardrail.start fails
-// with "busy" while the member is running or queued. The window's panel is GuardrailPanel.vue (an agent card's
-// shield button, the agent's Guardrails settings tab, and the global policy dialog for the global policy alone).
+// A member's check is a run of that member: it waits for a run slot, shows in runs.list, and guardrail.start fails
+// with "busy" while the member is running or queued.
 export type GuardrailVerdict = 'BLOCKED' | 'ALLOWED' | 'SKIP' | 'INFO' | 'MISSING';
 
 export interface GuardrailSubjectParams {
@@ -865,7 +862,7 @@ export interface TriggerFire { outcome: string; seq: number | null; reason: stri
 export interface TeamGitBranch {
   branch: string; sha: string; aheadOfBase: number; inTeamBranch: boolean; aheadRange?: CommitRangeRef | null; push?: BranchPush | null;
 }
-/** An old-style members/<member> branch left from before member branches were named members/<team>/<member>:
+/** A members/<member> branch, in the naming without the team (member branches are members/<team>/<member>):
  * here (local) and/or on origin (remote), and whether its commits are merged. */
 export interface TeamGitOldBranch { name: string; local: boolean; remote: boolean; merged: boolean }
 export interface TeamGitStatus {
@@ -937,16 +934,12 @@ export interface TidyPlan { repos: TidyRepo[] }
  * shown: the core refuses with code "stale" if either moved. Also refused (an error) while the member runs. */
 export interface BranchRealignResult { oldSha: string; newSha: string }
 /**
- * git.commitShow {team | teamId, sha, repo?} (core TeamRepos.CommitView.cs CommitInfo.ToJson): one commit of the
- * team's repository, from plain git (never an agent's clone). sha: 4 to 64 hex digits, else the error bad_params.
- * found=false: git no longer has it; the answer is then only {found, goneReason, sha} (goneReason is plain words and
- * may name the branch and member). made: the member, card and deliverable that made it (the app's own records); absent
- * when unknown; a merge recorded on the team branch is credited to the Manager. merge: what a merge brought in;
- * intoBranch / fromBranch are null when neither git nor the app's records can tell. where: inMain; branches: the team
- * branch first, then member branches, never main; otherBranches: the other local branches that hold it (not main, the team
- * branch or members/*; absent from an older core, read as []); onlyOnMember only when it is in neither main nor the team branch;
- * pushed (on origin); tags (the release tags that contain it). files: against the first parent for a merge.
- * codeShown=false: a cloud viewer with "Show members' code to cloud viewers" off; the file list only, no diffs.
+ * git.commitShow {team | teamId, sha, repo?}: one commit of the team's repository, from plain git. sha: 4 to 64 hex
+ * digits, else bad_params. found=false: git does not have it; the answer is then only {found, goneReason, sha}.
+ * made: the member, card and deliverable that made it; absent when unknown. merge: what a merge brought in
+ * (intoBranch / fromBranch null when unknown). where: inMain; branches (the team branch first, then member branches,
+ * never main); otherBranches (other local branches that hold it; absent from an older core); onlyOnMember; pushed;
+ * tags. codeShown=false: a cloud viewer who may not see code gets the file list only, no diffs.
  */
 export interface CommitPerson { name: string; email: string; date: string }
 export type CommitFileStatus = 'added' | 'modified' | 'deleted' | 'renamed';

@@ -238,7 +238,7 @@ describe('Settings > Guardrails', () => {
     expect(w.emitted('changed')).toHaveLength(1);
   });
 
-  it('sends the same payload shape as before, with the stored caps sent back exactly as loaded', async () => {
+  it('sends every field in one payload, with the stored caps sent back exactly as loaded', async () => {
     const { w, calls } = await mountPolicy(policy());
     await w.get('[data-test=global-maxConcurrentAgents]').setValue('6');
     await w.get('[data-test=save-global]').trigger('click');
@@ -254,7 +254,7 @@ describe('Settings > Guardrails', () => {
     });
   });
 
-  it('caps left empty are still left out, as before', async () => {
+  it('caps left empty are left out', async () => {
     const { w, calls } = await mountPolicy(policy({ memoryMb: null, cpuPercent: null, maxProcesses: null } as any));
     await w.get('[data-test=global-clipboard]').setValue('none');
     await w.get('[data-test=save-global]').trigger('click');
@@ -336,7 +336,7 @@ describe('Settings > Guardrails', () => {
     expect(calls.some((c) => c.method === 'policy.saveGlobal')).toBe(false);
   });
 
-  it('the Guardrail check card runs the same RPC as before', async () => {
+  it('the Guardrail check card runs guardrail.start', async () => {
     const { w, calls } = await mountPolicy(policy());
     const card = w.get('[data-test=global-guardrail]');
     expect(card.element.tagName).toBe('SECTION');
@@ -361,8 +361,8 @@ describe('no CSS containment on what hosts a Modal', () => {
   };
   const containment = /\bcontainer(-type)?\s*:|\bcontain\s*:|\btransform\s*:/;
 
-  it('the Settings page, its tab pane and the inline panel carry none', () => {
-    for (const file of ['SettingsView.vue', 'Modal.vue', 'SkillsDialog.vue', 'ListEditor.vue']) {
+  it('the Settings page, its tab pane and the inline panel carry none; nor do the Documents and Backlog pages, which fill the page and open dialogs', () => {
+    for (const file of ['SettingsView.vue', 'Modal.vue', 'SkillsDialog.vue', 'ListEditor.vue', 'DocumentsBrowser.vue', 'DocumentsView.vue', 'DocumentsDialog.vue', '../board/BacklogView.vue']) {
       expect(styleOf(file), file).not.toMatch(containment);
     }
   });

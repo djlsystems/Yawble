@@ -100,29 +100,11 @@ public sealed partial class NameLeakTests
 
     /// <summary>
     /// Files whose comments and test names are not checked for review traces: files that state the product's own rule
-    /// on member names such as "TesterWren", and files that still carry such wording. A file of the second group
-    /// leaves the list when its comments are rewritten.
+    /// on member names such as "TesterWren".
     /// </summary>
     private static readonly HashSet<string> ReviewTracesAllowed =
     [
         "core/src/Yawble.Core/Board/TesterRule.cs",
-        "shell/src/renderer/src/commitView.ts",
-        "shell/src/renderer/src/workflows/types.ts",
-        "shell/tests/e2e/git-tidy-core-plan.spec.ts",
-        "shell/tests/e2e/overall-time-timeline-verify.spec.ts",
-        "shell/tests/e2e/phone-remote.spec.ts",
-        "shell/tests/e2e/team-spacing.spec.ts",
-        "shell/tests/unit/board.test.ts",
-        "shell/tests/unit/commit-view-verify.test.ts",
-        "shell/tests/unit/concierge-default-agent.test.ts",
-        "shell/tests/unit/fake-core-expiry.test.ts",
-        "shell/tests/unit/phone-member-pane.test.ts",
-        "shell/tests/unit/phone-settings.test.ts",
-        "shell/tests/unit/remote-access-break.test.ts",
-        "shell/tests/unit/stopped-run-verify.test.ts",
-        "shell/tests/unit/sync-banner-verify.test.ts",
-        "shell/tests/unit/toolAsks.test.ts",
-        "shell/tests/unit/workflows-place.test.ts",
     ];
 
     /// <summary>Shipped migrations are fixed text; their comments are not checked for review traces.</summary>

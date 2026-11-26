@@ -113,3 +113,47 @@ describe('terminal pane: Grok not signed in', () => {
     expect(w.find('[data-test=terminal-pane-signin]').exists()).toBe(false);
   });
 });
+
+// The detail strings the core sends (SignInCatalog.Grok / GrokRefused in core/src/Yawble.Core/Agents/CliSignIn.cs) begin
+// with the heading's own words: the pane shows the fix text once and the rest of the detail as the reason.
+describe('Grok banner with the core\'s own detail', () => {
+  const FIX = 'Not signed in: run grok in your own terminal and sign in';
+  const CORE_DETAILS = [
+    'Not signed in: run `grok` in your own terminal and sign in. /home/alice/.grok/auth.json holds no sign-in (grok clears it when xAI refuses to renew it); then reopen this dialog.',
+    'Not signed in: run `grok` in your own terminal and sign in. /home/alice/.grok/auth.json is missing; then reopen this dialog.',
+    "Not signed in: run `grok` in your own terminal and sign in. The app's last Grok request (2026-11-22 15:00) was refused: the Grok sign-in on this computer was refused by xAI.",
+    "Not signed in: run `grok` in your own terminal and sign in. The app's last Grok request (2026-11-22 15:00) was refused: the Grok sign-in on this computer was refused or has expired: run 'grok' in your own terminal to renew it.",
+  ];
+  const REASONS = [
+    '/home/alice/.grok/auth.json holds no sign-in (grok clears it when xAI refuses to renew it).',
+    '/home/alice/.grok/auth.json is missing.',
+    "The app's last Grok request (2026-11-22 15:00) was refused: the Grok sign-in on this computer was refused by xAI.",
+    "The app's last Grok request (2026-11-22 15:00) was refused: the Grok sign-in on this computer was refused or has expired: run 'grok' in your own terminal to renew it.",
+  ];
+  let lastDetail: string | null = null;
+  async function banner(detail: string) {
+    const { api } = fakeApi(() => [grok('not-signed-in', detail)]);
+    showChannelTerminal('agent-test:grok', 'Terminal · Grok Build (xAI) · global policy');
+    const w = mount(TerminalPane, { props: { api }, ...stubs });
+    await flushPromises();
+    lastDetail = w.find('[data-test=terminal-pane-signin-detail]').exists() ? w.get('[data-test=terminal-pane-signin-detail]').text() : null;
+    return w.get('[data-test=terminal-pane-signin]').text().replace(/`/g, '');
+  }
+
+  it('shows the banner for each detail', async () => {
+    for (const d of CORE_DETAILS) expect(await banner(d)).toContain(FIX);
+  });
+
+  it('shows the fix text once', async () => {
+    for (const d of CORE_DETAILS) expect((await banner(d)).split(FIX).length - 1).toBe(1);
+  });
+
+  it('shows the reason as the detail line, without "reopen this dialog"', async () => {
+    for (const [i, d] of CORE_DETAILS.entries()) {
+      const text = await banner(d);
+      expect(text).toContain(REASONS[i]);
+      expect(text).not.toMatch(/reopen this dialog/i);
+      expect(lastDetail).toBe(REASONS[i]);
+    }
+  });
+});

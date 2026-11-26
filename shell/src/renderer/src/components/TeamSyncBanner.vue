@@ -41,7 +41,7 @@ async function syncNow() {
     const team = state.value?.behind?.teamBranch;
     const total = r.incomingCount ?? r.incoming?.length ?? 0;
     if (r.incoming?.length && team) {
-      // F4b: the not-pushed mark as in the Git dialog - only when the repository has an origin (git.status origin; neither
+      // The not-pushed mark, as in the Git dialog, shows only when the repository has an origin (git.status origin; neither
       // teams.syncToBase nor git.sync says). Unreadable status: no mark.
       let hasOrigin = false;
       try { hasOrigin = !!(await api.call<TeamGitStatus>('git.status', { teamId: props.team.id }))?.origin; } catch { /* no mark */ }

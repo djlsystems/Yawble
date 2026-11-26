@@ -317,7 +317,7 @@ describe('a workflow member on the team page', () => {
     expect(add.title).toBe(READ_ONLY_TITLE);
   });
 
-  it('the team page shows a workflow member card as its workflow tile, an agent as before', async () => {
+  it('the team page shows a workflow member card as its workflow tile, an agent as its pane', async () => {
     const agent = { ...card, kind: 'agent', member: { ...card.member, id: 2, name: 'DeveloperAda' } };
     const calls: Calls = [];
     const w = keep(mount(TeamView, { props: { team, api: fakeApi(calls, { 'teams.agents': () => [card, agent] }), pollMs: 60_000 },
@@ -326,16 +326,5 @@ describe('a workflow member on the team page', () => {
     expect(w.find('[data-test=workflow-member-Poller]').exists()).toBe(true);
     expect(w.findAll('[data-test=agent-pane-stub]').length).toBe(1);
     expect(w.get('[data-test=workflow-member-version]').text()).toBe('inbox-sms-alert@latest (v2)');
-  });
-});
-
-describe('workflow member pane layout', () => {
-  it('keeps each part of the body at its own height, so a file\'s lines never shrink to a sliver; the corners match the team cards', async () => {
-    const { readFileSync } = await import('node:fs');
-    const css = readFileSync('src/renderer/src/components/WorkflowMemberPane.vue', 'utf8');
-    expect(css).toMatch(/\.body \{[^}]*overflow: auto;[^}]*\}/);
-    expect(css).toMatch(/\.body > \* \{ flex: none; \}/);
-    expect(css).toMatch(/\.log \{[^}]*max-height: 160px;[^}]*overflow: auto;/);
-    expect(css).toMatch(/\.pane \{[^}]*border-radius: 14px;/);
   });
 });

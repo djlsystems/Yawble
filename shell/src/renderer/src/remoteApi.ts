@@ -7,14 +7,10 @@ interface Pending {
 }
 
 /**
- * The same window API as the desktop's preload bridge, over a WebSocket: the transport of a REMOTE view of an
- * instance. The page that serves this bundle also serves the socket, at "rpc" next to the page; whatever is behind it
- * relays the instance core's JSON-RPC unchanged: send {id, method, params}; receive {id, result} or {id, error:{code,
- * message}}, and pushes {event, data}. Nothing here names or assumes a particular server.
- *
- * A call is sent at once or it fails; it is never sent after its caller heard that it failed. The calls the screens
- * make while the page's first connection is still opening wait for it; when a connection closes, every waiting call
- * fails and is dropped, and until the next one is open a new call fails at once (the screens ask again by themselves).
+ * The same window API as the desktop's preload bridge, over a WebSocket at "rpc" next to the page: whatever is behind
+ * it relays the core's JSON-RPC unchanged ({id, method, params} out; {id, result} or {id, error} and pushes {event,
+ * data} in). A call is sent at once or it fails: calls made while the first connection opens wait for it; when a
+ * connection closes every waiting call fails, and until the next one is open a new call fails at once.
  */
 export function createRemoteApi(socketUrl: string = defaultSocketUrl()): YawbleApi {
   const pending = new Map<number, Pending>();
@@ -85,7 +81,7 @@ export function createRemoteApi(socketUrl: string = defaultSocketUrl()): YawbleA
       return () => listeners.delete(listener);
     },
     // An agent's terminal: in this page, on its team's page in that member's pane (memberTerminal.ts), not in a
-    // browser window of its own. (A #terminal/<id> link still opens the bare terminal page, as before.)
+    // browser window of its own. (A #terminal/<id> link opens the bare terminal page.)
     openTerminal: async (memberId) => { await openMemberTerminalById(memberId); },
     // No OS folder picker in a browser: the person types the folder's path on the instance.
     pickFolder: async () => null,

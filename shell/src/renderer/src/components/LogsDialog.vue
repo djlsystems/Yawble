@@ -12,13 +12,11 @@ import type { RunDetail } from '../workflows/types';
 const WorkflowRunView = defineAsyncComponent(() => import('./workflows/WorkflowRunView.vue').then((m) => m.default));
 
 /**
- * Logs: every log the app keeps, one at a time, as a table. The source is chosen from a list; the team, the member,
- * the source's own columns, a time range and free text filter it; any column sorts it; pages load as the table
- * scrolls. On this computer, Prune deletes old entries after saying exactly what goes, and Retention sets how long
- * each log is kept. A cloud viewer reads only. Opened from the sidebar, or from a member's card already filtered to
- * that member's activity.
+ * Logs: every log the app keeps, one at a time, as a table that filters, sorts and loads pages as it scrolls. On this
+ * computer, Prune deletes old entries after saying exactly what goes, and Retention sets how long each log is kept. A
+ * cloud viewer reads only.
  */
-// `page`: drawn as the app's Logs place (inline, filling it) instead of a dialog; a member's logs stay a dialog.
+// page: drawn as the app's Logs place (inline, filling it) instead of a dialog; a member's logs stay a dialog.
 const props = defineProps<{ api: YawbleApi; source?: string; team?: string; member?: string; page?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
@@ -51,14 +49,14 @@ const error = ref<string | null>(null);
 const open = ref<string | null>(null);
 let seq = 0;
 
-const source = computed(() => sources.value.find((s) => s.id === sourceId.value) ?? null);
+const sourceInfo = computed(() => sources.value.find((s) => s.id === sourceId.value) ?? null);
 /** The source's columns; a source with levels shows each row's level after its time. */
 const columns = computed<LogColumn[]>(() => {
-  const list = source.value?.columns ?? [];
-  if (!source.value?.levels) return list;
+  const list = sourceInfo.value?.columns ?? [];
+  if (!sourceInfo.value?.levels) return list;
   return [...list.slice(0, 1), { key: 'level', label: 'Level', kind: 'text', filter: false }, ...list.slice(1)];
 });
-const filterColumns = computed(() => columns.value.filter((c) => c.filter && !(c.key === 'team' && source.value?.team)));
+const filterColumns = computed(() => columns.value.filter((c) => c.filter && !(c.key === 'team' && sourceInfo.value?.team)));
 const groups = computed(() => {
   const by = new Map<string, LogSourceInfo[]>();
   for (const s of sources.value) by.set(s.group, [...(by.get(s.group) ?? []), s]);
@@ -101,10 +99,10 @@ function query(offset: number) {
   for (const [k, v] of Object.entries(filters)) if (v && columns.value.some((c) => c.key === k)) f[k] = v;
   return {
     source: sourceId.value,
-    team: source.value?.team && !member.value ? team.value || undefined : undefined,
-    member: source.value?.member ? member.value || undefined : undefined,
+    team: sourceInfo.value?.team && !member.value ? team.value || undefined : undefined,
+    member: sourceInfo.value?.member ? member.value || undefined : undefined,
     ...(app.value && appOffered.value ? { app: true } : {}),
-    ...(level.value && source.value?.levels ? { level: level.value } : {}),
+    ...(level.value && sourceInfo.value?.levels ? { level: level.value } : {}),
     from: fromDay.value ? `${fromDay.value}T00:00:00` : undefined,
     to: toDay.value ? `${toDay.value}T23:59:59.9999999` : undefined,
     text: text.value.trim() || undefined,
@@ -329,24 +327,24 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
           <button v-if="phone" type="button" class="actions-toggle" :class="{ on: actionsOpen }" aria-label="More: Prune, Retention" :aria-expanded="actionsOpen"
             data-test="logs-actions-toggle" @click="actionsOpen = !actionsOpen">⋯</button>
           <div v-show="!phone || actionsOpen" class="actions" :class="{ menu: phone }" data-test="logs-actions" @click="actionsOpen = false">
-            <button v-if="source?.prunable" type="button" :class="{ on: panel === 'prune' }" data-test="logs-prune-open" @click="panel = panel === 'prune' ? null : 'prune'; pruning = null">Prune…</button>
+            <button v-if="sourceInfo?.prunable" type="button" :class="{ on: panel === 'prune' }" data-test="logs-prune-open" @click="panel = panel === 'prune' ? null : 'prune'; pruning = null">Prune…</button>
             <button type="button" :class="{ on: panel === 'retention' }" data-test="logs-retention-open" @click="panel = panel === 'retention' ? null : 'retention'">Retention…</button>
           </div>
         </template>
       </div>
-      <p v-if="source && !phone" class="about muted small" data-test="logs-about">{{ source.about }}</p>
+      <p v-if="sourceInfo && !phone" class="about muted small" data-test="logs-about">{{ sourceInfo.about }}</p>
 
       <!-- On a phone the filters (and the Sort by row) sit at the top of the list's scroller and scroll away with it, so
            the list keeps the sheet; at desktop width they stay here (the Teleport is off). -->
       <Teleport defer :to="`#${phoneToolsId}`" :disabled="!phone">
       <div v-show="!phone || filtersOpen" class="filters" data-test="logs-filters">
-        <label v-if="source?.team">Team
+        <label v-if="sourceInfo?.team">Team
           <select v-model="team" data-test="logs-team">
             <option value="">All teams</option>
             <option v-for="t in who.teams" :key="t" :value="t">{{ t }}</option>
           </select>
         </label>
-        <label v-if="source?.member">Member
+        <label v-if="sourceInfo?.member">Member
           <select v-model="whoPick" data-test="logs-member">
             <option value="">{{ appOffered ? 'Everyone' : 'All members' }}</option>
             <optgroup label="Members">
@@ -359,7 +357,7 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
             <option v-if="appOffered" value="app" data-test="logs-member-app">app (the app itself)</option>
           </select>
         </label>
-        <label v-if="source?.levels">Level
+        <label v-if="sourceInfo?.levels">Level
           <select v-model="level" data-test="logs-level">
             <option value="">All but debug</option>
             <option value="error">Errors</option>
@@ -389,9 +387,9 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
       </div>
       </Teleport>
 
-      <section v-if="panel === 'prune' && source?.prunable" class="panel" data-test="logs-prune">
+      <section v-if="panel === 'prune' && sourceInfo?.prunable" class="panel" data-test="logs-prune">
         <div class="row">
-          <span>Delete {{ source.title }} entries</span>
+          <span>Delete {{ sourceInfo.title }} entries</span>
           <select v-model="pruneAge" data-test="logs-prune-age" @change="pruning = null">
             <option v-for="d in ages" :key="d" :value="d">older than {{ keepLabel(d) }}</option>
             <option value="all">all of them</option>
@@ -414,7 +412,7 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
           </template>
         </div>
       </section>
-      <p v-else-if="panel === 'prune' && source && !source.prunable" class="panel muted">{{ source.title }} is kept: {{ source.keptBecause }}.</p>
+      <p v-else-if="panel === 'prune' && sourceInfo && !sourceInfo.prunable" class="panel muted">{{ sourceInfo.title }} is kept: {{ sourceInfo.keptBecause }}.</p>
 
       <section v-if="panel === 'retention'" class="panel" data-test="logs-retention">
         <p class="muted small">Once a day the app deletes entries older than each log's retention. What a log loses is said beside it.</p>

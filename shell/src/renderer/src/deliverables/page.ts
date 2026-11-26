@@ -229,7 +229,7 @@ function safeStorage(): Storage | null { try { return localStorage; } catch { re
 export interface ItemsOf { items: Map<number, DeliverableItem>; backlog: boolean }
 /**
  * The items of a team's deliverables (or every team's), by deliverable id, from one deliverables.list; null when the core has no
- * deliverables.list (an older core): the screens then show no item, as before.
+ * deliverables.list (an older core): the screens then show no item.
  */
 export async function deliverableItems(api: Pick<YawbleApi, 'call'>, o: { teamId?: number; q?: string; state?: string; limit?: number } = {}): Promise<ItemsOf | null> {
   try {

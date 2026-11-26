@@ -1,10 +1,9 @@
 // @vitest-environment happy-dom
-// The Git dialog fed the REAL core's answers. tests/unit/fixtures/git-previews/*.json were
-// written by the core's git previews verify tests (GIT_PREVIEWS_FIXTURE_OUT set) from fixture repositories (base trunk), serialized as
-// UiRpc sends them. Checks: the shapes are api.ts's; every count asks for the exact pair git.status gave and shows that
+// The Git dialog fed the core's own answers. tests/unit/fixtures/git-previews/*.json are written by
+// core/tests/Yawble.Core.Tests/Teams/MergeDeletePreviewTests.cs (GIT_PREVIEWS_FIXTURE_OUT set) from fixture repositories
+// (base trunk), serialized as UiRpc sends them. Checks: the shapes are api.ts's; every count asks for the exact pair git.status gave and shows that
 // many rows, each opening the Commit view; the merge and delete previews show the core's words; Merge is offered only when
-// the core says it merges; Sync and Merge list what came in; the deleted branch's commit opens as "it was on X". Faults
-// found are pinned as F-tests; flip them when fixed.
+// the core says it merges; Sync and Merge list what came in; the deleted branch's commit opens as "it was on X".
 import { flushPromises, mount } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -59,7 +58,7 @@ describe('git previews: the real core\'s shapes are api.ts\'s', () => {
     expect(range.commits[0].date).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/);
     expect(range.commits[0].shortSha).toBe(range.commits[0].sha.slice(0, 12));
 
-    for (const n of ['merge-ff', 'merge-commit', 'merge-conflict', 'merge-refused', 'merge-up-to-date', 'merge-none', 'f1-merge-dirty']) {
+    for (const n of ['merge-ff', 'merge-commit', 'merge-conflict', 'merge-refused', 'merge-up-to-date', 'merge-none', 'merge-dirty']) {
       const p = real<MergePreview>(n);
       expect(keys(p), n).toEqual(['baseBranch', 'commits', 'conflictFiles', 'count', 'diffFrom', 'diffTo', 'files', 'from', 'hasOrigin', 'newSha', 'outcome',
         'summary', 'teamBranch', 'teamPush', 'text', 'to', 'truncated']);
@@ -201,7 +200,7 @@ describe('git previews: the merge preview shows the core\'s words', () => {
     expect(w.find('[data-test=git-merge-yes]').attributes('disabled')).toBeDefined();
   });
 
-  it('F2 (fixed, Ines efac07d): on a conflict the dialog says the commits are "on team/alpha not in trunk", as the core and the Concierge do', async () => {
+  it('on a conflict the dialog says the commits are "on team/alpha not in trunk", as the core and the Concierge do', async () => {
     const p = real<MergePreview>('merge-conflict');
     expect(p.text).toContain('1 commit on team/alpha not in trunk:');
     const { w } = await openPreview(p, { ...real<TeamGitStatus>('status-ff-origin'), merge: 'merge' });
@@ -210,8 +209,8 @@ describe('git previews: the merge preview shows the core\'s words', () => {
     expect(w.text()).not.toContain('will land');
   });
 
-  it('F1 (fixed, Tomas 9214afe), seen in the dialog: base checked out with uncommitted changes, the core\'s refusal and no Merge', async () => {
-    const p = real<MergePreview>('f1-merge-dirty');
+  it('seen in the dialog: base checked out with uncommitted changes, the core\'s refusal and no Merge', async () => {
+    const p = real<MergePreview>('merge-dirty');
     expect(p.outcome).toBe('refused');
     expect(p.summary).toMatch(/^trunk is checked out in .* with uncommitted changes\./);
     const { w } = await openPreview(p, { ...real<TeamGitStatus>('status-ff-origin'), dirty: true, checkedOut: 'trunk' });
@@ -258,7 +257,7 @@ describe('git previews: the delete preview shows the core\'s words', () => {
     expect(box.findAll('[data-test=commit-list-row]').every((r) => r.find('[data-test=local-mark]').exists())).toBe(true);
   });
 
-  it('F3 (fixed, Ines efac07d): the base is trunk, and the dialog marks a picked commit "already in trunk", as the core and the Concierge do', async () => {
+  it('the base is trunk, and the dialog marks a picked commit "already in trunk", as the core and the Concierge do', async () => {
     const p = real<DeletePreview>('delete-with-merge');
     expect(p.baseBranch).toBe('trunk');
     expect(p.text).toContain(': already in trunk, not pushed');
@@ -318,7 +317,7 @@ describe('git previews: Sync lists what came in', () => {
     expect(commitTarget.value?.sha).toBe(listed.commits[0].sha);
   });
 
-  it('F4 (fixed, Ines efac07d): the commits that came in carry the "not pushed" mark, as the same rows in the count\'s list do', async () => {
+  it('the commits that came in carry the "not pushed" mark, as the same rows in the count\'s list do', async () => {
     const before = real<TeamGitStatus>('status-before-sync');
     const listed = real<CommitRange>('range-team-behind');
     const sync = real<BranchSyncResult>('sync-ff');
@@ -340,7 +339,7 @@ describe('git previews: Sync lists what came in', () => {
     expect(came.map((r) => r.find('[data-test=local-mark]').exists())).toEqual(sync.incoming!.map((c) => c.notPushed));
   });
 
-  it('F4, no origin: the commits that came in carry no per-row mark', async () => {
+  it('no origin: the commits that came in carry no per-row mark', async () => {
     const before = { ...real<TeamGitStatus>('status-before-sync'), origin: null };
     const sync = real<BranchSyncResult>('sync-ff');
     let synced = false;

@@ -48,7 +48,7 @@ async function openEdit(s: McpServerInfo, remote = false) {
   return { w, ...f };
 }
 
-describe('Add dialog fix round 1', () => {
+describe('Add dialog: what it refuses, keeps and resets', () => {
   it('existingNameIsRefused', async () => {
     const { w, calls } = await openAdd(base({ 'integrations.mcpList': () => [server({ name: 'Linear' })] }));
     await t(w, 'f-name').setValue('linear');

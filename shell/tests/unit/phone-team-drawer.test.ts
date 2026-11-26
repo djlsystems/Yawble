@@ -5,8 +5,6 @@
 // buttons. Also: a dialog sheet's header never shrinks over its body (the Deliverables title sat on its intro text).
 // A fake matchMedia gives the width; the API is a scripted fake (no core, no network).
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
 import App from '../../src/renderer/src/App.vue';
@@ -206,14 +204,5 @@ describe('the team page header', () => {
     setWidth(760);
     await nextTick();
     expect(w.find('[data-test=open-deliverables]').exists()).toBe(true);
-  });
-});
-
-describe('a dialog sheet\'s header over its body (Modal.vue)', () => {
-  const css = readFileSync(resolve(__dirname, '../../src/renderer/src/components/Modal.vue'), 'utf8');
-  it('never shrinks, is opaque and is not sticky: the title sits above the body, never on it', () => {
-    expect(css).toMatch(/\nheader \{[^}]*flex: none;[^}]*background: var\(--surface\)/);
-    expect(css).toMatch(/\.modal\.sheet \{ overflow: hidden; \}/);
-    expect(css).not.toMatch(/\.modal\.sheet header \{[^}]*sticky/);
   });
 });

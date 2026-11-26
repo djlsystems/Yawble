@@ -14,7 +14,7 @@ import WorkflowRunView from './WorkflowRunView.vue';
 // Test run: a team, the workflow's settings as a form, one binding per requires entry (over the team's
 // integrations), and an input (a fake TriggerFired now, or a sample). Dry run is on by default; the first live run of a
 // workflow asks first, and the answer is remembered per workflow key. Calls workflows.testRun and shows the run view. doc is
-// the document of ersion (the one that runs), so the form, the bindings and the fake input match what the RPC runs.
+// the document of `version` (the one that runs), so the form, the bindings and the fake input match what the RPC runs.
 const props = defineProps<{ api: YawbleApi; workflow: { id: number; key: string }; version?: number; doc: WorkflowDocument | null; teams: readonly TeamSummary[] }>();
 const emit = defineEmits<{ ran: [r: TestRunResult] }>();
 const s = workflowsApi(props.api);

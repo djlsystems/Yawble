@@ -8,8 +8,8 @@ import { checkPhoneSpecs, isPhoneSpec, listSpecs, phoneSpecs, specMatcher } from
 
 const E2E = path.resolve(__dirname, '..', 'e2e');
 
-// The hand-kept list playwright.config.ts had before the specs were chosen by their imports.
-const OLD_PHONE_SPECS = [
+// A hand-kept list of file names: it leaves out every phone spec nobody added to it.
+const HAND_KEPT = [
   /[\\/]phone[\\/][^\\/]+\.spec\.ts$/,
   /[\\/](teams-buttons|team-more-menu|team-settings-list-rows|team-grid|code-map|monitor|deliverable-timeline|commit-view|deliverables-page|member-pane-phone|phone-remote|team-settings-phone|tell-icons|deliverables-visitor)\.spec\.ts$/,
 ];
@@ -97,7 +97,7 @@ describe('a spec that loads phone/ by a dynamic import() or through a helper mod
       'helpers/open.ts': `export { fakeRemote as openPhone } from '../phone/server';\n`,
       'phone/server.ts': 'export const fakeRemote = 1;\n',
     });
-    const outside = checkPhoneSpecs(dir, OLD_PHONE_SPECS).filter((p) => /not in the phone project/.test(p)).map((p) => p.split(' ')[0]);
+    const outside = checkPhoneSpecs(dir, HAND_KEPT).filter((p) => /not in the phone project/.test(p)).map((p) => p.split(' ')[0]);
     expect(outside).toEqual(['zz-dynamic.spec.ts', 'zz-helper.spec.ts']);
   });
 });
@@ -105,7 +105,7 @@ describe('a spec that loads phone/ by a dynamic import() or through a helper mod
 describe('checkPhoneSpecs: the check playwright.config.ts runs at load', () => {
   it('a stray spec (imports phone/server, not on a hand-kept list, test from @playwright/test) fails it on both counts', () => {
     const dir = tree({ 'zz-stray.spec.ts': STRAY, 'team-grid.spec.ts': GOOD, 'window.spec.ts': ELECTRON });
-    const problems = checkPhoneSpecs(dir, OLD_PHONE_SPECS);
+    const problems = checkPhoneSpecs(dir, HAND_KEPT);
     expect(problems).toHaveLength(2);
     expect(problems[0]).toMatch(/^zz-stray\.spec\.ts .*not in the phone project.*no worker cap/);
     expect(problems[1]).toMatch(/^zz-stray\.spec\.ts .*does not take `test` from phone\/fixtures/);
@@ -127,23 +127,21 @@ describe('checkPhoneSpecs: the check playwright.config.ts runs at load', () => {
 });
 
 describe('the real tests/e2e', () => {
-  // The specs that imported phone/server but were not on the old list, so they ran uncapped in `default`.
-  const STRAYS = [
+  // Phone specs outside tests/e2e/phone whose names no pattern would guess.
+  const BY_IMPORT = [
     'confirm-dialog.spec.ts', 'confirm-dialog-sites.spec.ts', 'git-tidy.spec.ts', 'git-tidy-core-plan.spec.ts', 'deliverable-expiry.spec.ts',
-    'terminal-links.spec.ts', 'team-spacing.spec.ts', 'settings-concierge-teams-defaults.spec.ts', 'overall-time-timeline-verify.spec.ts',
-    'provider-links.spec.ts', 'git-previews.spec.ts', 'team-lessons.spec.ts', 'deliverables-page-verify.spec.ts',
+    'terminal-links.spec.ts', 'team-spacing.spec.ts', 'settings-concierge-teams-defaults.spec.ts', 'timeline-dialog.spec.ts',
+    'provider-links.spec.ts', 'git-previews.spec.ts', 'team-lessons.spec.ts', 'deliverables-page-core-answers.spec.ts',
   ];
 
-  it('the old hand-kept list missed these phone specs', () => {
-    const missed = checkPhoneSpecs(E2E, OLD_PHONE_SPECS).filter((p) => /not in the phone project/.test(p)).map((p) => p.split(' ')[0]);
-    // A phone spec added after the hand-kept list went was never on it either, so it is missed too; it joins the project
-    // by its imports (next test).
-    expect(missed).toEqual(expect.arrayContaining(STRAYS));
+  it('a hand-kept list of names misses these phone specs', () => {
+    const missed = checkPhoneSpecs(E2E, HAND_KEPT).filter((p) => /not in the phone project/.test(p)).map((p) => p.split(' ')[0]);
+    expect(missed).toEqual(expect.arrayContaining(BY_IMPORT));
   });
 
   it('every phone spec is in the project built from the imports and uses phone/fixtures; the Electron specs stay in default', () => {
     const specs = phoneSpecs(E2E);
-    for (const s of STRAYS) expect(specs).toContain(s);
+    for (const s of BY_IMPORT) expect(specs).toContain(s);
     expect(specs).toContain('phone-remote.spec.ts');
     expect(specs).toContain('phone/rotate.spec.ts');
     for (const f of listSpecs(E2E).filter((f) => /^(first-run|window|windows-)/.test(f))) expect(specs).not.toContain(f);

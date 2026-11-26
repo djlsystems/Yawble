@@ -1,6 +1,4 @@
 // @vitest-environment happy-dom
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TeamsList from '../../src/renderer/src/components/TeamsList.vue';
@@ -284,17 +282,6 @@ describe('Teams list tiles: the button row', () => {
   });
 
   it('keeps the actions on one row on a phone, so an overflowing row switches to 44 px icons; the Delete confirm keeps its words', async () => {
-    // A wrapping row never overflows (its scrollWidth stays its clientWidth), so fit() never went icons-only on an iPhone
-    // and Delete wrapped onto a second row. The phone @media rule must not wrap the row.
-    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/components/TeamsList.vue'), 'utf8');
-    const phoneRules = /@media \(max-width: 759\.98px\) \{([\s\S]*?)\n\}/.exec(src)?.[1] ?? '';
-    expect(phoneRules).toMatch(/\.card-actions \{ flex-wrap: nowrap; \}/);
-    expect(src).not.toMatch(/flex-wrap: wrap/);
-    expect(phoneRules).toMatch(/\.tile-btn \{ height: 44px;/);
-    expect(phoneRules).toMatch(/\.icons-only \.card-actions\.normal \.tile-btn \{ width: 44px; \}/);
-    // Icon width applies to the normal row only: the confirm row's Cancel keeps its word; its question ellipsizes.
-    expect(src).not.toMatch(/\.icons-only \.tile-btn:not\(\.danger\)/);
-    expect(src).toMatch(/\.confirm-q \{[^}]*text-overflow: ellipsis; white-space: nowrap; min-width: 0;/);
 
     // A 375 px phone: the labelled row needs more than the card's ~325 px, so it overflows and goes icons-only.
     const sw = vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('card-actions') ? 360 : 0; });

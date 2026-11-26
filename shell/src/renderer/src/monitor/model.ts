@@ -6,15 +6,11 @@ import { cardOf } from './rhythm';
 import { CodeMap, codeEventKey, shortSha, type CodeEvent } from './codemap';
 
 /**
- * THE MONITOR'S MODEL: every team and member as the Monitor draws them, kept current from two sources. Snapshots
- * (the teams and their member cards, polled) always win: they say who exists and each member's state. The feed
- * (bus messages, monitor.messages) only adds what happens between snapshots: an instruction flies to its member as
- * a comet, a finished run bursts, a progress line floats up, a question raises "needs you". The step feed
- * (monitor.steps, steps.ts) adds what each member does inside its run: an icon rising off it for each step, the
- * files it touches on its team's code map (codemap.ts), and a line under its name saying what it is doing now. The
- * code events (monitor.codeEvents) are the map's truth: a commit's files confirm or correct the steps, and the
- * commit travels as a dot to the team's hub; a merge into the team branch bursts along the hub, a landing on main
- * bursts larger, a push pulses off the edge of the wall.
+ * The Monitor's model: every team and member as the Monitor draws them. Snapshots (the teams and their member cards,
+ * polled) always win: they say who exists and each member's state. The bus feed (monitor.messages) adds what happens
+ * between snapshots (a comet for an instruction, a burst for a finished run, "needs you" for a question); the step
+ * feed (monitor.steps) adds what each member does inside its run; the code events (monitor.codeEvents) confirm or
+ * correct the steps on the team's code map (codemap.ts).
  */
 
 /** stopped: a run the person stopped - a neutral step, never a failure and never "needs you". */

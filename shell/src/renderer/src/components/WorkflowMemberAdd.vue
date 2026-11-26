@@ -25,7 +25,7 @@ const versions = ref<WorkflowVersionInfo[]>([]);
 const version = ref<string>('');
 const settings = ref<WorkflowSettingDecl[]>([]);
 const requires = ref<WorkflowRequire[]>([]);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- a field per setting: text, a number input's number, or a checkbox's boolean
+// A field per setting: text, a number input's number, or a checkbox's boolean.
 const values = ref<Record<string, any>>({});
 const bindings = ref<Record<string, string>>({});
 /** Per requires name: the team's integrations of its kind (null: the kind is not listed, the name is typed). */

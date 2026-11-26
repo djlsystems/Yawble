@@ -24,7 +24,7 @@ function fakeApi(answers: Record<string, (params: any) => unknown>) {
 
 const team = { id: 3, name: 'ops', repoPath: null, members: 2, running: 0, queued: 0 };
 const base: TeamGitStatus = {
-  repoPath: 'C:\work\service', managed: false, baseBranch: 'main', checkedOut: 'main', dirty: false, origin: 'https://github.com/x/service.git',
+  repoPath: 'C:\\work\\service', managed: false, baseBranch: 'main', checkedOut: 'main', dirty: false, origin: 'https://github.com/x/service.git',
   baseSha: 'aaaaaaaaaaaa', originBaseSha: 'aaaaaaaaaaaa', baseAheadOfOrigin: 0, baseBehindOrigin: 0,
   teamBranch: 'team/ops', teamSha: 'bbbbbbbbbbbb', teamAheadOfBase: 2, teamBehindBase: 0,
   merge: 'fast-forward', conflictFiles: [], members: [{ branch: 'members/ada', sha: 'cccccccccccc', aheadOfBase: 1, inTeamBranch: true }],
@@ -216,5 +216,25 @@ describe('git dialog', () => {
     await flushPromises();
     expect(calls.some((c) => c.method === 'git.askTeam')).toBe(true);
     expect(w.find('[data-test=git-result]').text()).toContain('Told the Manager');
+  });
+});
+
+describe('git dialog on git.status as the core sends it', () => {
+  // git.status lists a local members/<name> branch once: in members only while a member is still recorded on it;
+  // otherwise in oldBranches only (the core's TeamBranchMoveTests, GitStatus_ListsAnOldStyleBranchOnce_...).
+  // Here Ada is on members/ops/ada and members/ada is old: it is shown once, not twice.
+  it('a local old-style branch nobody is on, which git.status lists only in oldBranches, is shown once, as old', async () => {
+    const status: TeamGitStatus = {
+      ...base, origin: null, originBaseSha: null, baseAheadOfOrigin: null, baseBehindOrigin: null, teamAheadOfBase: 0, merge: 'up-to-date',
+      members: [{ branch: 'members/ops/ada', sha: 'cccccccccccc', aheadOfBase: 1, inTeamBranch: false }],
+      oldBranches: [{ name: 'members/ada', local: true, remote: false, merged: false }],
+    };
+    const { api } = fakeApi({ 'git.status': () => status });
+    const w = mount(GitDialog, { props: { api, team } });
+    await flushPromises();
+    const names = w.findAll('[data-test=git-members] tr').slice(1).map((r) => r.find('code').text());
+    expect(names.filter((n) => n === 'members/ada')).toHaveLength(1);
+    expect(w.find('[data-test=git-old-branch] code').text()).toBe('members/ada');
+    expect(names).toContain('members/ops/ada');
   });
 });

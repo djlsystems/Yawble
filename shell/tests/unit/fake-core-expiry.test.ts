@@ -1,11 +1,10 @@
-// The phone-remote fake core (tests/e2e/phone/fake-core.ts) against the real UiRpc's
-// deliverable expiry shapes, as the core's expiry contract test reads them over the wire (same key list). The
-// faults F1-F4 are fixed in the fake, so every test is a plain `it`. Test-only.
+// The phone-remote fake core (tests/e2e/phone/fake-core.ts) against the real UiRpc's deliverable expiry shapes, as
+// core/tests/Yawble.Core.Tests/Bus/DeliverableExpiryTests.cs reads them over the wire (same key list). Test-only.
 import { describe, expect, it } from 'vitest';
 import { createFakeCore } from '../e2e/phone/fake-core';
 import { DELIVERABLE_EXTEND, TEAM_DELIVERABLE_EXPIRY } from '../../src/shared/api';
 
-/** bus.deliverables item keys from core (the expiry contract test's DeliverableItemKeys). */
+/** bus.deliverables item keys from the core (DeliverableItemKeys in DeliverableExpiryTests.cs). */
 const ItemKeys = ['id', 'title', 'owner', 'state', 'undeclared', 'busy', 'ending', 'startedAt', 'lastAt', 'messages',
   'endedAt', 'expiredAt', 'expiresAt', 'expiryWarning', 'question',
   // The deliverable item's time.
@@ -82,8 +81,8 @@ describe('the fake core serves the real UiRpc deliverable expiry shapes', () => 
     expect((call('teams.list').result as any[]).find((t) => t.id === 1).deliverableExpiryDays).toBe(9);
   });
 
-  // The values behind F1 and F3, not only the keys.
-  it('F1: expiryWarning is the core\'s WarningText on the warned #12, null on #10 and #9, and null again after Extend', () => {
+  // The values, not only the keys.
+  it('expiryWarning is the core\'s WarningText on the warned #12, null on #10 and #9, and null again after Extend', () => {
     const { call } = core();
     const list = () => call('bus.deliverables', { teamId: 1 }).result as any[];
     const by = (id: number) => list().find((w) => w.id === id);
@@ -94,7 +93,7 @@ describe('the fake core serves the real UiRpc deliverable expiry shapes', () => 
     expect(by(12).expiryWarning).toBeNull();
   });
 
-  it('F3: with deliverableExpiryDays 9, Extend sets expiresAt = now + 9 days, and the list item shows the same expiresAt', () => {
+  it('with deliverableExpiryDays 9, Extend sets expiresAt = now + 9 days, and the list item shows the same expiresAt', () => {
     const { call } = core();
     call(TEAM_DELIVERABLE_EXPIRY, { teamId: 1, days: 9 });
     const r = call(DELIVERABLE_EXTEND, { teamId: 1, deliverable: 12 }).result;

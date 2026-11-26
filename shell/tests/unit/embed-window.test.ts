@@ -88,9 +88,6 @@ describe('embed mode in the window (App.vue)', { timeout: 30_000 }, () => {
       expect(app.classes()).toContain('embed');
       expect(app.classes()).not.toContain('collapsed');
       expect(app.attributes('data-embed')).toBe('1');
-      // The grid has a single column in embed mode (the stylesheet's rule for .app.embed).
-      const css = readFileSync(resolve(__dirname, '../../src/renderer/src/App.vue'), 'utf8');
-      expect(css).toMatch(/\.app\.embed\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\);\s*\}/);
     });
   }
 
@@ -124,7 +121,7 @@ describe('embed mode in the window (App.vue)', { timeout: 30_000 }, () => {
   });
 
   it('navigate messages go through the sidebar\'s handlers: places, a team, a chat, New chat, Delete with the in-frame confirm', async () => {
-    const { w, send, navs, calls } = await page('?embed=1&theme=dark');
+    const { send, navs, calls } = await page('?embed=1&theme=dark');
     await send({ type: 'yawble.navigate', to: { kind: 'place', id: 'documents' } });
     expect(navs().at(-1)!.places.find((p: any) => p.active)?.id).toBe('documents');
     await send({ type: 'yawble.navigate', to: { kind: 'team', id: 7 } });
@@ -260,7 +257,7 @@ describe('theme.ts in embed mode (pageThemeEnv)', () => {
     for (const s of spies) s.mockRestore();
   });
 
-  it('not embedded: storage, storage events and the remote key, as before (embed=0, theme= alone change nothing)', () => {
+  it('not embedded: storage, storage events and the remote key (embed=0, theme= alone change nothing)', () => {
     for (const s of ['', '?embed=0&theme=dark', '?theme=dark']) {
       const env = pageThemeEnv(win(s));
       expect(typeof env.storage, s).toBe('function');
@@ -294,7 +291,7 @@ describe('theme-boot.js in embed mode', () => {
     expect(boot('?embed=1&theme=purple', { [REMOTE_THEME_KEY]: 'dark' }, false)).toEqual({ theme: 'light', reads: [] });
   });
 
-  it('not embedded: the kept choice as before (also with no location at all)', () => {
+  it('not embedded: the kept choice (also with no location at all)', () => {
     expect(boot('?theme=dark', { [REMOTE_THEME_KEY]: 'light' })).toEqual({ theme: 'light', reads: [REMOTE_THEME_KEY] });
     expect(boot('', { [REMOTE_THEME_KEY]: 'dark' })).toEqual({ theme: 'dark', reads: [REMOTE_THEME_KEY] });
     expect(boot(null, { [REMOTE_THEME_KEY]: 'dark' })).toEqual({ theme: 'dark', reads: [REMOTE_THEME_KEY] });

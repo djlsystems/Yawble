@@ -20,3 +20,7 @@ packaging/stage/
 # Dev install of the helper programs (scripts/run-dev.cmd).
 .devinstall/
 __pycache__/
+
+# Tool output at the repository root (browser automation runs, screen captures).
+/.playwright-mcp/
+/Screenshots/

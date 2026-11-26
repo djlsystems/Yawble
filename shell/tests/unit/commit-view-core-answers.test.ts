@@ -1,12 +1,10 @@
 // @vitest-environment happy-dom
-// The Commit view fed the REAL core's answers. tests/unit/fixtures/commit-view/*.json
-// are git.commitShow results the core wrote from a fixture repository (the core's commit view verify test with
-// COMMIT_VIEW_FIXTURE_OUT set), so these check the shell against the core's actual contract, not a hand-made fake:
+// The Commit view fed the core's own answers. tests/unit/fixtures/commit-view/*.json are git.commitShow results the
+// core writes from a fixture repository (core/tests/Yawble.Core.Tests/Teams/CommitViewTests.cs with
+// COMMIT_VIEW_FIXTURE_OUT set), so these check the shell against the core's contract, not a hand-made fake:
 // not found is only {found, goneReason, sha}; merge.intoBranch/fromBranch null; made missing; where.branches with the
-// team branch first and never main; codeShown false; a diff refused with remote_refused. Plus two faults found and
-// fixed: F1 a merge made on main now reads
-// "into main" (was "into team/alpha"); F2 a commit only on feature/x now reads "On feature/x (not a team or member
-// branch)" (was "a branch that held it was deleted"), from where.otherBranches.
+// team branch first and never main; codeShown false; a diff refused with remote_refused; a merge made on main reads
+// "into main"; a commit only on feature/x reads "On feature/x (not a team or member branch)", from where.otherBranches.
 import { flushPromises, mount } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -51,7 +49,7 @@ async function view(answer: CommitShow, diff?: (params: any) => unknown) {
 const whereTexts = (w: any) => w.findAll('[data-test=commit-where] li').map((l: any) => l.text());
 
 const ALL = ['in-main-not-pushed', 'in-main-pushed', 'team-branch-only', 'team-branch-only-pushed', 'member-branch-only', 'merge-unnamed',
-  'f1-merge-on-main', 'f2-own-branch', 'deleted-branch', 'not-found'];
+  'merge-on-main', 'own-branch', 'deleted-branch', 'not-found'];
 
 describe('the Commit view on the real core\'s answers', () => {
   it.each(ALL)('%s renders without "null" or "undefined"', async (name) => {
@@ -106,30 +104,30 @@ describe('the Commit view on the real core\'s answers', () => {
     expect(w.find('[data-test=commit-branch]').attributes('disabled')).toBeDefined();
   });
 
-  it('F1 (fixed in core): a merge made on main with git\'s default message reads "into main"', async () => {
-    const c = real('f1-merge-on-main') as CommitFound;
+  it('a merge made on main with git\'s default message reads "into main"', async () => {
+    const c = real('merge-on-main') as CommitFound;
     expect(c.title).toBe("Merge branch 'feature/login'");
     expect(c.merge?.intoBranch).toBe('main');
-    expect(mergeLine(c)).toBe('Merged feature/login into main, 1 commit'); // round 1 said "into team/alpha"
+    expect(mergeLine(c)).toBe('Merged feature/login into main, 1 commit');
     const { w } = await view(c);
     expect(w.find('[data-test=commit-merge]').text()).toBe('Merged feature/login into main, 1 commit');
   });
 
-  it('F2 (fixed in cards 458, 459): a commit only on feature/x reads "On feature/x (not a team or member branch)"', async () => {
-    const c = real('f2-own-branch') as CommitFound;
+  it('a commit only on feature/x reads "On feature/x (not a team or member branch)"', async () => {
+    const c = real('own-branch') as CommitFound;
     expect(c.where.branches).toEqual([]);
     expect(c.where.otherBranches).toEqual(['feature/x']);
     const own = await view(c);
-    expect(whereTexts(own.w)[0]).toBe('On feature/x (not a team or member branch)'); // round 1 said "deleted"
+    expect(whereTexts(own.w)[0]).toBe('On feature/x (not a team or member branch)');
     expect(own.w.find('[data-test=commit-branch]').attributes('disabled')).toBeDefined();
-    // A member branch that really was deleted keeps the deleted wording: the two now read differently.
+    // A deleted member branch reads as deleted: the two read differently.
     const g = real('deleted-branch') as CommitFound;
     expect(g.where.otherBranches).toEqual([]);
     const gone = await view(g);
     expect(whereTexts(gone.w)[0]).toBe('On no branch (a branch that held it was deleted)');
   });
 
-  it('F2: otherBranches is in every found answer from the real core, an array, never base/team/member branches', () => {
+  it('otherBranches is in every found answer from the real core, an array, never base/team/member branches', () => {
     for (const name of ALL.filter((n) => n !== 'not-found')) {
       const c = real(name) as CommitFound;
       expect(Array.isArray(c.where.otherBranches), name).toBe(true);

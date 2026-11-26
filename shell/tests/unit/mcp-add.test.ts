@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { stopConfirmStubs, stubConfirm } from './confirm-stub';
 import McpAddDialog from '../../src/renderer/src/components/McpAddDialog.vue';
 import McpServersPanel from '../../src/renderer/src/components/McpServersPanel.vue';

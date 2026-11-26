@@ -80,7 +80,7 @@ export async function audit(page: Page, scope = 'body'): Promise<Audit> {
       if (wide.length >= 8) break;
       if (!visible(el)) continue;
       const r = el.getBoundingClientRect();
-      if (r.right > W + 1 && !wide.some((w) => false && w)) {
+      if (r.right > W + 1) {
         if (el.parentElement && el.parentElement.getBoundingClientRect().right > W + 1 && wide.length) continue;
         wide.push(`${describe(el)} right=${Math.round(r.right)}`);
       }

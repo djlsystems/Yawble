@@ -5,7 +5,7 @@
 //    (elementFromPoint at each item's centre is that item, and the menu overlaps a pane); nothing scrolls sideways.
 //  - each item closes the menu; Deliverables opens the Deliverables page filtered to the team, the others their dialog.
 //  - 1280 x 900: no ⋯; the header's five buttons.
-//   npx playwright test team-more-menu     (measurements: test-results/team-more-menu-*.json; screenshots: test-results/team-more-menu-*.png)
+//   npx playwright test team-more-menu     (measurements: test-results/team-more-menu-*.json)
 import { expect, test, type Browser } from './phone/fixtures';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -53,9 +53,8 @@ test('375 x 812: the open ⋯ menu is on screen, its items line up, and it draws
   await page.locator('[data-test=team-more]').click();
   const menu = page.locator('[data-test=team-more-menu]');
   await expect(menu).toBeVisible();
-  await page.screenshot({ path: path.join(OUT, 'team-more-menu-375.png') });
   const m = await menu.evaluate((el) => {
-    const box = (e: Element) => { const b = e.getBoundingClientRect(); return { l: +b.left.toFixed(1), t: +b.top.toFixed(1), r: +b.right.toFixed(1), b: +b.bottom.toFixed(1), w: +b.width.toFixed(1), h: +b.height.toFixed(1) }; };
+    const box = (e: Element | Range) => { const b = e.getBoundingClientRect(); return { l: +b.left.toFixed(1), t: +b.top.toFixed(1), r: +b.right.toFixed(1), b: +b.bottom.toFixed(1), w: +b.width.toFixed(1), h: +b.height.toFixed(1) }; };
     const items = [...el.querySelectorAll('[role=menuitem]')].map((it) => {
       const r = it.getBoundingClientRect();
       const svg = it.querySelector('svg')!;
@@ -110,7 +109,6 @@ test('375 x 812: each ⋯ dialog item closes the menu and opens its dialog', asy
     const dlg = page.locator('[role=dialog]');
     await expect(dlg).toHaveCount(1);
     titles[id] = await dlg.getAttribute('aria-label');
-    await page.screenshot({ path: path.join(OUT, `team-more-menu-${id}-375.png`) });
     await page.locator('[data-test=modal-close]').click();
     await expect(dlg).toHaveCount(0);
   }
@@ -135,14 +133,12 @@ test('375 x 812: the ⋯ Deliverables item closes the menu and opens the Deliver
   await expect(page.locator('[data-test=deliverables-team-filter]')).toHaveValue('1');
   await expect(page.locator('[data-test=team-title]')).toHaveCount(0);
   await expect(page.locator('[role=dialog]')).toHaveCount(0);
-  await page.screenshot({ path: path.join(OUT, 'team-more-menu-open-deliverables-menu-375.png') });
   expect(errors).toEqual([]);
   await ctx.close();
 });
 
 test('1280 x 900: the header has its five buttons and no ⋯', async ({ browser }) => {
   const { page, ctx, errors } = await teamPage(browser, 1280, 900);
-  await page.screenshot({ path: path.join(OUT, 'team-more-menu-header-1280.png') });
   await expect(page.locator('[data-test=team-more]')).toHaveCount(0);
   const ids = await page.locator('.teamhead .actions > button').evaluateAll((bs) => bs.map((b) => b.getAttribute('data-test')));
   expect(ids).toEqual(['open-documents', 'open-deliverables', 'open-triggers', 'open-git', 'open-manage']);

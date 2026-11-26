@@ -1,16 +1,10 @@
 import { getCurrentInstance, onBeforeUnmount, onMounted } from 'vue';
 
 /**
- * One way to ask the core again and again. A poll:
- * - runs its function at once when it starts, then every interval;
- * - never runs two at a time: a tick that comes while the previous run is still out is skipped;
- * - rests while the page is hidden (a minimised window, a background tab) and runs once when the page shows again;
- * - slows down while its runs fail (the wait doubles with each failure in a row, up to MAX_BACKOFF_MS) and returns to
- *   its interval with the first run that works;
- * - stops with the component that made it.
- *
- * A run fails when the function throws, rejects, or answers false (for a function that catches its own errors and
- * shows them). An interval longer than MAX_BACKOFF_MS is never stretched.
+ * One way to ask the core again and again. A poll runs its function at once and then every interval, never two at a
+ * time, rests while the page is hidden, and stops with the component that made it. While its runs fail (the function
+ * throws, rejects or answers false) the wait doubles, up to MAX_BACKOFF_MS; the first run that works restores the
+ * interval. An interval longer than MAX_BACKOFF_MS is never stretched.
  */
 export const MAX_BACKOFF_MS = 10_000;
 
@@ -47,7 +41,7 @@ export function createPoll(fn: PollFn, intervalMs: number | (() => number), opti
   const run = async () => {
     if (!running || inFlight) return;
     inFlight = true;
-    let ok = true;
+    let ok: boolean;
     try { ok = (await fn()) !== false; } catch { ok = false; }
     inFlight = false;
     if (!running) return;

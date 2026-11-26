@@ -14,7 +14,7 @@ import ChatMessage from '../../src/renderer/src/components/ChatMessage.vue';
 import MemberActivity from '../../src/renderer/src/components/MemberActivity.vue';
 import CardPanel from '../../src/renderer/src/board/CardPanel.vue';
 import { mountPane, paneRow } from './deliverable-pane-fake';
-import { GIT_COMMITS_RESOLVE, isUiMethod, type BoardCard, type CommitMatch, type TeamSummary, type YawbleApi } from '../../src/shared/api';
+import { GIT_COMMITS_RESOLVE, isUiMethod, type BoardCard, type CommitMatch, type YawbleApi } from '../../src/shared/api';
 
 // A commit-shaped ID is a link only once git.commitsResolve confirms it, against a fake core with the
 // core's contract ({team? | teamId?, ids} -> {max, results: [{id, valid,

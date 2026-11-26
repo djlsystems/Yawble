@@ -350,7 +350,7 @@ describe('agents screen: Delete', () => {
   });
 });
 
-describe('fix round 1', () => {
+describe('agent settings: edge cases', () => {
   it('a duplicate whose update failed is in the list after Cancel, and the next Duplicate picks the next free name', async () => {
     const list = [builtin('claude'), builtin('grok')] as any[];
     const { w, calls } = await open(core({

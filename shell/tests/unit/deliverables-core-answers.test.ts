@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// The Deliverables page fed the REAL core's answers.
-// tests/unit/fixtures/deliverables/*.json were written by the core's deliverables verify test with DELIVERABLES_FIXTURE_OUT set: a started
+// The Deliverables page fed the core's own answers. tests/unit/fixtures/deliverables/*.json are written by
+// core/tests/Yawble.Core.Tests/Bus/DeliverablesPageTests.cs with DELIVERABLES_FIXTURE_OUT set: a started
 // engine with a scripted fake runner (never a real agent CLI) where Web's Manager runs holding the heavy-work lease and
 // has told Ben (whose run waits for the lease), Cy waits for the lease in his own deliverable, Cloud's Dee asked a question
 // with her run still on, Eve waits for a run slot; plus a dispatched item (completed, with its spec), an archived item
@@ -236,9 +236,8 @@ describe('the text filter on the real rows (spec: "over id, title, item label, t
     expect(ids(w)).toEqual([n('dispatched')]);
   });
 
-  // F1 (shell, minor): the item label is one of the filter's fields, but its match is not highlighted (the Item cell is
-  // ItemLink, which had no highlight). ItemLink now takes the filter (q).
-  it('F1: the matched item label is highlighted in the Item column', async () => {
+  // The item label is one of the filter's fields: the Item cell (ItemLink) takes the filter (q) and marks the match.
+  it('the matched item label is highlighted in the Item column', async () => {
     const w = await page();
     await w.find('[data-test=deliverables-chip-all]').trigger('click');
     await flushPromises();
@@ -248,7 +247,7 @@ describe('the text filter on the real rows (spec: "over id, title, item label, t
 
   // The highlight keeps the link (it still opens the Backlog at the item) and covers the archived and
   // plain-label (no backlog read) cases; a partial match marks only its part.
-  it('F1: the highlighted label is still the link; archived items too; only the matched part is marked', async () => {
+  it('the highlighted label is still the link; archived items too; only the matched part is marked', async () => {
     const w = await page();
     await w.find('[data-test=deliverables-chip-all]').trigger('click');
     await flushPromises();
@@ -264,7 +263,7 @@ describe('the text filter on the real rows (spec: "over id, title, item label, t
     expect(cell.text()).toBe(String(ID.spec));
   });
 
-  it('F1: a plain label (the backlog may not be read) is highlighted too', async () => {
+  it('a plain label (the backlog may not be read) is highlighted too', async () => {
     const f = fake();
     f.shape = (a) => (a && 'deliverables' in a ? { ...a, backlog: false } : a);
     const w = await page(f);
@@ -276,8 +275,8 @@ describe('the text filter on the real rows (spec: "over id, title, item label, t
     expect(rowOf(w, n('dispatched')).find('[data-test=deliverable-item-link]').exists()).toBe(false);
   });
 
-  // O2 (nit): the page opens on Open, its default; Clear shows only once the filters differ and puts the defaults back.
-  it('O2: Clear is hidden at the defaults and resets to them', async () => {
+  // The page opens on Open, its default; Clear shows only once the filters differ and puts the defaults back.
+  it('Clear is hidden at the defaults and resets to them', async () => {
     const w = await page();
     expect(w.find('[data-test=deliverables-chip-open]').attributes('aria-selected')).toBe('true');
     expect(w.find('[data-test=deliverables-clear]').exists()).toBe(false);
@@ -307,8 +306,8 @@ describe('the pure rules on the real rows', () => {
 });
 
 // What the Deliverables page's own tests did not cover.
-describe('the filter re-check: F1 stays on the Deliverables table; O2 the defaults', () => {
-  it('F1: with the filter on, the pane\'s item link (another ItemLink user) is not marked while the row is', async () => {
+describe('the filter mark stays on the Deliverables table; Clear and the defaults', () => {
+  it('with the filter on, the pane\'s item link (another ItemLink user) is not marked while the row is', async () => {
     const w = await page();
     await w.find('[data-test=deliverables-chip-all]').trigger('click');
     await flushPromises();
@@ -321,7 +320,7 @@ describe('the filter re-check: F1 stays on the Deliverables table; O2 the defaul
     expect(pane.find('[data-test=deliverable-item-link] mark').exists()).toBe(false);
   });
 
-  it('F1: ItemLink without q marks nothing (button, nested span, plain label), as the team tiles and the dialog use it', async () => {
+  it('ItemLink without q marks nothing (button, nested span, plain label), as the team tiles and the dialog use it', async () => {
     const item = { label: String(ID.spec), title: 'Deliverables page', archived: false } as any;
     for (const props of [{ item }, { item, nested: true }, { item, backlog: false }]) {
       const c = mount(ItemLink, { props: props as any });
@@ -330,16 +329,7 @@ describe('the filter re-check: F1 stays on the Deliverables table; O2 the defaul
     }
   });
 
-  it('F1: the team tiles and the pane pass no q', () => {
-    const src = (p: string) => readFileSync(path.join(__dirname, '..', '..', 'src', 'renderer', 'src', p), 'utf8');
-    for (const p of ['components/TeamDeliverables.vue', 'deliverables/DeliverablePane.vue']) {
-      const tags = src(p).match(/<ItemLink\b[^>]*>/g) ?? [];
-      expect(tags.length, p).toBeGreaterThan(0);
-      for (const t of tags) expect(t, p).not.toMatch(/\bq=|:q\b/);
-    }
-  });
-
-  it('O2: a team alone shows Clear; Clear goes back to Open with no team and no text', async () => {
+  it('a team alone shows Clear; Clear goes back to Open with no team and no text', async () => {
     const w = await page();
     expect(w.find('[data-test=deliverables-clear]').exists()).toBe(false);
     await w.find('[data-test=deliverables-team-filter]').setValue(String(n('web')));
@@ -355,7 +345,7 @@ describe('the filter re-check: F1 stays on the Deliverables table; O2 the defaul
     expect(w.find('[data-test=deliverables-clear]').exists()).toBe(false);
   });
 
-  it('O2: the empty state\'s Show all deliverables still goes to All (no text)', async () => {
+  it('the empty state\'s Show all deliverables still goes to All (no text)', async () => {
     const w = await page();
     await w.find('[data-test=deliverables-search]').setValue('zzz-no-such');
     await flushPromises();

@@ -2,14 +2,9 @@ import { computed, ref } from 'vue';
 import type { GripStore } from './gripStore';
 
 /**
- * The size of every member tile on a team page: one width and height for all of them (and the "New member"
- * tile), dragged by the width and height handles in the gaps. The team page's own size, kept apart from the Teams
- * list's (teamTileSize.ts) the same way: a reactive shared value, a preview while dragging, saved on release in this
- * viewer's storage (the desktop app and every Cloud Link browser keep their own; a blocked storage just means the
- * default next time).
- *
- * The default is two tiles per row at a 1280 px window: the content area is 1280 - 268 (sidebar) - 48 (padding) = 964
- * px, and 2 x 460 + 14 (gap) = 934 fits beside a scrollbar where three (1408) do not.
+ * The size of every member tile on a team page: one width and height for all of them, dragged by the handles in the
+ * gaps, previewed while dragging and saved on release in this viewer's storage (apart from the Teams list's,
+ * teamTileSize.ts). The default is two tiles per row at a 1280 px window: 2 x 460 + 14 fits the 964 px content area.
  */
 export const MEMBER_TILE_MIN_W = 280;
 export const MEMBER_TILE_MAX_W = 1200;

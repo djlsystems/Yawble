@@ -2,7 +2,7 @@ import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY
 import { LayoutDefaults, type LayoutSettings } from './layout';
 import { avatarSheet, initials, loadAvatarSheet, memberAvatar, tileSource, type MemberState } from '../faces/faces';
 import { DoingMs, memberKey, RunEndShowMs, teamKey, spaced, deliverableKey, type Effect, type MonitorModel, type TeamSnapshot, type Tone } from './model';
-import { deliverableTime, type DeliverableSummary } from '../../../shared/api';
+import type { DeliverableSummary } from '../../../shared/api';
 import { drawHandbackMark, drawStepIcon, drawDeliverableIcon } from './icons';
 import { StepLook } from './steps';
 import {
@@ -10,45 +10,19 @@ import {
   type MapFile, type TeamMapView,
 } from './codemap';
 import { busyMembers, nodeLabelFont, placeDeliverableLabels, deliverableNodeLabel, deliverableNodeLook, type LabelAsk, type LabelBox, type LabelObstacle, type PlacedLabel } from './deliverables';
-import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodMs, runFill, teamOfKey, youNodeAt, type Density, type KeepOut } from './rhythm';
+import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodMs, runFill, youNodeAt, type Density, type KeepOut } from './rhythm';
 
 /**
- * THE MONITOR'S SCENE: one canvas on a dark wall. Teams are territories (a glow in the team's hue with its name),
- * members orbit their team on spokes, each a disc with its face and the ring that says its state:
- *   running  - three arcs of 75 degrees turning, a turn in 3.3 s;
- *   waiting  - a dashed ring creeping round;
- *   blocked, needs you, failed - a ring that throbs every 1.4 s, wider and brighter;
- *   idle     - a thin line.
- * The Manager wears an outer ring with three ticks; queued instructions orbit a member as small dots.
- * Effects (comets, bursts, ripples, floating lines) come from the model. So do the members' steps: each step's icon
- * rises off its member and fades (newest lowest, at most the density's stepsEach at once, rhythm.ts), and a line under
- * the member's name says what it is doing now.
- * Each team's code map (codemap.ts) hangs round its hub past its members: the repository's folders on an arc, each
- * with its files fanned beyond it (a "+N" for the rest when the map is large), a folder glowing warmer the busier it
- * is. A new file pops in, an edit lights it bright, a read faint; a line runs from each member to every file it
- * touched, and a file two members touched wears a double ring. A commit's files gather into a dot that travels the
- * member's spoke to the hub and rests there (hover: its message and short sha); a merge into the team branch bursts
- * along the hub's spokes, a landing on main bursts larger, a push pulses out past the wall's edge. Map nodes off the
- * screen are not drawn, and all the maps together show at most MaxMapNodes files (fewer at a lower density).
- * The layout is a d3-force simulation
- * ticked once per frame while it is awake; it cools to rest once nothing changes, and so the camera, which fits
- * everything unless the person has moved it in the last 12 s, settles too. The canvas carries both as attributes:
- * data-settled="true" while the layout is at rest ("false" once it wakes: a drag, new nodes, new homes) and
- * data-camera-idle="true" while the camera is where it aims ("false" while it eases there after a fit or a focus).
- * Under reduced motion nothing turns or throbs.
- *
- * Livelier and easier to follow:
- *   deliverable nodes - every open deliverable is a small node tied by dashed lines to the members working it (to its hub
- *     while nobody is on it); completed, it flashes green and drifts away; closed, it fades with a cross; blocked, it
- *     wears the blocked colour and a "!". Under it, "#id title" (there is no DELIVERABLES panel); hover gives the
- *     whole title, a click opens the deliverable.
- *   work rhythm - a member's disc pulses faster the more steps it takes; a command shows a ring filling round it
- *     while it runs, then a green or red burst by its exit code when that is known; thinking shimmers softly.
- *   the You node - at the right edge: what waits for the person flies to it and it glows with the count.
- *   cards - a Manager's instruction carries its card's number ("#373"); the hand-back comes home along the same line
- *     with a check, or a cross when the run failed or was blocked.
- *   setDensity caps the effects drawn per frame; setFocus zooms to one team and dims the rest; under reduced motion
- *     nothing travels or pulses: a comet is a still line with its label, the states are steady marks.
+ * The Monitor's scene: one canvas on a dark wall. Teams are territories with a hub; members orbit it, each a disc
+ * with its face and a ring for its state (running: turning arcs; waiting: a dashed ring; blocked, needs you, failed:
+ * a throbbing ring; idle: a thin line). Effects (comets, bursts, ripples, floating lines) and the members' steps come
+ * from the model; each team's code map (codemap.ts) hangs round its hub past its members; every open deliverable is
+ * a small node tied to the members working it; what waits for the person flies to the You node at the right edge.
+ * The layout is a d3-force simulation ticked once per frame while it is awake; it cools to rest once nothing changes,
+ * and the camera, which fits everything unless the person moved it in the last 12 s, settles too. The canvas says so:
+ * data-settled="true" while the layout is at rest, data-camera-idle="true" while the camera is where it aims.
+ * setDensity caps the effects drawn per frame; setFocus zooms to one team and dims the rest; under reduced motion
+ * nothing turns, travels or pulses.
  */
 
 interface Node extends SimulationNodeDatum {
@@ -170,9 +144,8 @@ export function boxesGap(a: readonly Box[], b: readonly Box[]): number {
 
 /**
  * A force that acts only between nodes of the same team: one `make()` per team, each given only its
- * team's nodes. The teams' repulsion used to push whole clusters apart as well, so where they settled depended on the
- * start (the random birth spots and the order the teams, deliverables and maps arrived in): 3 teams' nearest gap ran 4-248.
- * Now a cluster's own forces only shape it, and its place comes from its home alone (measuredOvalRx).
+ * team's nodes. A cluster's own forces only shape it; its place comes from its home alone (measuredOvalRx), so where
+ * the clusters settle does not depend on the random birth spots or the order the teams, deliverables and maps arrive in.
  */
 function perTeam(make: () => Force<Node, undefined>): Force<Node, undefined> {
   let subs: Force<Node, undefined>[] = [];

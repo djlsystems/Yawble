@@ -2,16 +2,12 @@ using System.Text;
 using System.Text.Json;
 using Yawble.GuardCheck;
 
-// yawble-guardcheck: the guardrail check's probe (a battery of escape attempts, run as an in-app check).
-// The core runs it INSIDE a member's sandbox, under that member's exact compiled sandbox request with only the command
-// line swapped:
-//   yawble-guardcheck --plan <base64url JSON>
-// It tries each escape the plan names and prints one JSON line per attempt to stdout:
+// yawble-guardcheck: the guardrail check's probe. The core runs it inside a member's sandbox, under that member's
+// compiled sandbox request with only the command line swapped (yawble-guardcheck --plan <base64url JSON>). It tries
+// each escape the plan names and prints one JSON line per attempt:
 //   {"id":"...","category":"...","outcome":"blocked|allowed|skip|info","evidence":"...", ...}
-// "allowed" here means only "this worked from inside the sandbox". The core decides the final verdict: a write that
-// worked inside the sandbox but never reached the host is BLOCKED (sandbox release 1.0.1 masks denied folders with a writable
-// tmpfs). The probe never prints, copies or reads the content of a secret: a sensitive file counts as reachable if it
-// can be OPENED (open + close, no bytes read); only the core's own planted canaries are read.
+// "allowed" means only "this worked from inside the sandbox"; the core decides the verdict. The probe never prints,
+// copies or reads a secret: a sensitive file counts as reachable if it can be opened (no bytes read).
 if (args.Length != 2 || args[0] != "--plan")
 {
     Console.Error.WriteLine("usage: yawble-guardcheck --plan <base64url JSON>");

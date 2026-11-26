@@ -5,20 +5,13 @@ using System.Text.RegularExpressions;
 namespace Yawble.DotnetShim;
 
 /// <summary>
-/// `dotnet` inside a Windows sandbox. In a ProcessContainer a named pipe with an ordinary name can be created but never
-/// opened (sandbox release 1.0.1, microsoft/mxc#1706), and MSBuild's worker nodes are reached through exactly such pipes: a
-/// parallel build fails ("Build FAILED", 0 errors) and leaves idle workers that keep the agent's shell open. MSBuild
-/// takes its worker count only from the command line (`dotnet` itself passes a bare -maxcpucount, which beats any
-/// Directory.Build.rsp), so this wrapper, first on the sandbox's PATH, runs the real dotnet with -m:1 for the commands
-/// that build. -m:1 goes to MSBuild only, never to a program: `dotnet run` and a Microsoft.Testing.Platform `dotnet test`
-/// pass unknown options to the app, so for them the wrapper runs `dotnet build -m:1` first and then the command with
-/// --no-build (see <see cref="Plan"/>). Everything else passes through unchanged.
-/// Not covered (they reach pipes without passing a command line through here): `dotnet watch` (it starts the real
-/// dotnet itself), a full path to the real dotnet.exe, and other tools that use ordinary named pipes. The wrapper is
-/// needed only while microsoft/mxc#1706 stands; RealSandboxDotnetBuildTests' "ordinary pipes fail" check fails once it is fixed.
-/// macOS too: MSBuild puts its worker nodes' sockets in /tmp (NamedPipeUtil: macOS's temp folder is too long for a
-/// socket path), which the sandbox refuses ("SocketException (13): Permission denied" at bind), and the parent waits on
-/// workers that die at start: a restore hung. Granting /tmp would open every run's and the person's temp files to each other.
+/// `dotnet` inside a sandbox, first on its PATH: it runs the real dotnet with one MSBuild worker (-m:1) for the
+/// commands that build. In a Windows ProcessContainer an ordinary named pipe can be created but never opened
+/// (microsoft/mxc#1706), and on macOS the sandbox refuses the sockets MSBuild puts in /tmp; MSBuild reaches its worker
+/// nodes through exactly those, so a parallel build fails or hangs. -m:1 goes to MSBuild only: for `dotnet run` and a
+/// Microsoft.Testing.Platform `dotnet test` the wrapper builds first and then runs the command with --no-build (see
+/// <see cref="Plan"/>). Everything else passes through unchanged. Not covered: `dotnet watch`, a full path to the real
+/// dotnet.exe, and other tools that use ordinary named pipes.
 /// </summary>
 public static partial class Program
 {
@@ -54,22 +47,10 @@ public static partial class Program
     /// The dotnet command lines to run in order for what the caller typed: one, or for `dotnet run` and a
     /// Microsoft.Testing.Platform `dotnet test` that build, two (`build -m:1`, then the command with --no-build).
     /// <para>
-    /// Why two: -m:1 must reach MSBuild only. Neither MSBuild nor the SDK takes a node count from anywhere but the
-    /// command line: MSBuild's command-line parser reads only logging switches from the environment
-    /// (dotnet/msbuild src/MSBuild/CommandLine/CommandLineParser.cs, "Gathers and validates logging switches from the
-    /// MSBUILD_LOGGING_ARGS environment variable"), its response files are the lowest priority
-    /// (src/MSBuild/XMake.cs CombineSwitchesRespectingPriority: "auto-response file switches are on the left (default
-    /// options), and the command line switches are on the right (overriding options)"), and the SDK always passes a bare
-    /// one (dotnet/sdk v10.0.404 src/Cli/Microsoft.DotNet.Cli.Utils/MSBuildForwardingAppWithoutLogging.cs:
-    /// `_msbuildRequiredParameters = ["-maxcpucount", ...]`), which MSBuild reads as "all logical cores"
-    /// (CommandLineParser: a "/m" without parameters becomes GetLogicalCoreCount()). So no environment variable or .rsp can
-    /// give one node, and the implicit builds of run and MTP test do use several (RunCommand.EnsureProjectIsBuilt and
-    /// MTP MSBuildUtility.BuildOrRestoreProjectOrSolution both build through RestoringCommand, i.e. that forwarding app).
-    /// Yet neither command passes an -m on: `dotnet run` gives every token it does not know to the application
-    /// (RunCommandDefinition.ApplicationArguments), and MTP `dotnet test` forwards to MSBuild only its own options
-    /// (MSBuildUtility.GetBuildOptions: `parseResult.OptionValuesToBeForwarded(definition)`), the rest goes to the test app.
-    /// `dotnet build -m:1` with the build options the caller gave, then the command with --no-build, does the build in one
-    /// node and leaves the program's arguments exactly as typed.
+    /// Why two: MSBuild takes its node count from the command line only (the SDK always passes a bare -maxcpucount,
+    /// which means every core and beats a response file or an environment variable), and neither command passes an -m
+    /// on to MSBuild: `dotnet run` gives every option it does not know to the application, and an MTP `dotnet test`
+    /// gives it to the test app. Building first in one node leaves the program's arguments exactly as typed.
     /// </para>
     /// </summary>
     internal static IReadOnlyList<IReadOnlyList<string>> Plan(IReadOnlyList<string> args, string currentDirectory, ShimFiles files)

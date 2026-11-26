@@ -32,29 +32,11 @@ import { codeEventKey, readCodeEvents, type CodeEvent } from './codemap';
 import { entryTime, deliverableLabel, deliverableLook, DeliverableIconPath, DeliverableLooks, DeliverablesShown } from './deliverables';
 
 /**
- * THE MONITOR: every team and its members live on one dark wall (scene.ts), the counts across the top, the state
- * legend along the bottom, the timeline under the wall, and the activity on the right, newest first, with each
- * member's face. Snapshots (the teams and their member cards) are polled; the bus feed (monitor.messages) brings what
- * happens between them, and the step feed (monitor.steps) what each member does inside its runs: the icons rising
- * off it, the files it changes beside it, the line under its name.
- *
- * The timeline holds the last MaxWindowMinutes of both feeds. Clicking it replays from that moment: a model of its
- * own (the live one keeps listening underneath) plays the messages and steps from there, the members' rings show
- * the states the replay works out (ReplayStates), and when it catches up with now, or the person presses Live, the
- * wall is live again.
- *
- * The code events (monitor.codeEvents: commits, merges into the team branch, landings on main, pushes) are polled
- * the same way and build each team's code map with the steps (codemap.ts); a core without the read leaves the map to
- * the steps alone. The replay plays them at their times with the rest.
- *
- * Each team's newest deliverables (bus.deliverables) sit in one panel hung off its hub, live only: they are fetched when the bus brings that
- * team something and otherwise every DeliverablePollMs, and a replay shows none (it would be faking their history).
- * Clicking one opens the Deliverables page at that deliverable (no dialog over the Monitor).
- *
- * A click on a team's hub focuses it (the scene zooms to it and dims the rest); Esc, a click on the empty wall or the
- * chip's × shows every team again. A click on the You node opens Needs you (emit openNeedsYou). Beside the camera:
- * the sound (off unless turned on, kept; sound.ts). The cog opens the Monitor's settings: the density (calm / normal /
- * lively, lively by default, kept) at the top, then the network forces; on a phone the sound sits there too.
+ * The Monitor: every team and its members live on one dark wall (scene.ts), with the counts, the legend, the timeline
+ * and the activity list. Snapshots are polled; the bus feed (monitor.messages), the step feed (monitor.steps) and the
+ * code events (monitor.codeEvents) bring what happens between them. Clicking the timeline replays from that moment in
+ * a model of its own, until it catches up or the person presses Live. A click on a hub focuses that team; a click on
+ * the You node opens Needs you; the cog holds the density, the forces and (on a phone) the sound.
  */
 const props = defineProps<{ api?: YawbleApi; pollMs?: number }>();
 const emit = defineEmits<{
@@ -169,7 +151,7 @@ function onWallUp(e: PointerEvent): void {
   press = null;
   if (!p || p.id !== e.pointerId || Math.hypot(e.clientX - p.x, e.clientY - p.y) >= ClickSlopPx) return;
   const [x, y] = canvasPoint(e);
-  let you = false;
+  let you: boolean;
   try { you = extras()?.hitYouNode?.(x, y) === true; } catch { you = false; }
   // On a phone (no hover) a tap shows what is in it first; its button opens Needs you. A desktop click opens it.
   if (you) {

@@ -5,9 +5,7 @@
 // "Tell Manager"), the desktop's is "Tell Manager" + plane, and "Sending…" shows while bus.tellManager is held.
 //
 //   npx playwright test tell-icons      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/tell-icons (else test-results/tell-icons).
 import { expect, test, type Browser } from './phone/fixtures';
-import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore } from './phone/fake-core';
 import { ORIGIN, buildRenderer, builtDir } from './phone/server';
@@ -17,14 +15,13 @@ import { existsSync } from 'node:fs';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'tell-icons');
 
-test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
+test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 
 async function open(browser: Browser, w: number, h: number, theme: 'light' | 'dark') {
   const core = createFakeCore();
   core.setAsks(false);
-  let held: ((out: string) => void) | null = null;
+  let held: (() => void) | null = null;
   let holdTell = false;
   const phone = w < 760;
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, isMobile: phone, hasTouch: phone, deviceScaleFactor: 2, colorScheme: theme });
@@ -72,8 +69,6 @@ for (const [w, h] of [[375, 812], [1280, 800]] as const) {
       const phone = w < 760;
       const row = page.locator('.tell.row');
       await row.scrollIntoViewIfNeeded();
-      await row.screenshot({ path: path.join(SHOTS, `tell-${w}-${theme}.png`) });
-      await page.screenshot({ path: path.join(SHOTS, `team-${w}-${theme}.png`) });
 
       const m = await page.evaluate(() => {
         const rowEl = document.querySelector('.tell.row') as HTMLElement;
@@ -131,7 +126,6 @@ for (const [w, h] of [[375, 812], [1280, 800]] as const) {
       await expect(page.locator('[data-test=tell-send]')).toHaveAttribute('aria-busy', 'true');
       const busyH = await page.locator('[data-test=tell-send]').evaluate((b) => b.getBoundingClientRect().height);
       if (phone) expect.soft(busyH, 'busy button still >= 44 px').toBeGreaterThanOrEqual(44);
-      await row.screenshot({ path: path.join(SHOTS, `tell-${w}-${theme}-sending.png`) });
       release();
       await expect(page.locator('[data-test=tell-send]')).not.toContainText('Sending…');
       await expect(page.getByText('Sent to the Manager · deliverable 99')).toBeVisible();
