@@ -111,17 +111,9 @@ public sealed class PersonGitPush(TimeSpan? timeout = null, string? globalConfig
         process.StandardInput.Close();
         var stdout = process.StandardOutput.ReadToEndAsync(ct);
         var stderr = process.StandardError.ReadToEndAsync(ct);
-        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        limit.CancelAfter(_timeout);
-        try
-        {
-            await process.WaitForExitAsync(limit.Token);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+        // Out of time or cancelled by the caller: git (and its transport helpers) is stopped either way.
+        if (!await HostProcess.WaitOrStopAsync(process, _timeout, ct))
             return new GitResult(-1, "", $"git {args[0]} ran out of time after {_timeout.TotalSeconds:0}s and was stopped; the origin may be unreachable");
-        }
         return new GitResult(process.ExitCode, (await stdout).ReplaceLineEndings("\n").Trim(), (await stderr).ReplaceLineEndings("\n").Trim());
     }
 
