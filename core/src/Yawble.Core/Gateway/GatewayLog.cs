@@ -254,8 +254,8 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO usage_events (at, run_key, run_number, member, vhost, path, status, model, input_tokens, output_tokens,
-                                          cache_read_tokens, cache_write_tokens, usage)
-                VALUES ($at, $key, $run, $member, $vhost, $path, $status, $model, $in, $out, $cr, $cw, $usage);
+                                          cache_read_tokens, cache_write_tokens)
+                VALUES ($at, $key, $run, $member, $vhost, $path, $status, $model, $in, $out, $cr, $cw);
                 """;
             cmd.Parameters.AddWithValue("$at", _clock.GetUtcNow().ToString("O", CultureInfo.InvariantCulture));
             cmd.Parameters.AddWithValue("$key", (object?)runKey ?? DBNull.Value);
@@ -269,7 +269,6 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
             cmd.Parameters.AddWithValue("$out", (object?)u.OutputTokens ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$cr", (object?)u.CacheReadTokens ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$cw", (object?)u.CacheWriteTokens ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$usage", (object?)Truncate(u.Usage, 8192) ?? DBNull.Value);
             cmd.ExecuteNonQuery();
         }
     }
