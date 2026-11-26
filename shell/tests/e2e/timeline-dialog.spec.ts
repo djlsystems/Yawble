@@ -106,7 +106,7 @@ for (const [w, h] of [[1280, 800], [375, 667]] as const) {
       expect(s.core.calls).toContain('timeline.get');
       await expect(dlg.locator('[data-test=timeline-row]')).toHaveCount(1);
       await expect(dlg.locator('.lane.summary')).toHaveCount(0);
-      await expect(dlg.locator('[data-test=timeline-started]')).toContainText(/planned \d\d:\d\d · started \d\d:\d\d/);
+      await expect(dlg.locator('[data-test=timeline-started]')).toContainText(/planned (?:\S+ \d+ )?\d\d:\d\d · started (?:\S+ \d+ )?\d\d:\d\d/); // a time on another day carries its date
       await expect(dlg.locator('[data-test=timeline-before-start]')).toContainText('20m before it started');
       await expect(dlg.locator('[data-test=timeline-open]')).toBeVisible();
       await expect(dlg.locator('.band.stalled')).toHaveCount(1);
@@ -147,7 +147,7 @@ for (const [w, h] of [[1280, 800], [375, 667]] as const) {
       await expect(dlg.locator('.lane.summary')).toHaveCount(1);
       await expect(dlg.locator('.lane.summary')).toContainText('All cards');
       await expect(dlg.locator('[data-test=timeline-row]')).toHaveCount(7);
-      await expect(dlg.locator('[data-test=timeline-started]')).toContainText(/first message \d\d:\d\d · first card started \d\d:\d\d/);
+      await expect(dlg.locator('[data-test=timeline-started]')).toContainText(/first message (?:\S+ \d+ )?\d\d:\d\d · first card started (?:\S+ \d+ )?\d\d:\d\d/);
       await expect(dlg.locator('.lane:not(.summary) .band.stalled')).toHaveCount(1);
       expect(await dlg.locator('.lane.summary [data-test=timeline-band]').count()).toBeGreaterThan(1);
       await expect(dlg.locator('[data-test=timeline-legend]')).toContainText('Stalled');
