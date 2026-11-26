@@ -39,7 +39,11 @@ Everything here is in **Settings > Integrations**, which has four tabs: **CLIs**
 - Calls never go through a shell. Arguments are passed as a list, stdin is closed, there is no prompt, a call is
   stopped after 2 minutes, and output is cut at 64 KB.
 - `git` as an integration only reads your checkout (log, status, diff, show, blame and similar). Every command that
-  changes it is off. Agents have git in their own clones for their own work.
+  changes it is off. Agents have git in their own clones for their own work. Options that make git start another
+  program, write a file, or read files outside the repository (such as `--output`, `--no-index`, `--contents`,
+  `--ext-diff`, `--extcmd`, `-O`) are never run, whatever your rules say. So are branch deletes and renames.
+- `cli_help` takes a command's words only (`pr`, `create`), never options, and reads no help for a command that is
+  refused.
 - Agents can also get `pr_open` (open a pull request from the team branch) and `pr_status` (the team branch's pull
   requests). Each call follows its repository's provider (your override in **Team settings > Repositories**, else the
   one detected from the origin) and runs as that provider's CLI: `gh` for GitHub, `glab` for GitLab (merge requests),
