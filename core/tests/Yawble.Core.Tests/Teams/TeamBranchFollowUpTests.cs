@@ -5,10 +5,9 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Follow-ups to old member branches and blocked team branches. Temporary repositories only; no git local transport (no push, fetch, clone
-/// or ls-remote between local repositories), so these also run in a sandbox that does not allow it. Item 7's tests are
-/// TeamBranchBlockingTests.AStaleBlockerInTheSharedView_DoesNotRefuseTheStart_AndGoesAtTheRefresh (local transport) and
-/// TeamBranchBlockingGapTests.AStaleSharedViewBlocker_DoesNotRefuseTheStart.
+/// Old member branches and blocked team branches: blockers are matched ignoring case, a refusal after a move says what
+/// moved, and "every merged" keeps another team's branch. Temporary repositories only; no git local transport (no push,
+/// fetch, clone or ls-remote between local repositories), so these also run in a sandbox that does not allow it.
 /// </summary>
 public class TeamBranchFollowUpTests
 {
@@ -29,7 +28,7 @@ public class TeamBranchFollowUpTests
         Assert.Equal(1, cmd.ExecuteNonQuery());
     }
 
-    // ------------------------------------------------------------------ item 6: blockers ignore case
+    // ------------------------------------------------------------------ blockers ignore case
 
     /// <summary>Members/Docs blocks members/docs/&lt;name&gt; where loose refs are files (Windows, macOS): the start gets the
     /// plain message naming it as git has it, never "cannot lock ref", and the Git dialog lists it for its Delete.</summary>
@@ -88,7 +87,7 @@ public class TeamBranchFollowUpTests
         Assert.Empty(TeamRepos.BlockingHeads($"{sha}\trefs/heads/members/docs/ada\n", TeamRepos.BlockingNames("Docs")));
     }
 
-    // ------------------------------------------------------------------ item 8: a refusal after a move says what moved
+    // ------------------------------------------------------------------ a refusal after a move says what moved
 
     /// <summary>The move to members/&lt;team&gt;/&lt;name&gt; runs before the checks. When a check then refuses, the message does not say "Nothing was
     /// changed": it says which branch moved, and the move stands (the member is recorded on its new branch).</summary>
@@ -124,7 +123,7 @@ public class TeamBranchFollowUpTests
         Assert.Contains("delete members/docs in the Git dialog", moved.Message);
     }
 
-    // ------------------------------------------------------------------ item 9: "every merged" keeps another team's branch
+    // ------------------------------------------------------------------ "every merged" keeps another team's branch
 
     /// <summary>The Git dialog's Delete with no names plans every merged branch. A merged branch another team's member is
     /// recorded on (its clone not on disk, so not "checked out") is refused there too, naming the team and member, and the
