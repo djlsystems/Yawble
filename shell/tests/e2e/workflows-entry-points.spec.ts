@@ -11,6 +11,7 @@ import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { answers } from './phone/fake-core';
 import { ORIGIN, buildRenderer, ensureDir, fakeRemote } from './phone/server';
+import { settled } from './settle';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
@@ -34,7 +35,7 @@ async function open(browser: Browser, w: number, h: number, opts: { hash?: strin
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`${s.url}${opts.hash ?? ''}`);
   await expect(page.locator('.app')).toBeAttached({ timeout: 30_000 });
-  await page.waitForTimeout(400);
+  await settled(page);
   return { s, page, ctx, errors };
 }
 
@@ -84,7 +85,7 @@ for (const [w, h] of [[1280, 800], [375, 740]] as const) {
     await onPage(page, want, null);
     // Browser Back after the page opened: recorded.
     await page.goBack().catch(() => null);
-    await page.waitForTimeout(600);
+    await settled(page);
     console.log(`BACK ${w}: team page shown=${await page.locator('[data-test=team-title]').count()} workflows page shown=${await view(page).count()} url=${page.url()}`);
     expect(errors).toEqual([]);
     await ctx.close();
@@ -162,6 +163,7 @@ for (const [kind, wf, btn] of [['Nudge', 12, 'workflow-pane-nudge'], ['Stop', 10
     await expect(page.locator('[data-test=remote-access-chip]')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('[data-test=confirm-dialog]')).toHaveCount(0);
     await expect(pane(page).locator(`[data-test=${btn}]`)).toHaveCount(0);
+    // Nothing may be sent: this waits out the time a stray call from the closed confirm would take to reach the fake core.
     await page.waitForTimeout(500);
     const after = s.core.calls.slice(before);
     for (const m of ['bus.nudgeWorkflow', 'bus.stopWorkflow', 'bus.closeWorkflow', 'bus.workflowExtend']) expect(after, m).not.toContain(m);
@@ -185,7 +187,8 @@ test("#12's expiry on the page (setExpiry): its pane offers Extend; after Extend
   await page.locator('[data-test=confirm-ok]').click();
   await expect.poll(() => s.core.calls.filter((c) => c === 'bus.workflowExtend').length).toBe(1);
   await navTo(page, 'board');
-  await page.waitForTimeout(1500);
+  await expect(page.locator('[data-test=board-lanes]')).toBeVisible();
+  await settled(page);
   await expect(page.locator('[data-test=workflow-expiry-text]')).toHaveCount(0);
   expect(errors).toEqual([]);
   await ctx.close();
@@ -216,7 +219,7 @@ for (const [w, h] of [[1280, 800], [375, 740]] as const) {
     const chip = frame.locator('[data-test=team-workflow][data-id="10"]').first();
     await expect(chip).toBeAttached({ timeout: 15_000 });
     await chip.click();
-    await page.waitForTimeout(1500);
+    await expect(frame.locator('[data-test=workflows-view]')).toBeVisible({ timeout: 15_000 }).catch(() => { /* logged below, then asserted */ });
     const f = page.frames().find((x) => x.url().includes('remote.html'));
     console.log(`EMBED ${w} after chip: frame url=${f?.url()} app=${await frame.locator('.app').count()} view=${await frame.locator('[data-test=workflows-view]').count()} errors=${JSON.stringify(errors)}`);
     await expect(frame.locator('[data-test=workflows-view]')).toBeVisible({ timeout: 15_000 });

@@ -42,13 +42,15 @@ test('real hello team: a new team, its Manager hires and runs a build-and-test t
     await main.locator('[data-test=tell-text]').fill(instruction);
     await main.locator('[data-test=tell-send]').click();
     await expect(main.locator('[data-test=tell-sent]')).toBeVisible({ timeout: 30_000 });
-    await main.waitForTimeout(5_000);
+    // The Manager's run has started on the instruction.
+    await expect(main.locator('[data-test=team-title]')).toContainText(/[1-9]\d* running/, { timeout: 60_000 });
     await main.screenshot({ path: path.join(shots, '2-told.png') });
     // The app stays open while the team works (closing it would interrupt the runs). The caller ends the wait by
     // creating <root>/done once the workflow is complete; a screenshot every two minutes records the progress.
     const done = path.join(root, 'done');
     const deadline = Date.now() + 75 * 60_000;
     for (let i = 3; Date.now() < deadline && !existsSync(done); i++) {
+      // Kept: the screenshot cadence (every 2 min), polling the caller's done file every 5 s in between.
       for (let s = 0; s < 24 && !existsSync(done); s++) await main.waitForTimeout(5_000);
       await main.screenshot({ path: path.join(shots, `${i}-progress.png`) });
     }

@@ -266,12 +266,42 @@ function youNode(f: Frame) {
 const youFlyers = (f: Frame) => discs(f, (o, a) => isScreen(o) && o.style === C.decision && a.r <= 3.41 && a.r > 1);
 
 async function canvasBox(page: Page) { return (await page.locator('[data-test=monitor-canvas]').boundingBox())!; }
-/** Moves to a world point, lets the scene see the pointer there, then presses and lets go (a bare click from afar missed). */
+
+/**
+ * Waits for the wall to come to rest: the canvas's data-settled (the forces cooled, the hubs home, the map in place) and
+ * data-camera-idle (the camera where it aims), both set by the scene.
+ */
+async function still(page: Page, timeout = 40_000) {
+  // Two frames first: the scene sets the attributes in its frame, so one drawn since the last action is read.
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))));
+  const wall = page.locator('[data-test=monitor-canvas]');
+  await expect(wall).toHaveAttribute('data-settled', 'true', { timeout });
+  await expect(wall).toHaveAttribute('data-camera-idle', 'true', { timeout });
+}
+/**
+ * A frame drawn after now. The recorder keeps a frame when the next one starts, so the first kept after now may have
+ * been drawn before it: the second is the first surely drawn after.
+ */
+async function freshFrame(page: Page): Promise<Frame> {
+  const t0 = await page.evaluate(() => performance.now());
+  await page.waitForFunction((t) => (window as any).__frames.filter((f: Frame) => f.at > t).length >= 2, t0, { timeout: 5000 });
+  return page.evaluate(() => (window as any).__frames.at(-1));
+}
+/** Waits until the page has read `method` from the fake core since feed.calls had `from` entries: what was fed before is on the page. */
+async function readAfter(feed: Feed, method: string, from: number, timeout = 8000) {
+  await expect.poll(() => feed.calls.slice(from).some((c) => c.method === method), { timeout, message: `the page reads ${method}` }).toBe(true);
+}
+/** Whether a click left the Monitor: the Workflows page shows, or the wall is gone, within 1.5 s. */
+const leftMonitor = (page: Page) => page.waitForFunction(() => !!document.querySelector('[data-test=workflows-view]') || !document.querySelector('[data-test=monitor-canvas]'), null, { timeout: 1500 }).then(() => true, () => false);
+/** Waits until the hover tip shows (true) or not within `timeout` (false). */
+const tipShown = (page: Page, timeout = 2000) => page.locator('[data-test=monitor-tip]').waitFor({ state: 'visible', timeout }).then(() => true, () => false);
+
+/** Moves to a world point, waits for the scene's tip there, then presses and lets go (a bare click from afar missed). */
 async function clickWorld(page: Page, o: { m: number[] }, p: Pt) {
   const box = await canvasBox(page);
   const s = screen(o, p.x, p.y);
   await page.mouse.move(box.x + s.x, box.y + s.y);
-  await page.waitForTimeout(150);
+  await tipShown(page);
   if (process.env.DBG_CLICK) await page.screenshot({ path: 'test-results/dbg-click.png' });
   if (process.env.DBG_CLICK) console.log('CLICK at', s.x.toFixed(1), s.y.toFixed(1), 'tip:', (await page.locator('[data-test=monitor-tip]').count()) ? (await page.locator('[data-test=monitor-tip]').innerText()).replace(/\s+/g, ' ') : 'none');
   await page.mouse.down();
@@ -283,7 +313,8 @@ async function clickWorld(page: Page, o: { m: number[] }, p: Pt) {
  */
 async function focusTeam(page: Page, team = TEAM, tap = false): Promise<number> {
   for (let i = 1; i <= 8; i++) {
-    const f = await lastFrame(page);
+    await still(page); // the hub where it rests, the camera where it aims
+    const f = await freshFrame(page);
     const h = hubAt(f, team);
     if (h) {
       const box = await canvasBox(page);
@@ -292,55 +323,55 @@ async function focusTeam(page: Page, team = TEAM, tap = false): Promise<number> 
         // At once: the hub drifts several pixels in 150 ms and reaches only 14 world units.
         if (tap) await page.touchscreen.tap(box.x + s.x, box.y + s.y);
         else { await page.mouse.move(box.x + s.x, box.y + s.y); await page.mouse.down(); await page.mouse.up(); }
-        await page.waitForTimeout(100);
+        const focused = await page.locator('[data-test=monitor-focus]').waitFor({ timeout: 1000 }).then(() => true, () => false);
         if (process.env.DBG_CLICK) {
           const g = await lastFrame(page); const h2 = hubAt(g, team)!; const s2 = screen(h2.op, h2.x, h2.y);
           console.log('TRY', i, 'k', h.op.m[0].toFixed(3), 'at', s.x.toFixed(1), s.y.toFixed(1), 'hub after', s2.x.toFixed(1), s2.y.toFixed(1), 'picked', await page.locator('[data-test=monitor-unpick]').count(), 'tip', (await page.locator('[data-test=monitor-tip]').count()) ? (await page.locator('[data-test=monitor-tip]').innerText()).replace(/\s+/g, ' ').slice(0, 60) : 'none');
         }
-        if (await page.locator('[data-test=monitor-focus]').count()) return i;
+        if (focused) return i;
       } else if (process.env.DBG_CLICK) console.log('SKIP', i, 'hub off the wall: k', h.op.m[0].toFixed(3), 'at', s.x.toFixed(1), s.y.toFixed(1), 'wall', box.width.toFixed(0), box.height.toFixed(0));
     } else if (process.env.DBG_CLICK) {
       const inks = f.ops.filter((o) => o.op === 'text' && o.text === team).map((o) => `${o.style}${isScreen(o) ? ' screen' : ''}`);
       console.log('SKIP', i, 'no hub label', f.ops.length, 'ops; texts', team, ':', JSON.stringify(inks));
     }
-    await page.waitForTimeout(400);
   }
   return 0;
 }
-async function unhover(page: Page) { await page.mouse.move(2, 2); await page.waitForTimeout(150); }
+/** Moves the pointer off the wall: the tip goes, and a frame is drawn without the hover's dimming. */
+async function unhover(page: Page) {
+  await page.mouse.move(2, 2);
+  await expect(page.locator('[data-test=monitor-tip]')).toHaveCount(0);
+  await freshFrame(page);
+}
 
-/** Waits until the frames show what `ok` wants. */
+/** Waits until the frames show what `ok` wants (polled by expect.poll); returns the last value seen. */
 async function until<T>(page: Page, get: (f: Frame) => T, ok: (v: T) => boolean, timeout = 10_000): Promise<T> {
-  const end = Date.now() + timeout;
   let v: T;
-  do {
-    const f = await lastFrame(page);
-    v = f ? get(f) : (undefined as T);
-    if (f && ok(v)) return v;
-    await page.waitForTimeout(80);
-  } while (Date.now() < end);
+  await expect.poll(async () => { const f = await lastFrame(page); v = get(f); return ok(v); }, { timeout, intervals: [80] }).toBe(true).catch(() => {});
   return v!;
 }
 /** Waits for a frame that shows what `ok` wants, and returns that frame (the last one if it never does). */
 async function untilFrame(page: Page, ok: (f: Frame) => unknown, timeout = 10_000): Promise<Frame> {
-  const end = Date.now() + timeout;
   let f: Frame;
-  do {
-    f = await lastFrame(page);
-    if (ok(f)) return f;
-    await page.waitForTimeout(80);
-  } while (Date.now() < end);
-  return f;
+  await expect.poll(async () => { f = await lastFrame(page); return !!ok(f); }, { timeout, intervals: [80] }).toBe(true).catch(() => {});
+  return f!;
 }
-/** Over the frames of the last `ms`, the most of what `get` counts. */
+/** Waits until the frames kept since they were last cleared show what `ok` wants (polled); returns them. */
+async function untilFrames(page: Page, ok: (fs: Frame[]) => unknown, timeout = 10_000): Promise<Frame[]> {
+  // Each poll fetches only the frames kept since the last (fetching all of them each time slowed the page enough to drop frames).
+  const fs: Frame[] = [];
+  await expect.poll(async () => {
+    fs.push(...await page.evaluate((t) => (window as any).__frames.filter((f: Frame) => f.at > t), fs.at(-1)?.at ?? -Infinity));
+    return !!ok(fs);
+  }, { timeout, intervals: [120] }).toBe(true).catch(() => {});
+  return fs;
+}
+/** The most of what `get` counts over the frames drawn in the next `ms` (the frames kept cover about 5 s). */
 async function most(page: Page, get: (f: Frame) => number, ms: number): Promise<number> {
-  let best = 0;
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    for (const f of await recent(page)) best = Math.max(best, get(f));
-    await page.waitForTimeout(120);
-  }
-  return best;
+  const t0 = await page.evaluate(() => performance.now());
+  await page.waitForTimeout(ms); // a measurement window: the most drawn in this stretch of time
+  const fs: Frame[] = await page.evaluate((t) => (window as any).__frames.filter((f: Frame) => f.at > t), t0);
+  return Math.max(0, ...fs.map(get));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -419,7 +450,12 @@ async function open(browser: Browser, o: OpenOpts = {}) {
   return { page, ctx, feed, core, errors, push };
 }
 
-async function shot(page: Page, name: string) { await page.screenshot({ path: path.join(SHOTS, 'screens', `${name}.png`) }); }
+/** A screenshot once the fonts are in and the layout is at rest (data-settled). */
+async function shot(page: Page, name: string) {
+  await page.evaluate(() => document.fonts.ready.then(() => true));
+  if (await page.locator('[data-test=monitor-canvas]').count()) await expect(page.locator('[data-test=monitor-canvas]')).toHaveAttribute('data-settled', 'true', { timeout: 20_000 });
+  await page.screenshot({ path: path.join(SHOTS, 'screens', `${name}.png`) });
+}
 
 const result: Record<string, unknown> = {};
 // Merged into what is there: a --grep group run keeps the other groups' results instead of leaving only its own.
@@ -457,8 +493,8 @@ test('1 workflow nodes: open ones tied to their members (or hub), blocked look, 
   const { page, ctx, errors } = await open(browser, { feed });
   const r: Record<string, unknown> = {};
   await untilFrame(page, (x) => [10, 11, 12].every((id) => wfNode(x, id)), 12_000);
-  await page.waitForTimeout(2500); // the forces settle
-  let f = await lastFrame(page);
+  await still(page);
+  let f = await freshFrame(page);
   const n10 = wfNode(f, 10)!, n11 = wfNode(f, 11)!, n12 = wfNode(f, 12)!;
   const ada = memberAt(f, ADA)!, ben = memberAt(f, BEN)!, hub = hubAt(f)!;
   r.nodes = { n10: { color: n10.color, lw: n10.lw }, n11: { color: n11.color }, n12: { color: n12.color } };
@@ -487,7 +523,8 @@ test('1 workflow nodes: open ones tied to their members (or hub), blocked look, 
   feed.wf(1, 10, 'completed', []);
   feed.wf(1, 11, 'closed', []);
   await until(page, (x) => !wfNode(x, 10) && !wfNode(x, 11), Boolean, 12_000);
-  await page.waitForTimeout(2800);
+  // Until both leaving squares are gone: the green one has drifted out and the grey one faded.
+  await untilFrame(page, (x) => !wfBoxes(x).some((b) => b.color === C.done || b.color === C.inkDim), 8000);
   const fs = await frames(page);
   const flash = fs.filter((x) => { const h = hubAt(x); return h && arcsAt(x, h, 0, C.done, 1e9).length >= 0 && x.ops.some((o) => o.op === 'stroke' && o.style === C.done && o.lw === 2.5 && o.items?.some((i) => i.t === 'arc' && full(i) && i.r >= 13 && i.r <= 39.1)); }).length;
   const greens = fs.map((x) => ({ h: hubAt(x), b: wfBoxes(x).filter((b) => b.color === C.done) })).filter((x) => x.h && x.b.length);
@@ -504,11 +541,11 @@ test('1 workflow nodes: open ones tied to their members (or hub), blocked look, 
   // A click on the workflow node #12 opens that workflow.
   await unhover(page);
   for (let i = 0; i < 4; i++) {
-    f = await lastFrame(page);
+    await still(page);
+    f = await freshFrame(page);
     const n = wfNode(f, 12)!;
     await clickWorld(page, n.op, n);
-    if (await page.locator('[data-test=workflows-view]').count() || !(await page.locator('[data-test=monitor-canvas]').count())) break; // left the Monitor
-    await page.waitForTimeout(300);
+    if (await leftMonitor(page)) break;
   }
   await expectWorkflowsPage(page, 12);
   r.clickOpens = 'the Workflows page with workflow 12 open (team payments)';
@@ -523,18 +560,15 @@ test('1b a workflow node click with a team focused: the workflow opens; is the f
   seed(feed);
   const { page, ctx, errors } = await open(browser, { feed });
   await until(page, (x) => !!wfNode(x, 10), Boolean, 12_000);
-  await page.waitForTimeout(2000);
-  let f = await lastFrame(page);
   await focusTeam(page);
   await expect(page.locator('[data-test=monitor-focus]')).toBeVisible();
-  await page.waitForTimeout(2200); // the zoom
   await unhover(page);
   for (let i = 0; i < 4; i++) {
-    f = await lastFrame(page);
+    await still(page); // the zoom to the team done
+    const f = await freshFrame(page);
     const n = wfNode(f, 10)!;
     await clickWorld(page, n.op, n);
-    if (await page.locator('[data-test=workflows-view]').count() || !(await page.locator('[data-test=monitor-canvas]').count())) break; // left the Monitor
-    await page.waitForTimeout(300);
+    if (await leftMonitor(page)) break;
   }
   await expectWorkflowsPage(page, 10);
   const focusAfter = await page.locator('[data-test=monitor-focus]').count();
@@ -554,13 +588,13 @@ test('2 rhythm: the pulse follows the step rate, a command ring fills then burst
   seed(feed);
   const { page, ctx, errors } = await open(browser, { feed });
   await until(page, (x) => !!memberAt(x, ADA), Boolean);
-  await page.waitForTimeout(1500);
+  await still(page);
   const r: Record<string, unknown> = {};
 
   // Pulse: a period from the body radius over ~5 s (its peaks).
   const period = async (name: string) => {
     await page.evaluate(() => { (window as any).__frames = []; });
-    await page.waitForTimeout(5200);
+    await page.waitForTimeout(5200); // a measurement window: the pulse's period is read from 5 s of frames
     const fs = await frames(page);
     const rs = fs.map((x) => ({ t: x.at, r: bodyR(x, name) })).filter((x) => x.r !== null) as { t: number; r: number }[];
     const lo = Math.min(...rs.map((x) => x.r)), hi = Math.max(...rs.map((x) => x.r));
@@ -571,11 +605,13 @@ test('2 rhythm: the pulse follows the step rate, a command ring fills then burst
   };
   r.quietBen = await period(BEN);
   expect((r.quietBen as any).hi - (r.quietBen as any).lo, 'a quiet member does not pulse').toBeLessThan(0.01);
+  let from = feed.calls.length;
   for (let i = 0; i < 2; i++) feed.step(ADA, 'read', `src/a${i}.ts`);
-  await page.waitForTimeout(1500);
+  await readAfter(feed, 'monitor.steps', from);
   r.slowAda = await period(ADA);
+  from = feed.calls.length;
   for (let i = 0; i < 60; i++) feed.step(ADA, 'read', `src/b${i}.ts`);
-  await page.waitForTimeout(1500);
+  await readAfter(feed, 'monitor.steps', from);
   r.fastAda = await period(ADA);
   const slow = r.slowAda as any, fast = r.fastAda as any;
   expect(slow.hi - slow.lo, 'a working member pulses').toBeGreaterThan(0.5);
@@ -587,15 +623,18 @@ test('2 rhythm: the pulse follows the step rate, a command ring fills then burst
   let f = await untilFrame(page, (x) => { const b = memberAt(x, BEN); return b ? arcsAt(x, b, b.r + 12, C.run).length >= 2 : false; });
   const ringFill = (x: Frame) => { const b = memberAt(x, BEN)!; const a = arcsAt(x, b, b.r + 12, C.run).filter((i) => Math.abs(i.a0 + Math.PI / 2) < 0.001 && !full(i)); return a.length ? (a[0]!.a1 - a[0]!.a0) / (Math.PI * 2) : null; };
   const fill1 = ringFill(f);
-  await page.waitForTimeout(2500);
-  const fill2 = ringFill(await lastFrame(page));
+  const fill2 = await until(page, ringFill, (v) => v !== null && fill1 !== null && v > fill1 + 0.05, 6000);
   r.runNoExit = { fill1, fill2 };
   expect(fill1, 'the ring is drawn while it runs').not.toBeNull();
   expect(fill2!, 'and fills').toBeGreaterThan(fill1!);
   await shot(page, 'rhythm-01-run-ring');
   await page.evaluate(() => { (window as any).__frames = []; });
   feed.step(BEN, 'read', 'src/refund.ts');
-  await page.waitForTimeout(2600);
+  // The ring goes full when the command ends, then it goes: a burst, if there were one, would show before it does.
+  const runRing = (x: Frame) => { const b = memberAt(x, BEN); return b ? arcsAt(x, b, b.r + 12, C.run).length : 0; };
+  const fullRingSeen = (x: Frame) => { const b = memberAt(x, BEN); return !!b && arcsAt(x, b, b.r + 12, C.run).some((i) => Math.abs(i.a1 - i.a0 - Math.PI * 2) < 0.01 && i.a0 + Math.PI / 2 < 0.001); };
+  await untilFrames(page, (all) => all.some(fullRingSeen), 6000);
+  await untilFrame(page, (x) => runRing(x) === 0, 8000);
   let fs = await frames(page);
   const fullRun = fs.filter((x) => { const b = memberAt(x, BEN); return b && arcsAt(x, b, b.r + 12, C.run).some((i) => Math.abs(i.a1 - i.a0 - Math.PI * 2) < 0.01 && i.a0 + Math.PI / 2 < 0.001); }).length;
   const noExitBursts = Math.max(0, ...fs.map((x) => { const b = memberAt(x, BEN); return b ? sparks(x, b, C.done) + sparks(x, b, C.fail) : 0; }));
@@ -607,24 +646,27 @@ test('2 rhythm: the pulse follows the step rate, a command ring fills then burst
   for (const [exit, color, n] of [[0, C.done, 8], [2, C.fail, 14]] as const) {
     await page.evaluate(() => { (window as any).__frames = []; });
     feed.step(BEN, 'run', exit ? 'npm run lint' : 'npm test', 0, TEAM, exit);
-    await page.waitForTimeout(1800);
+    const ringOf = (x: Frame) => { const b = memberAt(x, BEN); return !!b && arcsAt(x, b, b.r + 12, color).some((i) => full(i) || Math.abs(i.a1 - i.a0 - Math.PI * 2) < 0.01); };
+    const sparksOf = (x: Frame) => { const b = memberAt(x, BEN); return b ? sparks(x, b, color) : 0; };
+    // Until the ring has shown and the burst has come and gone (its sparks drawn, then none).
+    await untilFrames(page, (all) => all.some(ringOf) && all.some((x) => sparksOf(x) > 0) && sparksOf(all.at(-1)!) === 0, 8000);
     fs = await frames(page);
-    const ring = fs.some((x) => { const b = memberAt(x, BEN); return b && arcsAt(x, b, b.r + 12, color).some((i) => full(i) || Math.abs(i.a1 - i.a0 - Math.PI * 2) < 0.01); });
-    const sp = Math.max(0, ...fs.map((x) => { const b = memberAt(x, BEN); return b ? sparks(x, b, color) : 0; }));
+    const ring = fs.some(ringOf);
+    const sp = Math.max(0, ...fs.map(sparksOf));
     r[`exit${exit}`] = { ring, sparks: sp };
     expect(ring, `exit ${exit}: the ring in ${color}`).toBe(true);
     expect(sp, `exit ${exit}: a burst of ${n} sparks`).toBe(n);
     if (exit === 2) await shot(page, 'rhythm-02-exit-red');
-    await page.waitForTimeout(800);
+    await untilFrame(page, (x) => { const b = memberAt(x, BEN); return !!b && arcsAt(x, b, b.r + 12).length === 0; }, 6000); // its ring gone
   }
 
   // Thinking: a glint at r + 3 that slides round (its start moves), and the soft halo.
   feed.step(BEN, 'think', null);
   f = await untilFrame(page, (x) => { const b = memberAt(x, BEN); return b ? arcsAt(x, b, b.r + 3, 'rgba(226, 232, 240, 0.35)').length > 0 : false; });
-  const g1 = (() => { const b = memberAt(f, BEN)!; return arcsAt(f, b, b.r + 3, 'rgba(226, 232, 240, 0.35)')[0]?.a0; })();
-  await page.waitForTimeout(600);
-  f = await lastFrame(page);
-  const g2 = (() => { const b = memberAt(f, BEN)!; return arcsAt(f, b, b.r + 3, 'rgba(226, 232, 240, 0.35)')[0]?.a0; })();
+  const glint = (x: Frame) => { const b = memberAt(x, BEN); return b ? arcsAt(x, b, b.r + 3, 'rgba(226, 232, 240, 0.35)')[0]?.a0 : undefined; };
+  const g1 = glint(f);
+  f = await untilFrame(page, (x) => glint(x) !== undefined && glint(x) !== g1, 4000); // the glint slides on
+  const g2 = glint(f);
   const halo = (() => { const b = memberAt(f, BEN)!; return discs(f, (o, a) => o.style === 'gradient' && near(a, b, 0.01) && Math.abs(a.r - (b.r + 12)) < 0.01).length; })();
   r.thinking = { glintA0: [g1, g2], halo };
   expect(g1).toBeDefined();
@@ -645,9 +687,9 @@ test('3 You node: a question flies in, it glows with the count; a click opens Ne
   // No network or tool asks here (they count too; test 3b checks them).
   const { page, ctx, errors } = await open(browser, { feed, asks: false });
   await until(page, (x) => !!youNode(x), Boolean);
-  await page.waitForTimeout(1500);
+  await still(page);
   const r: Record<string, unknown> = {};
-  let f = await lastFrame(page);
+  let f = await freshFrame(page);
   const box = await canvasBox(page);
   let y = youNode(f)!;
   r.place = { x: y.x, y: y.y, canvas: { w: box.width, h: box.height }, expected: { x: box.width - 46, y: Math.max(120, box.height / 2) } };
@@ -661,10 +703,11 @@ test('3 You node: a question flies in, it glows with the count; a click opens Ne
   await page.evaluate(() => { (window as any).__frames = []; });
   feed.row('decision', BEN, BEN, 12, 0, 'Which refund limit?');
   feed.attn.set(`1/${BEN}`, 'decision');
-  await page.waitForTimeout(3200); // the next poll (1.2 s), then the flight (1.5 s, its ring in the last quarter)
-  const fs = await frames(page);
+  // The next poll, then the flight: until its arrival ring has opened (in the flight's last quarter).
+  const arrivalRing = (x: Frame) => x.ops.some((o) => o.op === 'stroke' && isScreen(o) && o.style === C.decision && o.lw === 2 && o.items?.some((i) => i.t === 'arc' && i.r > 26));
+  const fs = await untilFrames(page, (all) => all.some(arrivalRing), 8000);
   const flying = fs.filter((x) => youFlyers(x).length >= 4).length;
-  const ring = fs.some((x) => x.ops.some((o) => o.op === 'stroke' && isScreen(o) && o.style === C.decision && o.lw === 2 && o.items?.some((i) => i.t === 'arc' && i.r > 26)));
+  const ring = fs.some(arrivalRing);
   f = await untilFrame(page, (x) => youNode(x)?.count === '1');
   y = youNode(f)!;
   r.question = { flyingFrames: flying, arrivalRing: ring, count: y.count, fill: y.fill, needsYou: y.needsYou };
@@ -678,7 +721,7 @@ test('3 You node: a question flies in, it glows with the count; a click opens Ne
   // A press on the You node picks nothing (no pick panel, no tip), the release opens Needs you (the Board).
   await page.mouse.move(box.x + y.x, box.y + y.y);
   await page.mouse.down();
-  await page.waitForTimeout(150);
+  await freshFrame(page); // the press seen and the view updated
   const pickedOnPress = await page.locator('[data-test=monitor-unpick]').count();
   const tip = await page.locator('[data-test=monitor-tip]').count();
   await page.mouse.up();
@@ -709,7 +752,7 @@ test('3b You node: pending network and tool asks are counted (waiting at open: n
   expect(youNode(f)?.needsYou).toBe(true);
   // Those waiting at open are counted, not flown in.
   await page.evaluate(() => { (window as any).__frames = []; });
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(2000); // a window longer than a flight (1.5 s): none may start in it
   r.atOpen = { ...(r.atOpen as object), flyingFramesAfter: (await frames(page)).filter((x) => youFlyers(x).length >= 4).length };
   expect((r.atOpen as any).flyingFramesAfter, 'nothing flies for those waiting at open').toBe(0);
   await shot(page, 'you-04-asks-at-open');
@@ -721,10 +764,12 @@ test('3b You node: pending network and tool asks are counted (waiting at open: n
   push('network.asksChanged');
   f = await untilFrame(page, (x) => youNode(x)?.count === '3', 6000);
   const countedMs = Date.now() - t0;
-  await page.waitForTimeout(1800); // the flight (1.5 s)
-  let fs = await frames(page);
+  // The flight, until its arrival ring has opened.
+  const arrivalRing = (x: Frame) => x.ops.some((o) => o.op === 'stroke' && isScreen(o) && o.style === C.decision && o.lw === 2 && o.items?.some((i) => i.t === 'arc' && i.r > 26));
+  let fs = await untilFrames(page, (all) => all.some(arrivalRing), 6000);
+  await untilFrame(page, (x) => youFlyers(x).length === 0, 4000); // the flight's tail gone
   const netFlying = fs.filter((x) => youFlyers(x).length >= 4).length;
-  const netRing = fs.some((x) => x.ops.some((o) => o.op === 'stroke' && isScreen(o) && o.style === C.decision && o.lw === 2 && o.items?.some((i) => i.t === 'arc' && i.r > 26)));
+  const netRing = fs.some(arrivalRing);
   const netLabel = fs.some((x) => texts(x).includes('registry.npmjs.org'));
   r.networkAdded = { count: youNode(f)?.count ?? null, countedMs, flyingFrames: netFlying, arrivalRing: netRing, labelSeen: netLabel };
   expect(youNode(f)?.count, 'a new network ask: 3').toBe('3');
@@ -738,8 +783,8 @@ test('3b You node: pending network and tool asks are counted (waiting at open: n
   feed.toolAsks.push(feed.toolAsk(6, ADA, 'node-22', 'Node.js 22', 'installing'));
   push('tools.asksChanged');
   f = await untilFrame(page, (x) => youNode(x)?.count === '4', 6000);
-  await page.waitForTimeout(1800);
-  fs = await frames(page);
+  fs = await untilFrames(page, (all) => all.some(arrivalRing), 6000); // the flight in, its ring opened
+  await untilFrame(page, (x) => youFlyers(x).length === 0, 4000); // and its tail gone
   r.toolAdded = { count: youNode(f)?.count ?? null, flyingFrames: fs.filter((x) => youFlyers(x).length >= 4).length };
   expect(youNode(f)?.count, 'a new tool ask: 4').toBe('4');
   expect((r.toolAdded as any).flyingFrames, 'the new tool ask flies in').toBeGreaterThan(5);
@@ -751,7 +796,7 @@ test('3b You node: pending network and tool asks are counted (waiting at open: n
   push('network.asksChanged');
   push('tools.asksChanged');
   f = await untilFrame(page, (x) => youNode(x)?.count === '2', 6000);
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(1200); // a window: nothing may fly in for the decided ones
   r.decided = { count: youNode(f)?.count ?? null, flyingFrames: (await frames(page)).filter((x) => youFlyers(x).length >= 4).length };
   expect(youNode(f)?.count, 'the decided ones leave: 2').toBe('2');
   expect((r.decided as any).flyingFrames).toBe(0);
@@ -824,24 +869,29 @@ for (const W of [1280, 375]) {
 
     /** Waits until the header and the You node both say n; returns what each said. */
     async function both(n: number, timeout = 9000) {
-      const end = Date.now() + timeout;
       let node: string | null = null, head: number | null = null;
-      do {
+      await expect.poll(async () => {
         const f = await lastFrame(page);
         const y = youNode(f);
         if (y) you = { x: y.x, y: y.y };
         node = y?.count ?? null; head = await headerNeed(page);
-        if ((n === 0 ? node === null : node === String(n)) && head === n) break;
-        await page.waitForTimeout(100);
-      } while (Date.now() < end);
+        return (n === 0 ? node === null : node === String(n)) && head === n;
+      }, { timeout, intervals: [100] }).toBe(true).catch(() => {});
       return { node, header: head };
     }
-    /** One change: clears the frames and tones' mark, applies it, waits for the count, then for the flights to end. */
+    /**
+     * One change: clears the frames and tones' mark, applies it, waits for the count, then for the flights to end: with
+     * flights wanted, until that many have started, their rings opened, the tones sounded and no head is in the air;
+     * with none, a window of `settle` ms (longer than a flight) in which none may start.
+     */
     async function step(name: string, change: () => void, n: number, want: { flights: number; tones: number }, settle = 2600) {
       await page.evaluate(() => { (window as any).__frames = []; });
       const tones0 = await tonesNeedYou(page);
       change();
       const said = await both(n);
+      // A measurement window: a flight's whole life and its ring (1.5 s) and more, in which exactly the wanted flights,
+      // rings and tones may start. (Waiting instead for the flights to land, by reading the frames while they flew, slowed
+      // the page enough that the arrival rings' few frames were dropped.)
       await page.waitForTimeout(settle);
       const fs = await frames(page);
       const s = {
@@ -864,7 +914,7 @@ for (const W of [1280, 375]) {
         if (!(await page.locator('[data-test=monitor-you-tip]').count())) {
           await page.touchscreen.tap(b.x + you.x, b.y + you.y);
           if (process.env.DBG_YOU) {
-            await page.waitForTimeout(200);
+            await freshFrame(page);
             const y = youNode(await lastFrame(page));
             console.log('TAP you at', you.x.toFixed(1), you.y.toFixed(1), 'node now', y?.x.toFixed(1), y?.y.toFixed(1), 'tip', await page.locator('[data-test=monitor-you-tip]').count(), 'board', await page.locator('[data-test=board]').count(), 'hit', await page.evaluate((q) => (document.elementFromPoint(q.x, q.y) as HTMLElement | null)?.dataset?.test ?? (document.elementFromPoint(q.x, q.y) as HTMLElement | null)?.className, { x: b.x + you.x, y: b.y + you.y }));
             await needYouShot(page, `${tag}-dbg-tap-${Date.now() % 100000}`);
@@ -872,9 +922,14 @@ for (const W of [1280, 375]) {
         }
       } else { await page.mouse.move(b.x + you.x, b.y + you.y); }
       await expect(page.locator('[data-test=monitor-you-tip]')).toBeVisible({ timeout: 4000 });
-      await page.waitForTimeout(300);
-      // The panel sits beside the You node, centred on it (translateY(-50%) at the node's y).
-      const tb = (await page.locator('[data-test=monitor-you-tip]').boundingBox())!;
+      // The panel sits beside the You node, centred on it (translateY(-50%) at the node's y): read once it stops moving.
+      let tb = (await page.locator('[data-test=monitor-you-tip]').boundingBox())!;
+      await expect.poll(async () => {
+        const b = (await page.locator('[data-test=monitor-you-tip]').boundingBox())!;
+        const same = Math.abs(b.x - tb.x) < 0.5 && Math.abs(b.y - tb.y) < 0.5 && Math.abs(b.height - tb.height) < 0.5;
+        tb = b;
+        return same;
+      }, { timeout: 3000, intervals: [50] }).toBe(true).catch(() => {});
       const cb = await canvasBox(page);
       const offsetY = Math.round(tb.y + tb.height / 2 - (cb.y + you.y));
       expect.soft(Math.abs(offsetY), `the panel is centred on the You node (canvas ${Math.round(cb.height)} px high, node at ${you.y})`).toBeLessThan(30);
@@ -901,11 +956,11 @@ for (const W of [1280, 375]) {
           if (hit === 'monitor-canvas') { at = p; onCanvas = hit; break; }
         }
         await page.touchscreen.tap(at.x, at.y);
-        await page.waitForTimeout(300);
+        await page.locator('[data-test=monitor-you-tip]').waitFor({ state: 'detached', timeout: 3000 }).catch(() => {});
         return { tappedOn: onCanvas, tipAfter: await page.locator('[data-test=monitor-you-tip]').count() };
       }
       await unhover(page);
-      await page.waitForTimeout(150);
+      await page.locator('[data-test=monitor-you-tip]').waitFor({ state: 'detached', timeout: 3000 }).catch(() => {});
       return { tappedOn: null, tipAfter: await page.locator('[data-test=monitor-you-tip]').count() };
     }
 
@@ -913,9 +968,9 @@ for (const W of [1280, 375]) {
     await until(page, (x) => !!youNode(x), Boolean);
     const atOpen = await both(2, 12_000);
     await page.evaluate(() => { (window as any).__frames = []; });
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(2500); // a window longer than a flight: nothing may fly in or sound for those waiting at open
     let fs = await frames(page);
-    r.atOpen = { ...atOpen, flights: starts(fs, (f) => youHeads(f).length), tones: await tonesNeedYou(page), soundOn: await page.evaluate(() => localStorage.getItem('yawble.monitor.sound')) };
+    r.atOpen ={ ...atOpen, flights: starts(fs, (f) => youHeads(f).length), tones: await tonesNeedYou(page), soundOn: await page.evaluate(() => localStorage.getItem('yawble.monitor.sound')) };
     expect(r.atOpen.header).toBe(2);
     expect(r.atOpen.node).toBe('2');
     expect(r.atOpen.flights, 'nothing flies for those waiting at open').toBe(0);
@@ -1010,15 +1065,15 @@ for (const W of [1280, 375]) {
     // 375 x 640: the 12 asks' banners leave a wall of about 110 px; the You node stays on it, clear of the
     // controls row with Legend, so the tap below reaches it (before, at y 120, it sat under Legend, out of reach).
     await page.setViewportSize({ width: W, height: phone ? 640 : 600 });
-    await page.waitForTimeout(1200);
-    let yn = youNode(await lastFrame(page));
+    await still(page); // refitted to the new wall
+    let yn = youNode(await freshFrame(page));
     if (yn) you = { x: yn.x, y: yn.y };
     r.resized = await tip();
     await needYouShot(page, `${tag}-08-after-resize-tip`);
     if (!phone) await unhover(page);
     await page.setViewportSize({ width: W, height: H0 });
-    await page.waitForTimeout(1200);
-    yn = youNode(await lastFrame(page));
+    await still(page);
+    yn = youNode(await freshFrame(page));
     if (yn) you = { x: yn.x, y: yn.y };
     const stayedOpen = (await page.locator('[data-test=monitor-you-tip]').count()) > 0;
     if (phone) expect.soft(stayedOpen, 'the tapped panel stays open through the resize').toBe(true);
@@ -1058,8 +1113,8 @@ test(`3d You node on a short phone wall (375 x ${H}, 12 asks): inside the wall, 
   feed.netAsks = Array.from({ length: 12 }, (_, i) => feed.netAsk(200 + i, i % 2 ? ADA : BEN, `s${i}.example${i}.com`));
   const { page, ctx, errors } = await open(browser, { feed, w: 375, h: H });
   const you = await until(page, youNode, (y) => !!y && y.count === '12', 15_000);
-  await page.waitForTimeout(600);
-  const f = youNode(await lastFrame(page))!;
+  await still(page);
+  const f = youNode(await freshFrame(page))!;
   const cb = await canvasBox(page);
   const lb = (await page.locator('[data-test=monitor-legend-toggle]').boundingBox())!;
   const rb = (await page.locator('.controls').boundingBox())!;
@@ -1113,23 +1168,26 @@ test('4 cards: an instruction carries "#card", the hand-back comes home with a c
   seed(feed);
   const { page, ctx, errors } = await open(browser, { feed });
   await until(page, (x) => !!memberAt(x, ADA), Boolean);
-  await page.waitForTimeout(1500);
+  await still(page);
   const r: Record<string, unknown> = {};
   const label = async (text: string) => {
-    const end = Date.now() + 4000;
-    while (Date.now() < end) {
-      for (const x of await frames(page)) { const o = x.ops.find((k) => k.op === 'text' && k.text === text); if (o) return { style: o.style, frame: x }; }
-      await page.waitForTimeout(100);
-    }
-    return null;
+    let got: { style: string; frame: Frame } | null = null;
+    await expect.poll(async () => {
+      for (const x of await frames(page)) { const o = x.ops.find((k) => k.op === 'text' && k.text === text); if (o) { got = { style: o.style, frame: x }; return true; } }
+      return false;
+    }, { timeout: 8000, intervals: [100] }).toBe(true).catch(() => {});
+    return got as { style: string; frame: Frame } | null;
   };
+  /** Until the comet with this label has landed: the label no longer drawn in a comet's colour. */
+  const cometInks = [C.tell, C.handback, C.fail, C.blocked];
+  const landed = (text: string) => untilFrame(page, (x) => !x.ops.some((o) => o.op === 'text' && o.text === text && cometInks.includes(o.style)), 6000);
   await page.evaluate(() => { (window as any).__frames = []; });
   feed.row('instruction', ADA, 'Manager', 10, 0, 'Card 4373 (workflow nodes): do it');
   const out = await label('#4373');
   r.instruction = out && { style: out.style, heads: cometHeads(out.frame).length };
   expect(out?.style, 'the card number rides the comet in the tell colour').toBe(C.tell);
   await shot(page, 'cards-01-instruction');
-  await page.waitForTimeout(1500);
+  await landed('#4373');
   await page.evaluate(() => { (window as any).__frames = []; });
   feed.row('handback', ADA, ADA, 10, 0, 'Done');
   const back = await label('#4373 ✓');
@@ -1137,20 +1195,19 @@ test('4 cards: an instruction carries "#card", the hand-back comes home with a c
   r.handback = back && { style: back.style, markDiscs: mark };
   expect(back?.style, 'the hand-back in the hand-back colour').toBe(C.handback);
   expect(mark, 'the check rides a small disc').toBeGreaterThan(0);
-  await page.waitForTimeout(400);
   await shot(page, 'cards-02-handback-check');
-  await page.waitForTimeout(1200);
+  await landed('#4373 ✓');
   feed.row('instruction', BEN, 'Manager', 12, 0, '[card 4374] test it');
   await label('#4374');
-  await page.waitForTimeout(1300);
+  await landed('#4374');
   feed.row('failed', BEN, BEN, 12, 0, 'Run failed');
   const cross = await label('#4374 ✗');
   r.failed = cross && { style: cross.style };
   expect(cross?.style, 'a failed run comes home red with a cross').toBe(C.fail);
-  await page.waitForTimeout(1300);
+  await landed('#4374 ✗');
   feed.row('instruction', ADA, 'Manager', 10, 0, 'Card 4376: more');
   await label('#4376');
-  await page.waitForTimeout(1300);
+  await landed('#4376');
   feed.row('blocked', ADA, ADA, 10, 0, 'Blocked on a host');
   const blk = await label('#4376 ✗');
   r.blocked = blk && { style: blk.style };
@@ -1170,7 +1227,7 @@ test('5 focus: a hub click zooms and dims the rest, its code events only; Esc, t
   for (let i = 0; i < 6; i++) { feed.step(ADA, 'edit', `src/refund/f${i}.ts`, 90_000 - i); feed.step('DeveloperCleo', 'edit', `web/cart/c${i}.ts`, 90_000 - i, TEAM2); }
   const { page, ctx, errors } = await open(browser, { feed });
   await until(page, (x) => fileDots(x).length >= 12, Boolean, 12_000);
-  await page.waitForTimeout(3000);
+  await still(page);
   await unhover(page);
   const r: Record<string, unknown> = {};
   const pillAlpha = (x: Frame, t: string) => x.ops.find((o) => o.op === 'text' && o.text === t && o.style === C.ink)?.alpha;
@@ -1182,12 +1239,13 @@ test('5 focus: a hub click zooms and dims the rest, its code events only; Esc, t
 
   // The fit with two small maps (finding: zoomed far out, the hub near or past the left edge): its zoom and hub over 6 s.
   const fitTrace: { k: number; hubX: number; hubY: number }[] = [];
+  // A trace over time: one sample every 500 ms for 6 s (it records whether the fit holds still, so it waits out time).
   for (let i = 0; i < 12; i++) { const x = await lastFrame(page); const h = hubAt(x)!; const s = screen(h.op, h.x, h.y); fitTrace.push({ k: +h.op.m[0].toFixed(3), hubX: Math.round(s.x), hubY: Math.round(s.y) }); await page.waitForTimeout(500); }
   r.fitWithMaps = fitTrace;
   // Focus payments.
   r.focusTries = await focusTeam(page);
   await expect(page.locator('[data-test=monitor-focus]')).toContainText(TEAM);
-  await page.waitForTimeout(2500);
+  await still(page); // zoomed to the team
   await unhover(page);
   f = await lastFrame(page);
   const k1 = hubAt(f)!.op.m[0];
@@ -1208,14 +1266,19 @@ test('5 focus: a hub click zooms and dims the rest, its code events only; Esc, t
   feed.event({ kind: 'merge-team', team: TEAM2, member: null, sha: 'c'.repeat(40), message: 'Merge', files: [] });
   // The instruction text has no "#10": focused, the zoom passes 0.5 and payments' own workflow #10 is labelled "#10",
   // so a text with "#10" in it would match that label.
+  const fromCalls = feed.calls.length;
   feed.row('instruction', 'DeveloperCleo', 'Manager', 20, 0, 'Card 77: other team comet', TEAM2);
-  await page.waitForTimeout(3500);
-  const fs = await frames(page);
   const dotsByTeam = (x: Frame) => {
     const a = hubAt(x), b = hubAt(x, TEAM2);
     const ds = commitDots(x);
     return { mine: ds.filter((d) => a && (!b || Math.hypot(d.x - a.x, d.y - a.y) < Math.hypot(d.x - b.x, d.y - b.y))).length, other: ds.filter((d) => b && a && Math.hypot(d.x - b.x, d.y - b.y) < Math.hypot(d.x - a.x, d.y - a.y)).length };
   };
+  // The page has read the comet's row and both commits, and payments' commit dot has travelled to its hub and rests
+  // there (a commit's dot lasts 12 s): the other team's, read in the same poll, would be drawn by now.
+  await readAfter(feed, 'monitor.messages', fromCalls);
+  await untilFrames(page, (all) => all.some((x) => dotsByTeam(x).mine > 0), 8000);
+  await readAfter(feed, 'monitor.messages', feed.calls.length); // one poll more: a comet read with the row is on its way
+  const fs = await frames(page);
   const mine = Math.max(...fs.map((x) => dotsByTeam(x).mine)), oth = Math.max(...fs.map((x) => dotsByTeam(x).other));
   const otherRings = Math.max(0, ...fs.map((x) => { const b = hubAt(x, TEAM2); return b ? x.ops.filter((o) => o.op === 'stroke' && o.style === C.handback && o.items?.some((i) => i.t === 'arc' && near(i, b, 0.5) && i.r >= 10 && full(i))).length : 0; }));
   const otherComet = Math.max(0, ...fs.map((x) => texts(x).filter((t) => t === '#77').length));
@@ -1228,8 +1291,7 @@ test('5 focus: a hub click zooms and dims the rest, its code events only; Esc, t
   // Esc leaves.
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-test=monitor-focus]')).toHaveCount(0);
-  await page.waitForTimeout(400);
-  f = await lastFrame(page);
+  f = await untilFrame(page, (x) => pillAlpha(x, TEAM2) === 1, 4000); // the other team brightens again
   r.afterEsc = { other: pillAlpha(f, TEAM2) };
   expect(pillAlpha(f, TEAM2)).toBe(1);
   // The chip's × leaves.
@@ -1238,11 +1300,10 @@ test('5 focus: a hub click zooms and dims the rest, its code events only; Esc, t
   await page.locator('[data-test=monitor-focus-leave]').click();
   await expect(page.locator('[data-test=monitor-focus]')).toHaveCount(0);
   // A click on the empty wall leaves: a point far from anything drawn.
-  await page.waitForTimeout(2000);
   await focusTeam(page);
   await expect(page.locator('[data-test=monitor-focus]')).toBeVisible();
-  await page.waitForTimeout(2500);
-  f = await lastFrame(page);
+  await still(page);
+  f = await freshFrame(page);
   const box = await canvasBox(page);
   const pts = f.ops.filter((o) => !isScreen(o)).flatMap((o) => (o.op === 'text' ? [screen(o, o.x!, o.y!)] : (o.items ?? []).filter((i) => i.x !== undefined).map((i) => screen(o, i.x, i.y))));
   let empty: Pt | null = null;
@@ -1270,7 +1331,7 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
   }
   const { page, ctx, errors } = await open(browser, { feed, extraTeams: 3 });
   await until(page, (x) => fileDots(x).length > 0, Boolean, 15_000);
-  await page.waitForTimeout(4000);
+  await still(page, 30_000);
   await unhover(page);
   const r: Record<string, any> = {};
   await page.locator('[data-test=monitor-layout-toggle]').click(); // the density sits in the cog's settings panel
@@ -1278,18 +1339,19 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
   let shaN = 0;
   for (const level of ['calm', 'normal', 'lively'] as const) {
     await page.locator(`[data-test=monitor-density-${level}]`).first().click();
-    await page.waitForTimeout(1500);
+    await expect(page.locator(`[data-test=monitor-density-${level}]`).first()).toHaveAttribute('aria-pressed', 'true');
+    await still(page, 30_000); // the maps redrawn at the new cap
     const map = await most(page, (x) => fileDots(x).length, 1500);
     // Six steps at once on Ada: the step icons on her.
     await page.evaluate(() => { (window as any).__frames = []; });
     for (let i = 0; i < 6; i++) feed.step(ADA, 'read', `docs/r${i}.md`);
-    const steps = await most(page, (x) => badges(x).length, 3000);
-    // Twenty instructions at once: the comets.
-    await page.waitForTimeout(800);
+    const steps = await most(page, (x) => badges(x).length, 3000); // the next poll (1.2 s), then the icons rise
+    // Twenty instructions at once: the comets, once the step icons have gone.
+    await until(page, (x) => badges(x).length, (n) => n === 0, 6000);
     for (let i = 0; i < 20; i++) feed.row('instruction', who(teams[i % 5]!), 'Manager', 10, 0, `Card ${500 + i}`, teams[i % 5]!);
     const comets = await most(page, (x) => cometHeads(x).length, 3000); // the next poll (1.2 s), then a comet's 1.1 s
-    // Ten commits for payments at once: its commit dots.
-    await page.waitForTimeout(800);
+    // Ten commits for payments at once: its commit dots, once the comets have landed.
+    await until(page, (x) => cometHeads(x).length, (n) => n === 0, 6000);
     const callsBefore = feed.calls.length;
     const pushedAt = Date.now();
     for (let i = 0; i < 10; i++) feed.event({ kind: 'commit', team: TEAM, member: ADA, sha: (++shaN).toString(16).padStart(40, '0'), message: `c${shaN}`, files: [{ path: `src/area1/file${i}.ts`, status: 'M' }] });
@@ -1299,7 +1361,7 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
       let best = 0;
       for (const x of await recent(page)) best = Math.max(best, commitDots(x).length);
       trace.push({ ms: Date.now() - pushedAt, dots: best });
-      await page.waitForTimeout(120);
+      await page.waitForTimeout(120); // the trace's sampling interval (it records when the dots first show)
     }
     const commits = Math.max(0, ...trace.map((t) => t.dots));
     const in3s = Math.max(0, ...trace.filter((t) => t.ms <= 3000).map((t) => t.dots));
@@ -1307,7 +1369,7 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
     const codeReads = feed.calls.slice(callsBefore).filter((c) => c.method === 'monitor.codeEvents').length;
     r[level] = { mapFileNodes: map, stepIconsOnAda: steps, cometHeads: comets, paymentsCommitDots: commits, commitDotsIn3s: in3s, firstCommitDotMs: firstDotMs, codeReadsIn8s: codeReads, stored: await page.evaluate(() => localStorage.getItem('yawble.monitor.density')) };
     await shot(page, `density-${level}`);
-    await page.waitForTimeout(12_500); // the commits fade (12 s) before the next level
+    await until(page, (x) => commitDots(x).length, (n) => n === 0, 20_000); // the commits fade (12 s) before the next level
   }
   result.density = r;
   console.log('DENSITY', JSON.stringify(r));
@@ -1340,7 +1402,7 @@ test('7 reduced motion: comets are still lines with their label, no pulse, no tr
   feed.attn.set(`1/${BEN}`, 'decision');
   const { page, ctx, errors } = await open(browser, { feed, reduced: true });
   await until(page, (x) => !!memberAt(x, ADA), Boolean);
-  await page.waitForTimeout(2000);
+  await still(page);
   const r: Record<string, unknown> = {};
   await page.evaluate(() => { (window as any).__frames = []; });
   for (let i = 0; i < 30; i++) feed.step(ADA, 'read', `src/x${i}.ts`);
@@ -1348,11 +1410,14 @@ test('7 reduced motion: comets are still lines with their label, no pulse, no tr
   feed.row('decision', ADA, ADA, 10, 0, 'A question');
   feed.event({ kind: 'commit', team: TEAM, member: ADA, sha: 'd'.repeat(40), message: 'Still commit', files: [{ path: 'src/x1.ts', status: 'M' }] });
   feed.event({ kind: 'landed', team: TEAM, member: null, sha: 'e'.repeat(40), message: 'Landed', files: [] });
-  await page.waitForTimeout(2500);
-  const fs = await frames(page);
+  // Until all of it is on the wall: the comet's still line with its label, the still line to the You node and the commit
+  // at rest (a landing burst, a travelling comet or a flyer would have been drawn with them). The frames kept since the
+  // feed changed (a poll's wait and more, at least 90 of them) show a pulse or a turning ring if there were one.
+  const fs = await untilFrames(page, (all) => all.length >= 90 && all.some((x) => texts(x).includes('#4377')) && all.some((x) => commitDots(x).length > 0)
+    && all.some((x) => x.ops.some((o) => o.op === 'stroke' && isScreen(o) && o.dash && o.style === C.decision)), 8000);
   const radii = fs.map((x) => bodyR(x, ADA)).filter((x): x is number => x !== null);
   const heads = Math.max(0, ...fs.map((x) => cometHeads(x).length));
-  const still = fs.filter((x) => x.ops.some((o) => o.op === 'stroke' && o.dash && o.style === C.tell && o.items?.some((i) => i.t === 'q'))).length;
+  const stillLines = fs.filter((x) => x.ops.some((o) => o.op === 'stroke' && o.dash && o.style === C.tell && o.items?.some((i) => i.t === 'q'))).length;
   const label = fs.some((x) => texts(x).includes('#4377'));
   const flyers = Math.max(0, ...fs.map((x) => youFlyers(x).length));
   const youLine = fs.some((x) => x.ops.some((o) => o.op === 'stroke' && isScreen(o) && o.dash && o.style === C.decision));
@@ -1360,11 +1425,11 @@ test('7 reduced motion: comets are still lines with their label, no pulse, no tr
   const landedRings = Math.max(0, ...fs.map((x) => { const h = hubAt(x); return h ? x.ops.filter((o) => o.op === 'stroke' && o.style === C.done && o.lw === 3 && o.items?.some((i) => i.t === 'arc' && near(i, h, 0.5))).length : 0; }));
   // Ada runs: her three state arcs start at the same angle every frame.
   const starts = new Set(fs.map((x) => { const a = memberAt(x, ADA); return a ? arcsAt(x, a, a.r + 5).filter((i) => !full(i)).map((i) => i.a0.toFixed(3)).sort().join(',') : ''; }).filter(Boolean));
-  r.reduced = { bodyRadius: { min: Math.min(...radii), max: Math.max(...radii) }, cometHeads: heads, stillLineFrames: still, label, youFlyers: flyers, youStillLine: youLine, commitDistFromHub: { first: commitAt[0], last: commitAt.at(-1) }, landedRings, runningRingStarts: [...starts] };
+  r.reduced = { bodyRadius: { min: Math.min(...radii), max: Math.max(...radii) }, cometHeads: heads, stillLineFrames: stillLines, label, youFlyers: flyers, youStillLine: youLine, commitDistFromHub: { first: commitAt[0], last: commitAt.at(-1) }, landedRings, runningRingStarts: [...starts] };
   result.reduced = r.reduced;
   expect(Math.max(...radii) - Math.min(...radii), 'no pulse').toBeLessThan(0.001);
   expect(heads, 'no comet travels').toBe(0);
-  expect(still, 'a still dashed line instead').toBeGreaterThan(0);
+  expect(stillLines, 'a still dashed line instead').toBeGreaterThan(0);
   expect(label, 'with its label').toBe(true);
   expect(flyers, 'nothing flies to the You node').toBe(0);
   expect(youLine, 'a still line to it').toBe(true);
@@ -1384,21 +1449,27 @@ test('8 sound: off by default (no oscillator for events), on when turned on and 
   const feed = new Feed();
   seed(feed);
   const { page, ctx, errors } = await open(browser, { feed });
-  await page.waitForTimeout(1500);
+  await still(page);
   const btn = page.locator('[data-test=monitor-sound]').first();
   const r: Record<string, unknown> = { default: await btn.getAttribute('aria-pressed'), stored: await page.evaluate(() => localStorage.getItem('yawble.monitor.sound')) };
+  let from = feed.calls.length;
   feed.row('handback', ADA, ADA, 10, 0, 'Done');
   feed.event({ kind: 'commit', team: TEAM, member: ADA, sha: 'f'.repeat(40), message: 'x', files: [] });
-  await page.waitForTimeout(2500);
+  // Both read and drawn (the hand-back's comet, the commit's dot): a tone would have started with them.
+  await readAfter(feed, 'monitor.messages', from);
+  await readAfter(feed, 'monitor.codeEvents', from);
+  await untilFrames(page, (all) => all.some((x) => texts(x).some((t) => t.includes('✓'))) || all.some((x) => commitDots(x).length > 0), 6000);
+  await freshFrame(page);
   r.offOscillators = await page.evaluate(() => (window as any).__osc);
   r.offContexts = await page.evaluate(() => (window as any).__audio);
   await btn.click();
   r.on = await btn.getAttribute('aria-pressed');
   r.storedOn = await page.evaluate(() => localStorage.getItem('yawble.monitor.sound'));
+  from = feed.calls.length;
   feed.row('instruction', ADA, 'Manager', 10, 0, 'Card 4380');
-  await page.waitForTimeout(1300);
+  await readAfter(feed, 'monitor.messages', from);
   feed.row('handback', ADA, ADA, 10, 0, 'Done');
-  await page.waitForTimeout(2500);
+  await expect.poll(() => page.evaluate(() => (window as any).__osc), { timeout: 6000 }).toBeGreaterThan(0).catch(() => {}); // the hand-back's tone
   r.onOscillators = await page.evaluate(() => (window as any).__osc);
   await page.reload();
   await page.locator('[data-test=sidebar] [data-test=nav-monitor]').first().click();
@@ -1445,12 +1516,13 @@ for (const theme of ['light', 'dark'] as const)
       const feed = busyFeed();
       const { page, ctx, errors } = await open(browser, { feed, theme, w });
       const load = liveLoad(feed);
-      await page.waitForTimeout(4500);
+      await until(page, (x) => !!youNode(x) && fileDots(x).length > 0, Boolean, 12_000);
+      await still(page);
       await unhover(page);
       const tag = `${theme}-${w}`;
       const r: Record<string, unknown> = { theme: await page.evaluate(() => document.documentElement.dataset.theme) };
       const box = await canvasBox(page);
-      const f = await lastFrame(page);
+      const f = await freshFrame(page);
       const y = youNode(f);
       r.youNode = y && { x: y.x, y: y.y, inside: y.x + 24 <= box.width && y.x - 24 >= 0, count: y.count };
       expect(y, 'the You node is drawn').not.toBeNull();
@@ -1464,7 +1536,7 @@ for (const theme of ['light', 'dark'] as const)
       r.focusChip = { right: chip.x + chip.width, viewport: w, leaveButton: { w: leave.width, h: leave.height } };
       expect(chip.x + chip.width, 'the chip fits').toBeLessThanOrEqual(w);
       if (w < 700) expect(Math.min(leave.width, leave.height), 'a 44 px target on the phone').toBeGreaterThanOrEqual(44);
-      await page.waitForTimeout(2500);
+      await still(page); // zoomed to the team
       await unhover(page);
       await shot(page, `${tag}-focus-on`);
       await page.locator('[data-test=monitor-focus-leave]').click();
@@ -1481,7 +1553,7 @@ for (const theme of ['light', 'dark'] as const)
       for (const level of ['calm', 'normal', 'lively']) {
         await page.locator(`[data-test=monitor-density-${level}]`).first().click();
         if (w < 700) await page.keyboard.press('Escape');
-        await page.waitForTimeout(2200);
+        await still(page); // the wall redrawn at the new density
         await shot(page, `${tag}-density-${level}`);
         if (w < 700 && level !== 'lively') await page.locator('[data-test=monitor-layout-toggle]').click();
       }
@@ -1499,7 +1571,8 @@ for (const theme of ['light', 'dark'] as const)
     test.setTimeout(120_000);
     const feed = busyFeed();
     const { page, ctx, errors } = await open(browser, { feed, theme, w: 1280 });
-    await page.waitForTimeout(4500);
+    await until(page, (x) => !!hubAt(x, TEAM2) && !!memberAt(x, 'DeveloperCleo'), Boolean, 12_000);
+    await still(page);
     await unhover(page);
     const box = await canvasBox(page);
     const tip = async () => (await page.locator('[data-test=monitor-tip]').count()) ? (await page.locator('[data-test=monitor-tip]').innerText()).replace(/\s+/g, ' ') : '';
@@ -1509,7 +1582,7 @@ for (const theme of ['light', 'dark'] as const)
       { name: `hub ${TEAM2}`, label: TEAM2, at: (f) => { const h = hubAt(f, TEAM2); return h && screen(h.op, h.x, h.y); } },
       ...[ADA, BEN, 'DeveloperCleo'].map((m) => ({ name: m, label: m.replace(/([a-z])([A-Z])/g, '$1 $2'), at: (f: Frame) => { const p = memberAt(f, m); return p && screen(p.op, p.x, p.y); } })),
     ];
-    const hoverAt = async (p: Pt) => { await page.mouse.move(box.x + p.x, box.y + p.y); await page.waitForTimeout(60); return tip(); };
+    const hoverAt = async (p: Pt) => { await page.mouse.move(box.x + p.x, box.y + p.y); await tipShown(page); return tip(); };
     const names = (t: string) => nodes.filter((n) => n.label !== TEAM && n.label !== TEAM2 && t.includes(n.label)).map((n) => n.name);
     const r: Record<string, unknown> = {};
     // Each node at its centre.
@@ -1550,7 +1623,8 @@ for (const w of [1280, 375])
     const feed = busyFeed();
     const { page, ctx, errors } = await open(browser, { feed, w, reduced: true, theme: w < 700 ? 'light' : 'dark' });
     const load = liveLoad(feed);
-    await page.waitForTimeout(4500);
+    await until(page, (x) => !!youNode(x) && fileDots(x).length > 0, Boolean, 12_000);
+    await still(page);
     await unhover(page);
     await shot(page, `reduced-${w}`);
     clearInterval(load);
@@ -1563,8 +1637,10 @@ test('9c remote view as a Visitor (read access) at 375 and 1280: the wall draws 
     const feed = busyFeed();
     const { page, ctx, errors } = await open(browser, { feed, w, access: 'read' });
     const load = liveLoad(feed);
-    await page.waitForTimeout(4000);
-    const f = await lastFrame(page);
+    // The You node, workflow #10 and the map drawn, and the wall at rest.
+    await until(page, (x) => !!youNode(x) && wfBoxes(x).some((b) => b.color === C.start) && fileDots(x).length > 0, Boolean, 12_000);
+    await still(page);
+    const f = await freshFrame(page);
     const r = { you: !!youNode(f), wfNode10: wfBoxes(f).some((b) => b.color === C.start), wfCalls: feed.calls.filter((c) => c.method === 'bus.workflows').length, comets: (await frames(page)).some((x) => cometHeads(x).length > 0), files: fileDots(f).length };
     result[`visitor-${w}`] = r;
     await shot(page, `visitor-${w}`);
@@ -1607,13 +1683,15 @@ for (const level of ['normal', 'lively'] as const)
       if (n % 3 === 0) feed.event({ kind: 'commit', team: t, member: who(t), sha: n.toString(16).padStart(40, '0'), message: `c${n}`, files: [{ path: `src/area1/f${n % 80}.ts`, status: 'M' }] });
       if (n % 7 === 0) feed.row('decision', who(t), who(t), 10, 0, 'Question', t);
     }, 600);
+    // A warm-up before the timed window. Not the settled attribute: the live load touches new files all the time, so the
+    // maps keep growing and the wall does not come to rest.
     await page.waitForTimeout(5000);
     await page.evaluate(() => { (window as any).__perf = []; });
-    await page.waitForTimeout(10_000);
+    await page.waitForTimeout(10_000); // a measurement window: the frame rate over 10 s of live load
     const perf: { t: number; d: number }[] = await page.evaluate(() => (window as any).__perf);
     clearInterval(live);
     await page.evaluate(() => { (window as any).__rec = true; });
-    await page.waitForTimeout(400);
+    await freshFrame(page);
     const byFrame = new Map<number, number>();
     for (const p of perf) byFrame.set(p.t, (byFrame.get(p.t) ?? 0) + p.d);
     const ts = [...byFrame.keys()].sort((a, b) => a - b);

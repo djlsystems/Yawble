@@ -11,6 +11,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore } from './phone/fake-core';
 import { ORIGIN, buildRenderer, builtDir } from './phone/server';
+import { settled } from './settle';
 import { existsSync } from 'node:fs';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
@@ -51,14 +52,14 @@ async function open(browser: Browser, w: number, h: number, theme: 'light' | 'da
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`${ORIGIN}/remote.html`);
   await expect(page.locator('[data-test=sidebar]')).toBeAttached({ timeout: 30_000 });
-  await page.waitForTimeout(400);
+  await settled(page);
   if (phone) {
     await page.locator('[data-test=drawer-toggle]').first().click();
   }
   await page.locator('[data-test=sidebar] [data-test=nav-teams]').first().click();
   await page.locator('[data-test=team-open-payments]').click();
   await expect(page.locator('[data-test=tell-send]')).toBeVisible();
-  await page.waitForTimeout(300);
+  await settled(page);
   return { page, ctx, errors, hold: (on: boolean) => { holdTell = on; }, release: () => { held?.(); held = null; } };
 }
 

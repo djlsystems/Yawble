@@ -181,9 +181,12 @@ test('embedded: theme messages set data-theme; the kept yawble.remoteTheme is ne
   await send(page, { type: 'yawble.theme', theme: 'dark' });
   await expect.poll(theme).toBe('dark');
   await send(page, { type: 'yawble.theme', theme: 'purple' });
-  // A message from the frame itself, not its parent: ignored.
-  await f.evaluate(() => window.postMessage({ type: 'yawble.theme', theme: 'light' }, location.origin));
-  await page.waitForTimeout(200);
+  // A message from the frame itself, not its parent: ignored. Resolved once a listener added after the app's has seen
+  // it, so the app's listener has had it (and the parent's 'purple' before it) by then.
+  await f.evaluate(() => new Promise<void>((done) => {
+    addEventListener('message', function seen(e) { if (e.source === window) { removeEventListener('message', seen); done(); } });
+    window.postMessage({ type: 'yawble.theme', theme: 'light' }, location.origin);
+  }));
   expect(await theme()).toBe('dark');
   // The counter is read before this check's own getItem (object literal order), so it counts the page's uses only.
   const kept = await f.evaluate(() => ({ use: (window as any).__remoteThemeUse, value: localStorage.getItem('yawble.remoteTheme') }));

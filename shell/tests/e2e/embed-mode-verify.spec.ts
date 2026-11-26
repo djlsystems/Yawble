@@ -207,24 +207,41 @@ test('embedded Visitor (read-only): readOnly, no New team, no chat actions; thos
   await send(page, { type: 'yawble.navigate', to: { kind: 'newTeam' } });
   await send(page, { type: 'yawble.navigate', to: { kind: 'chatAction', id: 'c1', action: 'delete' } });
   await send(page, { type: 'yawble.navigate', to: { kind: 'chatAction', id: 'c1', action: 'rename' } });
-  await page.waitForTimeout(400);
+  // A Visitor still moves between places. This navigate is taken after the three above (one queue of messages), so
+  // once the board shows, a dialog any of them opened would show too.
+  await send(page, { type: 'yawble.navigate', to: { kind: 'place', id: 'board' } });
+  await expect(frame.locator('[data-test=board]')).toBeVisible();
   await expect(frame.locator('[data-test=team-name]')).toHaveCount(0);
   await expect(frame.locator('[data-test=confirm-dialog]')).toHaveCount(0);
   await expect(frame.locator('[data-test=embed-rename]')).toHaveCount(0);
   expect(core.calls.filter((m) => m === 'concierge.delete' || m === 'concierge.rename')).toEqual([]);
-  // A Visitor still moves between places.
-  await send(page, { type: 'yawble.navigate', to: { kind: 'place', id: 'board' } });
-  await expect(frame.locator('[data-test=board]')).toBeVisible();
 });
 
 test('a parent on another origin: it reads nothing the frame posts, and its navigate and theme messages are ignored', async ({ browser }) => {
-  const { page, frame, errors } = await openEmbedded(browser, 1280, 800, { parent: OTHER });
+  const { page, frame, errors, core } = await openEmbedded(browser, 1280, 800, { parent: OTHER });
   await expect(frame.locator('[data-test=concierge-hero], [data-test=concierge]').first()).toBeVisible({ timeout: 15_000 });
-  await page.waitForTimeout(1500);
+  // The frame has posted its yawble.ready and the yawble.nav with the teams and chats: both reads asked, and answered
+  // (a read the frame makes after them comes back behind their answers), then a frame for the nav's watch to post.
+  await expect.poll(() => ['app.overview', 'concierge.list'].filter((m) => !core.calls.includes(m))).toEqual([]);
+  await frameWin(page).evaluate(async () => {
+    await (window as any).yawble.call('app.overview').catch(() => null);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  });
   expect(await page.evaluate(() => (window as any).any.length), 'posted to its own origin only').toBe(0);
+  // A listener the frame adds now (after the app's) counts the parent's two messages: once both are in, the app's
+  // listener has had them too.
+  await frameWin(page).evaluate(() => {
+    (window as any).__parentMessages = new Promise<void>((done) => {
+      let n = 0;
+      addEventListener('message', (e) => { if (e.source === parent && ++n === 2) done(); });
+    });
+  });
   await send(page, { type: 'yawble.theme', theme: 'light' });
   await send(page, { type: 'yawble.navigate', to: { kind: 'place', id: 'monitor' } });
-  await page.waitForTimeout(500);
+  await frameWin(page).evaluate(async () => {
+    await (window as any).__parentMessages;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  });
   await expect(frame.locator('[data-test=monitor]')).toHaveCount(0);
   expect(await frame.locator('html').getAttribute('data-theme')).toBe('dark');
   expect(errors).toEqual([]);

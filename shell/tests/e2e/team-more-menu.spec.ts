@@ -10,6 +10,7 @@ import { expect, test, type Browser } from './phone/fixtures';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildRenderer, fakeRemote } from './phone/server';
+import { settled } from './settle';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
@@ -41,7 +42,7 @@ async function teamPage(browser: Browser, w: number, h: number) {
   await page.goto(`${s.url}#team=1`);
   await expect(page.locator('[data-test=team-title]')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('[data-test^=agent-]').first()).toBeVisible({ timeout: 30_000 });
-  await page.waitForTimeout(500);
+  await settled(page);
   return { page, ctx, errors };
 }
 

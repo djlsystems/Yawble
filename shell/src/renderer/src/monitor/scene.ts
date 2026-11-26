@@ -32,7 +32,9 @@ import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodM
  * screen are not drawn, and all the maps together show at most MaxMapNodes files (fewer at a lower density).
  * The layout is a d3-force simulation
  * ticked once per frame while it is awake; it cools to rest once nothing changes, and so the camera, which fits
- * everything unless the person has moved it in the last 12 s, settles too.
+ * everything unless the person has moved it in the last 12 s, settles too. The canvas carries both as attributes:
+ * data-settled="true" while the layout is at rest ("false" once it wakes: a drag, new nodes, new homes) and
+ * data-camera-idle="true" while the camera is where it aims ("false" while it eases there after a fit or a focus).
  * Under reduced motion nothing turns or throbs.
  *
  * Livelier and easier to follow:
@@ -290,6 +292,23 @@ export function teamAngle(i: number, count: number): number {
 
 export function aimsAtEverything(pinned: boolean, now: number, movedAt: number, fitUntil: number): boolean {
   return pinned ? now < fitUntil : now - movedAt > RefitAfterMs;
+}
+
+/** The forces' energy at or under which the scene stops ticking them: the layout is at rest. */
+export const RestAlpha = 0.001;
+/**
+ * Whether the camera has arrived where it aims: the zoom within 0.1% of its target and the centre within half a
+ * screen pixel of it. The camera eases toward its target every frame, so it never lands exactly.
+ */
+export function cameraAtTarget(cam: { x: number; y: number; k: number }, target: { x: number; y: number; k: number }): boolean {
+  return Math.abs(cam.k - target.k) <= target.k * 1e-3 && Math.hypot(cam.x - target.x, cam.y - target.y) * cam.k < 0.5;
+}
+/**
+ * Whether the layout is at rest: the forces cooled (RestAlpha), nothing held by the pointer, no cluster still sliding
+ * to a new home and every hub at its home, the map nodes at their places, and the last spacing check made no move.
+ */
+export function layoutAtRest(s: { alpha: number; dragging: boolean; shifting: boolean; hubsHome: boolean; mapAtRest: boolean; spacingStill: boolean }): boolean {
+  return s.alpha <= RestAlpha && !s.dragging && !s.shifting && s.hubsHome && s.mapAtRest && s.spacingStill;
 }
 
 /** The wall's state colours: the app's --state-* lifted toward white, read once. */
@@ -561,13 +580,14 @@ export class MonitorScene {
    */
   private settleSpacing(now: number): void {
     const count = this.teamList.length;
-    if (count < 2 || this.sim.alpha() > 0.04 || this.drag?.node || this.shifts.size || now - this.spacingAt < 150) return;
+    if (count < 2) { this.spacingStill = true; return; }
+    if (this.sim.alpha() > 0.04 || this.drag?.node || this.shifts.size || now - this.spacingAt < 150) return;
     // Only under Auto fit while it aims at everything: the labels' size follows the zoom, so a wall the person zoomed or
     // pinned would move under their hand (and a pinned camera would not follow the teams).
-    if (this.pinned || !this.fitting(now) || this.focusId !== null) return;
+    if (this.pinned || !this.fitting(now) || this.focusId !== null) { this.spacingStill = true; return; }
     // And only at Team spacing 1: wider, the camera zooms out, the labels grow, and the radius measured grew with them
     // (2x came out 4.7x). Other spacings scale the radius last measured at 1 (or the estimate).
-    if (this.layout.spacing !== LayoutDefaults.spacing) return;
+    if (this.layout.spacing !== LayoutDefaults.spacing) { this.spacingStill = true; return; }
     this.spacingAt = now;
     const what = `${count}|${this.nodes.size}|${this.mapNodes.length}`;
     if (what !== this.spacingFor) { this.spacingFor = what; this.spacingMoves = 0; }
@@ -587,9 +607,12 @@ export class MonitorScene {
     // over SpacingShrink too far apart. The labels grow as the camera zooms out to the wider oval, and jump from spot to
     // spot as things move, so a narrow band each way kept it moving.
     const err = (want - rx1) * nearestPair(count);
-    if (err < SpacingSlack && err > -SpacingShrink) return;
-    if (this.spacingMoves >= (overlap ? 2 * SpacingMoves : SpacingMoves)) return;
+    // Nothing to move: still, once measured at the camera's final zoom (the labels' size follows it, so a measure
+    // while the camera eases can want a move later).
+    if (err < SpacingSlack && err > -SpacingShrink) { this.spacingStill = cameraAtTarget(this.cam, this.target); return; }
+    if (this.spacingMoves >= (overlap ? 2 * SpacingMoves : SpacingMoves)) { this.spacingStill = true; return; }
     this.spacingMoves++;
+    this.spacingStill = false;
     this.measured = { rx: want, count };
     const homes = new Map<string, { x: number; y: number }>();
     for (const n of this.nodes.values()) if (n.kind === 'team') homes.set(n.team.toLowerCase(), { x: n.homeX, y: n.homeY });
@@ -778,7 +801,7 @@ export class MonitorScene {
     if (this.wfFrom.model !== this.model || this.wfFrom.rev !== (this.model?.workflowsRev ?? -1) || this.mapRoom !== this.wantedRoom) this.rebuild();
     this.resize();
     this.applyShifts(dt);
-    if (this.sim.alpha() > 0.001) this.sim.tick(); // at rest the nodes stay put (a wake: new nodes, a drag, new homes)
+    if (this.sim.alpha() > RestAlpha) { this.sim.tick(); this.spacingStill = false; } // at rest the nodes stay put (a wake: new nodes, a drag, new homes)
     if (this.fitting(now)) this.aimFit();
     const ease = 1 - Math.pow(0.0025, dt / 1000);
     this.cam.x += (this.target.x - this.cam.x) * ease;
@@ -788,7 +811,31 @@ export class MonitorScene {
     this.drawn = capEffects(this.effects, this.density, this.focusTeam());
     this.draw(now);
     this.settleSpacing(now);
+    this.markStill();
   };
+
+  /** Whether the layout is at rest (layoutAtRest) and the camera where it aims (cameraAtTarget), as of the last frame. */
+  settled = false;
+  cameraIdle = false;
+  /** The last spacing check (settleSpacing) since the forces cooled found nothing to move; a wake clears it. */
+  private spacingStill = false;
+  /** Every map node has eased to its place (placeMap). */
+  private mapAtRest = true;
+
+  /**
+   * Sets the canvas's data-settled and data-camera-idle ("true" / "false") from this frame, only when they change: a page
+   * (or a test) can wait for the wall to come to rest instead of waiting a fixed time.
+   */
+  private markStill(): void {
+    let hubsHome = true;
+    for (const n of this.nodes.values()) if (n.kind === 'team' && (n.x !== n.homeX || n.y !== n.homeY)) { hubsHome = false; break; }
+    const settled = layoutAtRest({
+      alpha: this.sim.alpha(), dragging: !!this.drag?.node, shifting: this.shifts.size > 0, hubsHome, mapAtRest: this.mapAtRest, spacingStill: this.spacingStill,
+    });
+    const idle = cameraAtTarget(this.cam, this.target);
+    if (settled !== this.settled || this.canvas.dataset.settled === undefined) { this.settled = settled; this.canvas.dataset.settled = String(settled); }
+    if (idle !== this.cameraIdle || this.canvas.dataset.cameraIdle === undefined) { this.cameraIdle = idle; this.canvas.dataset.cameraIdle = String(idle); }
+  }
 
   /** How long an effect shows: under reduced motion a comet is a still line that stays a little longer. */
   private life(e: Effect): number {
@@ -1147,6 +1194,7 @@ export class MonitorScene {
     if (!map || !map.size) {
       if (this.mapNodes.length) { this.mapNodes = []; this.mapById.clear(); this.mapPos.clear(); }
       this.wantedRoom = 0;
+      this.mapAtRest = true;
       return;
     }
     const L = this.mapLayouts;
@@ -1166,10 +1214,12 @@ export class MonitorScene {
     const ease = this.reduced ? 1 : 1 - Math.pow(0.0004, this.dt / 1000);
     const nodes: MapNode[] = [];
     const byId = new Map<string, MapNode>();
+    let atRest = true;
     const put = (node: Omit<MapNode, 'x' | 'y'>, tx: number, ty: number, bornX: number, bornY: number) => {
       let p = this.mapPos.get(node.id);
       if (!p) this.mapPos.set(node.id, (p = { x: this.reduced ? tx : bornX, y: this.reduced ? ty : bornY }));
       p.x += (tx - p.x) * ease; p.y += (ty - p.y) * ease;
+      if (atRest && Math.hypot(tx - p.x, ty - p.y) > 0.3) atRest = false;
       const n: MapNode = { ...node, x: p.x, y: p.y };
       nodes.push(n);
       byId.set(n.id, n);
@@ -1189,6 +1239,7 @@ export class MonitorScene {
         put({ id: `${team.key}|+folders`, kind: 'rest', team, label: `+${v.moreFolders} folder${v.moreFolders === 1 ? '' : 's'}`, heat: 0, files: [] }, laid.rest.x, laid.rest.y, team.x!, team.y!);
     }
     for (const id of [...this.mapPos.keys()]) if (!byId.has(id)) this.mapPos.delete(id);
+    this.mapAtRest = atRest;
     this.mapNodes = nodes;
     this.mapById = byId;
   }

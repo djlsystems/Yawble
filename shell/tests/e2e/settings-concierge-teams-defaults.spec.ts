@@ -16,6 +16,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { answers, createFakeCore, type Access } from './phone/fake-core';
 import { ORIGIN, buildRenderer, builtDir } from './phone/server';
+import { settled } from './settle';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(120_000);
@@ -75,6 +76,7 @@ async function open(browser: Browser, size: { width: number; height: number }, a
   core.setAsks(false);
   core.setAccess(access);
   const sent: { method: string; params: any }[] = [];
+  const answered: string[] = []; // the methods the fake has answered, in order
   let hold: Promise<void> | null = null;
   let release = () => {};
   if (opts.slowGenerate) hold = new Promise((r) => { release = r; });
@@ -93,30 +95,45 @@ async function open(browser: Browser, size: { width: number; height: number }, a
       if (msg.method === 'teams.generateNames' && hold) await hold;
       const out = core.answer(String(m));
       if (out) ws.send(out);
+      answered.push(msg.method);
     });
   });
   const page = await ctx.newPage();
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`${ORIGIN}/remote.html`);
-  await expect(page.locator('[data-test=sidebar]')).toBeAttached({ timeout: 30_000 });
-  await page.waitForTimeout(400);
-  return { page, ctx, errors, sent, state, release: () => release(), core };
+  await startedUp(page, answered);
+  return { page, ctx, errors, sent, answered, state, release: () => release(), core };
 }
+
+/** The window's start-up reads are answered (the agents, the custom agents, the saved Concierge default) and the page is at rest. */
+async function startedUp(page: Page, answered: string[]) {
+  await expect(page.locator('[data-test=sidebar]')).toBeAttached({ timeout: 30_000 });
+  await expect.poll(() => ['agents.detect', 'agentProfiles.list', 'concierge.defaults'].filter((m) => !answered.includes(m)), { message: 'the start-up reads answered' }).toEqual([]);
+  await settled(page);
+}
+
+/** A reload, then the start-up reads answered again. */
+async function reload(page: Page, answered: string[]) {
+  answered.length = 0;
+  await page.reload();
+  await startedUp(page, answered);
+}
+
+/** What a tab shows once it is open. */
+const TAB_SHOWS = { 'open-concierge': '[data-test=concierge-default-agent]', 'open-teams': '[data-test=default-manager-name]' } as const;
 
 async function openTab(page: Page, tab: 'open-concierge' | 'open-teams') {
   const back = page.locator('[data-test=settings] [data-test=settings-back]');
   if (await back.isVisible().catch(() => false)) await back.click(); // a phone shows one section at a time
-  if (await page.locator('[data-test=settings]').isVisible().catch(() => false)) {
-    await page.locator(`[data-test=settings] [data-test=${tab}]`).first().click();
-    await page.waitForTimeout(400);
-    return;
+  if (!(await page.locator('[data-test=settings]').isVisible().catch(() => false))) {
+    // Settings is the gear at the top right (the desktop window, the remote view and the phone top bar).
+    await page.getByTestId('settings-gear').click();
+    await expect(page.locator('[data-test=settings]')).toBeVisible();
   }
-  // Settings is the gear at the top right (the desktop window, the remote view and the phone top bar).
-  await page.getByTestId('settings-gear').click();
-  await expect(page.locator('[data-test=settings]')).toBeVisible();
   await page.locator(`[data-test=settings] [data-test=${tab}]`).first().click();
-  await page.waitForTimeout(400);
+  await expect(page.locator(TAB_SHOWS[tab])).toBeVisible();
+  await settled(page);
 }
 
 const DESKTOP = { width: 1280, height: 800 };
@@ -214,7 +231,9 @@ for (const [label, size] of [['desktop-1280', DESKTOP], ['phone-375', PHONE]] as
     }
     await page.locator('[data-test=names-generate]').click({ force: true }).catch(() => {});
     await page.locator('[data-test=team-defaults-save]').click({ force: true }).catch(() => {});
-    await page.waitForTimeout(300);
+    // Nothing is sent: a read the page makes after the clicks goes over the same socket behind anything they would have
+    // sent, so once it is answered, such a send would be in `sent` too.
+    await page.evaluate(() => (window as any).yawble.call('teams.defaults').catch(() => null));
     expect(sent.filter((s) => ['teams.generateNames', 'teams.setDefaults', 'concierge.setDefaults'].includes(s.method))).toEqual([]);
     await page.screenshot({ path: path.join(SHOTS, `settings-defaults-teams-visitor-${label}.png`), fullPage: true });
     expect(errors).toEqual([]);
@@ -234,9 +253,12 @@ test.describe('F1: a new chat starts on the saved Concierge default', () => {
     { cliId: 'gemini', found: false, version: null, path: null, signIn: { status: 'unknown', detail: null } },
   ];
 
-  async function newChat(page: Page) {
+  /** New chat, then the saved default read again (App.vue newChat) and the composer shown. */
+  async function newChat(page: Page, answered: string[]) {
+    const reads = answered.filter((m) => m === 'concierge.defaults').length;
     await page.locator('[data-test=sidebar] [data-test=new-chat]').first().click();
-    await page.waitForTimeout(400);
+    await expect.poll(() => answered.filter((m) => m === 'concierge.defaults').length, { message: 'the default read again' }).toBeGreaterThan(reads);
+    await expect(composerAgent(page)).toBeVisible();
   }
   const composerAgent = (page: Page) => page.locator('[data-test=composer-agent]').first();
   async function sendHello(page: Page, sent: { method: string; params: any }[]) {
@@ -249,12 +271,10 @@ test.describe('F1: a new chat starts on the saved Concierge default', () => {
 
   test('grok saved: New chat is on grok; changing the default applies to the next New chat; an existing chat keeps its agent', async ({ browser }) => {
     answers['agents.detect'] = agents;
-    const { page, ctx, errors, sent, state } = await open(browser, DESKTOP);
+    const { page, ctx, errors, sent, answered, state } = await open(browser, DESKTOP);
     state.defaultAgent = 'grok';
-    await page.reload();
-    await expect(page.locator('[data-test=sidebar]')).toBeAttached({ timeout: 30_000 });
-    await page.waitForTimeout(400);
-    await newChat(page);
+    await reload(page, answered);
+    await newChat(page, answered);
     await expect(composerAgent(page)).toHaveValue('grok');
     await page.screenshot({ path: path.join(SHOTS, 'settings-defaults-f1-new-chat-on-grok-desktop-1280.png') });
     expect((await sendHello(page, sent)).cli).toBe('grok');
@@ -263,17 +283,17 @@ test.describe('F1: a new chat starts on the saved Concierge default', () => {
     await openTab(page, 'open-concierge');
     await page.locator('[data-test=concierge-default-agent]').selectOption('claude');
     await expect(page.locator('[data-test=concierge-defaults-saved]')).toBeVisible();
-    await newChat(page);
+    await newChat(page, answered);
     await expect(composerAgent(page)).toHaveValue('claude');
     await openTab(page, 'open-concierge');
     await page.locator('[data-test=concierge-default-agent]').selectOption('grok');
     await expect(page.locator('[data-test=concierge-defaults-saved]')).toBeVisible();
-    await newChat(page);
+    await newChat(page, answered);
     await expect(composerAgent(page)).toHaveValue('grok');
 
     // An existing chat (c2, on claude) keeps its agent.
     await page.locator('[data-test=sidebar] [data-test=chat-item]').filter({ hasText: 'A long chat title' }).first().click();
-    await page.waitForTimeout(500);
+    // The chat opens on its own agent (the composer was on grok before the click).
     await expect(composerAgent(page)).toHaveValue('claude');
     expect(errors).toEqual([]);
     await ctx.close();
@@ -282,12 +302,10 @@ test.describe('F1: a new chat starts on the saved Concierge default', () => {
   for (const [why, saved] of [['signed out', 'codex'], ['not installed', 'gemini']] as const) {
     test(`a saved default that is ${why} (${saved}) falls back to the first ready agent`, async ({ browser }) => {
       answers['agents.detect'] = agents;
-      const { page, ctx, errors, sent, state } = await open(browser, DESKTOP);
+      const { page, ctx, errors, sent, answered, state } = await open(browser, DESKTOP);
       state.defaultAgent = saved;
-      await page.reload();
-      await expect(page.locator('[data-test=sidebar]')).toBeAttached({ timeout: 30_000 });
-      await page.waitForTimeout(400);
-      await newChat(page);
+      await reload(page, answered);
+      await newChat(page, answered);
       await expect(composerAgent(page)).toHaveValue('claude');
       expect((await sendHello(page, sent)).cli).toBe('claude');
       expect(errors).toEqual([]);

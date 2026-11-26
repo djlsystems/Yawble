@@ -219,17 +219,53 @@ async function hoverWorld(page: Page, o: Op, x: number, y: number): Promise<stri
 async function hoverFile(page: Page, match: (f: Frame) => Dot | undefined): Promise<string> {
   // The graph still drifts a little: read the place, move there, and retry until the tip is about a file.
   for (let i = 0; i < 6; i++) {
-    const f = await lastFrame(page);
+    await still(page);
+    const f = await freshFrame(page);
     const d = match(f);
     if (d) {
       const t = await hoverWorld(page, d.op, d.x, d.y).catch(() => '');
       if (t) return t;
     }
-    await page.waitForTimeout(250);
   }
   return '';
 }
-async function unhover(page: Page) { await page.mouse.move(2, 2); await page.waitForTimeout(150); }
+/** Moves the pointer off the wall: the tip goes, and a frame is drawn without the hover. */
+async function unhover(page: Page) {
+  await page.mouse.move(2, 2);
+  await expect(page.locator('[data-test=monitor-tip]')).toHaveCount(0);
+  await freshFrame(page);
+}
+
+/**
+ * Waits for the wall to come to rest: the canvas's data-settled (the forces cooled, the hubs home, the map in place) and
+ * data-camera-idle (the camera where it aims), both set by the scene.
+ */
+async function still(page: Page, timeout = 40_000) {
+  // Two frames first: the scene sets the attributes in its frame, so one drawn since the last action is read.
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))));
+  const wall = page.locator('[data-test=monitor-canvas]');
+  await expect(wall).toHaveAttribute('data-settled', 'true', { timeout });
+  await expect(wall).toHaveAttribute('data-camera-idle', 'true', { timeout });
+}
+/**
+ * A frame drawn after now. The recorder keeps a frame when the next one starts, so the first kept after now may have
+ * been drawn before it: the second is the first surely drawn after.
+ */
+async function freshFrame(page: Page): Promise<Frame> {
+  const t0 = await page.evaluate(() => performance.now());
+  await page.waitForFunction((t) => (window as any).__frames.filter((f: Frame) => f.at > t).length >= 2, t0, { timeout: 5000 });
+  return page.evaluate(() => (window as any).__frames.at(-1));
+}
+/** Waits until the frames kept (the last 2.5 s) show what `ok` wants (polled); returns them. */
+async function untilFrames(page: Page, ok: (fs: Frame[]) => unknown, timeout = 10_000): Promise<Frame[]> {
+  // Each poll fetches only the frames kept since the last (fetching all of them each time slows the page).
+  const fs: Frame[] = [];
+  await expect.poll(async () => {
+    fs.push(...await page.evaluate((t) => (window as any).__frames.filter((f: Frame) => f.at > t), fs.at(-1)?.at ?? -Infinity));
+    return !!ok(fs);
+  }, { timeout, intervals: [100] }).toBe(true).catch(() => {});
+  return fs;
+}
 
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -286,18 +322,21 @@ async function open(browser: Browser, o: OpenOpts = {}) {
 
 /** Waits until the frames show what `ok` wants (the page polls every 1.2 s). */
 async function until<T>(page: Page, get: (f: Frame) => T, ok: (v: T) => boolean, timeout = 10_000): Promise<T> {
-  const end = Date.now() + timeout;
   let v: T;
-  do {
+  await expect.poll(async () => {
     const f = await lastFrame(page);
     v = f ? get(f) : (undefined as T);
-    if (f && ok(v)) return v;
-    await page.waitForTimeout(100);
-  } while (Date.now() < end);
+    return !!f && ok(v);
+  }, { timeout, intervals: [100] }).toBe(true).catch(() => {});
   return v!;
 }
 
-async function shot(page: Page, name: string) { await page.screenshot({ path: path.join(SHOTS, `${name}.png`) }); }
+/** A screenshot once the fonts are in and the layout is at rest (data-settled). */
+async function shot(page: Page, name: string) {
+  await page.evaluate(() => document.fonts.ready.then(() => true));
+  if (await page.locator('[data-test=monitor-canvas]').count()) await expect(page.locator('[data-test=monitor-canvas]')).toHaveAttribute('data-settled', 'true', { timeout: 20_000 });
+  await page.screenshot({ path: path.join(SHOTS, `${name}.png`) });
+}
 
 /** The workflow's instructions, read at the start: the members' touches belong to workflow 10. */
 function seedWorkflow(feed: Feed, msAgo = 120_000, wf = 10) {
@@ -320,8 +359,10 @@ test('map: the tree grows over a workflow, a Write pops, edits bright, reads fai
   // 1. A Write: a new file pops in (its radius goes below and past 3.6 within the 420 ms pop).
   feed.step(ADA, 'create', 'src/refund/partial.ts');
   await until(page, (x) => fileDots(x).length, (n) => n >= 1);
-  await page.waitForTimeout(700); // the 90 kept frames (1.5 s) now cover the whole 420 ms pop
-  const radii = (await frames(page)).flatMap((x) => fileDots(x).filter((d) => d.color === C.create).map((d) => d.r));
+  // Until the pop is over: the new file drawn at its size (3.6) again after its peak; the kept frames cover the 420 ms pop.
+  const createdR = (x: Frame) => fileDots(x).filter((d) => d.color === C.create).map((d) => d.r);
+  const popped = await untilFrames(page, (all) => { const rs = all.flatMap(createdR); return rs.some((r) => r > 3.62) && createdR(all.at(-1)!).every((r) => Math.abs(r - 3.6) < 0.001); }, 5000);
+  const radii = popped.flatMap(createdR);
   result.popRadii = { min: Math.min(...radii), max: Math.max(...radii) };
   expect(Math.min(...radii), 'the new file pops in small').toBeLessThan(3.2);
   expect(Math.max(...radii), 'and overshoots its size (1.25x at its peak, back to 3.6 by 420 ms)').toBeGreaterThan(3.62);
@@ -334,8 +375,16 @@ test('map: the tree grows over a workflow, a Write pops, edits bright, reads fai
   feed.step(BEN, 'read', 'docs/refunds.md');
   const grew = await until(page, (x) => fileDots(x).length, (n) => n === 4);
   expect(grew, 'four files on the map').toBe(4);
-  await page.waitForTimeout(2800); // the fresh-touch light fades (LightMs 2.4 s)
-  f = await lastFrame(page);
+  // Until the fresh-touch light has faded (LightMs 2.4 s): every file's alpha the same in two frames 200 ms apart.
+  let alphas = '';
+  await expect.poll(async () => {
+    const now = fileDots(await lastFrame(page)).map((d) => d.alpha.toFixed(3)).sort().join(',');
+    const same = now === alphas;
+    alphas = now;
+    return same;
+  }, { timeout: 8000, intervals: [200] }).toBe(true);
+  await still(page);
+  f = await freshFrame(page);
   const dots = fileDots(f);
   const byColor = (c: string) => dots.filter((d) => d.color === c);
   result.dots = dots.map((d) => ({ color: d.color, alpha: +d.alpha.toFixed(3), r: d.r }));
@@ -401,8 +450,8 @@ test('map: a large map collapses to its busiest 8 folders, "+N" per folder and "
   for (let d = 0; d < 12; d++) for (let i = 0; i < 10; i++) for (let k = 0; k <= (11 - d) % 3; k++) feed.step(ADA, 'edit', `src/mod${String(d).padStart(2, '0')}/file${i}.ts`, 200_000 - d * 1000 - i * 10 - k);
   const { page, ctx, errors } = await open(browser, { feed });
   await until(page, (x) => fileDots(x).length, (n) => n > 0);
-  await page.waitForTimeout(4000); // the camera settles on the whole map (off-screen nodes are culled)
-  let f = await lastFrame(page);
+  await still(page); // the camera settles on the whole map (off-screen nodes are culled)
+  let f = await freshFrame(page);
   // "+N" nodes: dashed rings of radius 7 (a folder's rest) and 9 (the team's "+N folders"); a folder's "+N" text shows
   // only zoomed in (the scene's labels, cam.k > 0.55), the "+N folders" text always.
   const dashed = (fr: Frame, r: number) => fr.ops.filter((o) => o.op === 'stroke' && o.dash && o.items?.length === 1 && o.items[0].t === 'arc' && o.items[0].r === r);
@@ -420,11 +469,10 @@ test('map: a large map collapses to its busiest 8 folders, "+N" per folder and "
   const ring = dashed(f, 7)[0]!;
   const s0 = screen(ring, ring.items![0].x, ring.items![0].y);
   await page.mouse.move(box.x + s0.x, box.y + s0.y);
-  for (let i = 0; i < 2; i++) { await page.mouse.wheel(0, -150); await page.waitForTimeout(120); }
-  await page.waitForTimeout(1500);
-  await page.mouse.move(2, 2);
-  await page.waitForTimeout(300);
-  f = await lastFrame(page);
+  for (let i = 0; i < 2; i++) { await page.mouse.wheel(0, -150); await freshFrame(page); }
+  await unhover(page);
+  await still(page); // the zoom applied and the map at rest
+  f = await freshFrame(page);
   const k = f.ops.find((o) => o.op === 'text')!.m[0];
   const plus = texts(f).filter((s) => /^\+\d+$/.test(s));
   result.collapse = { ...(result.collapse as object), zoom: k, plus };
@@ -466,17 +514,16 @@ test('events: a commit dot travels to the hub (hover: message + sha) and correct
   // Follow the dot: gathers (2.2 dots), then a dot from the member to the hub, then resting by the hub.
   const track: { t: number; x: number; y: number; dm: number; dh: number }[] = [];
   let gathered = 0;
-  const end = Date.now() + 9000;
-  while (Date.now() < end) {
+  // Until the dot has been followed for 2.5 s (it gathers, travels 1.3 s and rests).
+  await expect.poll(async () => {
     for (const fr of await frames(page)) {
       gathered = Math.max(gathered, gatherDots(fr));
       const cd = commitDots(fr)[0];
       const m = memberAt(fr, ADA), h = hubAt(fr);
       if (cd && m && h && !track.some((p) => p.t === fr.at)) track.push({ t: fr.at, x: cd.x, y: cd.y, dm: Math.hypot(cd.x - m.x, cd.y - m.y), dh: Math.hypot(cd.x - h.x, cd.y - h.y) });
     }
-    if (track.length && track.at(-1)!.t - track[0]!.t > 2500) break;
-    await page.waitForTimeout(150);
-  }
+    return track.length > 0 && Math.max(...track.map((p) => p.t)) - Math.min(...track.map((p) => p.t)) > 2500;
+  }, { timeout: 9000, intervals: [150] }).toBe(true).catch(() => {});
   track.sort((a, b) => a.t - b.t);
   result.commitTrack = { gathered, first: track[0], last: track.at(-1), n: track.length };
   expect(gathered, 'the files gather to the member').toBeGreaterThan(0);
@@ -517,28 +564,30 @@ test('events: a commit dot travels to the hub (hover: message + sha) and correct
   // A merge into the team branch, a landing on main and a push, each a few seconds apart.
   const hub = hubAt(await lastFrame(page))!;
   const seen = { merge: [] as number[], landedLw: [] as number[], landedRings: 0, push: 0 };
-  const watch = async (ms: number) => {
-    const stop = Date.now() + ms;
-    while (Date.now() < stop) {
-      for (const fr of await frames(page)) {
-        const h = hubAt(fr) ?? hub;
-        const b = bursts(fr, h);
-        seen.merge.push(...b.merge.map((r) => r.r));
-        seen.landedLw.push(...b.landed.map((r) => r.lw!));
-        seen.landedRings = Math.max(seen.landedRings, b.landed.length);
-        seen.push += b.push;
-      }
-      await page.waitForTimeout(120);
+  /** Collects what the kept frames show until `done` (an effect seen and over), each frame once. */
+  const counted = new Set<number>();
+  const watch = (done: (last: ReturnType<typeof bursts>) => boolean) => expect.poll(async () => {
+    const fs = await frames(page);
+    for (const fr of fs) {
+      if (counted.has(fr.at)) continue;
+      counted.add(fr.at);
+      const b = bursts(fr, hubAt(fr) ?? hub);
+      seen.merge.push(...b.merge.map((r) => r.r));
+      seen.landedLw.push(...b.landed.map((r) => r.lw!));
+      seen.landedRings = Math.max(seen.landedRings, b.landed.length);
+      seen.push += b.push;
     }
-  };
+    const last = fs.at(-1);
+    return !!last && done(bursts(last, hubAt(last) ?? hub));
+  }, { timeout: 8000, intervals: [120] }).toBe(true).catch(() => {});
   feed.event({ kind: 'merge-team', member: ADA, branch: 'members/payments/developerada', sha: 'b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1', message: "Merge DeveloperAda's work", files: [{ path: 'src/refund/partial.ts', status: 'A' }], into: 'team/payments' });
-  await watch(2600);
+  await watch((last) => seen.merge.length > 3 && last.merge.length === 0); // the merge's rings have run out
   const mergeSeen = [...seen.merge];
   await shot(page, '07-merge');
   feed.event({ kind: 'landed', member: null, branch: 'team/payments', sha: 'c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2', message: 'Land team/payments on main', files: [{ path: 'src/refund/partial.ts', status: 'A' }], into: 'main', workflowId: null });
-  await watch(2600);
+  await watch((last) => seen.landedRings > 0 && last.landed.length === 0);
   feed.event({ kind: 'push', member: null, branch: 'main', sha: 'c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2', message: 'Pushed main to origin', files: [], branches: ['main'], workflowId: null });
-  await watch(2400);
+  await watch((last) => seen.push > 3 && last.push === 0);
   result.bursts = { mergeRadii: [Math.min(...mergeSeen), Math.max(...mergeSeen)], landedRings: seen.landedRings, landedLw: [...new Set(seen.landedLw)], push: seen.push };
   expect(mergeSeen.length, 'the merge rings off the hub').toBeGreaterThan(3);
   expect(Math.max(...mergeSeen) - Math.min(...mergeSeen), 'and grows').toBeGreaterThan(30);
@@ -589,7 +638,8 @@ test('replay: the timeline plays the map and the events in order', async ({ brow
   const mapSizes: { t: number; n: number }[] = [];
   let commitDotSeen = false, mergeSeen = false, landedSeen = false, pushSeen = false;
   const t0 = Date.now();
-  while (Date.now() - t0 < 25_000) {
+  // Watched until the replay ends (it reaches live): the Activity rows' order, the effects drawn and the map's size.
+  await expect.poll(async () => {
     const rows = await page.locator('[data-test=monitor-row]').allInnerTexts();
     for (const r of [...rows].reverse()) {
       const k = /committed|merged into the team|landed on main|pushed|wrote files|edited files/.exec(r)?.[0];
@@ -602,11 +652,12 @@ test('replay: the timeline plays the map and the events in order', async ({ brow
     }
     const lf = await lastFrame(page);
     mapSizes.push({ t: Date.now() - t0, n: fileDots(lf).length });
-    if (!(await page.locator('[data-test=monitor-replaying]').isVisible())) break;
-    if (order.length === 0 && mapSizes.length === 1) await shot(page, '10-replay-start');
-    if (order.includes('committed') && !order.includes('pushed')) await shot(page, '11-replay-commit');
-    await page.waitForTimeout(150);
-  }
+    if (!(await page.locator('[data-test=monitor-replaying]').isVisible())) return true;
+    // Mid-replay shots are taken as they come (the replay moves on; waiting for the wall to rest would miss what it draws).
+    if (order.length === 0 && mapSizes.length === 1) await page.screenshot({ path: path.join(SHOTS, '10-replay-start.png') });
+    if (order.includes('committed') && !order.includes('pushed')) await page.screenshot({ path: path.join(SHOTS, '11-replay-commit.png') });
+    return false;
+  }, { timeout: 25_000, intervals: [150] }).toBe(true).catch(() => {});
   result.replay = { order, commitDotSeen, mergeSeen, landedSeen, pushSeen, mapStart: mapSizes[0], mapMax: Math.max(...mapSizes.map((m) => m.n)), ms: Date.now() - t0 };
   expect(mapSizes[0]!.n, 'the replay starts before the files existed').toBe(0);
   expect(Math.max(...mapSizes.map((m) => m.n)), 'and grows the map').toBe(2);
@@ -626,31 +677,36 @@ test('reduced motion (emulated): nothing travels or pops, no bursts; the map jus
   feed.step(ADA, 'create', 'src/refund/partial.ts');
   feed.step(ADA, 'edit', 'src/refund/model.ts');
   await until(page, (x) => fileDots(x).length, (n) => n === 2);
-  await page.waitForTimeout(600);
-  const radii = (await frames(page)).flatMap((x) => fileDots(x).map((d) => d.r));
+  // Until 30 frames (half a second) have drawn both files: a pop (420 ms) would show in them.
+  const both = await untilFrames(page, (all) => all.filter((x) => fileDots(x).length === 2).length >= 30, 5000);
+  const radii = both.flatMap((x) => fileDots(x).map((d) => d.r));
   result.reducedRadii = [Math.min(...radii), Math.max(...radii)];
   expect(new Set(radii), 'no pop: every file node at 3.6 in every frame').toEqual(new Set([3.6]));
   feed.event({ kind: 'commit', member: ADA, sha: 'd'.repeat(40), message: 'Reduced commit', files: [{ path: 'src/refund/partial.ts', status: 'A' }, { path: 'src/refund/model.ts', status: 'M' }] });
   const pos: { dh: number }[] = [];
-  let gather = 0;
+  let gather = 0, seenFrames = 0;
   const b = { merge: 0, landed: 0, push: 0 };
-  const watch = async (ms: number) => {
-    const stop = Date.now() + ms;
-    while (Date.now() < stop) {
-      for (const fr of await frames(page)) {
-        const h = hubAt(fr);
-        gather += gatherDots(fr);
-        for (const d of commitDots(fr)) if (h) pos.push({ dh: Math.hypot(d.x - h.x, d.y - h.y) });
-        if (h) { const x = bursts(fr, h); b.merge += x.merge.length; b.landed += x.landed.length; b.push += x.push; }
-      }
-      await page.waitForTimeout(120);
+  /** Counts what the kept frames show, each frame once, until `done`. */
+  const counted = new Set<number>();
+  const watch = (done: () => boolean) => expect.poll(async () => {
+    for (const fr of await frames(page)) {
+      if (counted.has(fr.at)) continue;
+      counted.add(fr.at); seenFrames++;
+      const h = hubAt(fr);
+      gather += gatherDots(fr);
+      for (const d of commitDots(fr)) if (h) pos.push({ dh: Math.hypot(d.x - h.x, d.y - h.y) });
+      if (h) { const x = bursts(fr, h); b.merge += x.merge.length; b.landed += x.landed.length; b.push += x.push; }
     }
-  };
-  await watch(3000);
+    return done();
+  }, { timeout: 10_000, intervals: [120] }).toBe(true).catch(() => {});
+  await watch(() => pos.length > 30); // the commit shown in half a second of frames: travelling, it would have moved
   feed.event({ kind: 'merge-team', member: ADA, sha: 'e'.repeat(40), message: 'Merge', files: [{ path: 'src/refund/partial.ts', status: 'A' }], into: 'team/payments' });
   feed.event({ kind: 'landed', member: null, branch: 'team/payments', sha: 'f'.repeat(40), message: 'Land', files: [], into: 'main' });
   feed.event({ kind: 'push', member: null, branch: 'main', sha: 'f'.repeat(40), message: 'Pushed main to origin', files: [] });
-  await watch(3000);
+  // The events read (in Activity), then a second of frames in which their bursts would be drawn.
+  await expect(page.locator('[data-test=monitor-row]').filter({ hasText: 'pushed' }).first()).toBeVisible({ timeout: 8000 });
+  const after = seenFrames;
+  await watch(() => seenFrames - after >= 60);
   result.reduced = { commitFrames: pos.length, dh: [Math.min(...pos.map((p) => p.dh)), Math.max(...pos.map((p) => p.dh))], gather, bursts: b };
   expect(pos.length, 'the commit shows').toBeGreaterThan(3);
   expect(gather, 'no files gather').toBe(0);
@@ -679,7 +735,10 @@ test('remote view: a Visitor (read access) gets the same map through monitor.* r
   expect(ringsAt(f, d.x, d.y, d.r + 2.2), 'confirmed by the commit').toBeGreaterThan(0);
   expect(ringsAt(f, d.x, d.y, d.r + 6.2, C.ink), 'two members').toBeGreaterThan(0);
   await expect(page.locator('[data-test=monitor-row]').filter({ hasText: 'committed' })).toContainText('Visitor sees this');
-  await page.waitForTimeout(2600);
+  // The next poll after the refusal: per team again, not the all-teams form.
+  const perTeam = () => feed.calls.filter((c) => c.method === 'monitor.codeEvents' && typeof c.params?.team === 'string').length;
+  const before = perTeam();
+  await expect.poll(perTeam, { timeout: 8000 }).toBeGreaterThan(before);
   const asked = feed.calls.filter((c) => c.method === 'monitor.codeEvents');
   result.remote = { methods: [...new Set(feed.calls.map((c) => c.method))], codeEventsAsks: asked.slice(0, 4).map((c) => c.params) };
   expect(new Set(feed.calls.map((c) => c.method))).toEqual(new Set(['monitor.messages', 'monitor.steps', 'monitor.codeEvents']));
@@ -709,14 +768,15 @@ test('performance: a several-hundred-file fixture (4 teams x 150 files, live edi
     for (const t of teams) for (let k = 0; k < 3; k++) feed.step(who(t), 'edit', `src/area${(n + k) % 12}/sub/file${(n * 7 + k) % 150}.ts`, 0, t);
     if (n % 3 === 0) feed.event({ kind: 'commit', team: teams[n % 4]!, member: who(teams[n % 4]!), sha: n.toString(16).padStart(40, '0'), message: `Load commit ${n}`, files: Array.from({ length: 6 }, (_, k) => ({ path: `src/area${k}/sub/file${(n + k) % 150}.ts`, status: 'M' })) });
   }, 700);
-  await page.waitForTimeout(4000); // settle: first paint, the layout's forces
+  // A warm-up before the timed window (first paint, the layout's forces). Not the settled attribute: the live load
+  // touches new files all the time, so the maps keep growing and the wall does not come to rest.
+  await page.waitForTimeout(4000);
   await page.evaluate(() => { (window as any).__perf = []; });
-  await page.waitForTimeout(10_000);
+  await page.waitForTimeout(10_000); // a measurement window: the frame rate over 10 s of live load
   const perf: { t: number; s: number; d: number }[] = await page.evaluate(() => (window as any).__perf);
   clearInterval(live);
   await page.evaluate(() => { (window as any).__rec = true; });
-  await page.waitForTimeout(300);
-  const f = await lastFrame(page);
+  const f = await freshFrame(page);
   const drawn = fileDots(f).length;
   // Frame intervals from the frames' timestamps; JS time per frame = the sum of that frame's callbacks.
   const byFrame = new Map<number, number>();

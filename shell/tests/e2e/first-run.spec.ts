@@ -303,7 +303,8 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await term.locator('[data-test=member-view-activity]').click();
 
     // ---- Reopen: the replay comes back (everything shown before, from the start of the run), then live again.
-    await main.waitForTimeout(1500);
+    // The pane is off its terminal (closed, so the reopen below attaches again from the start of the run).
+    await expect(term.locator('[data-test=member-terminal]')).toHaveCount(0);
     term = await terminalFor(app, main, 'Ben');
     const mirror2 = term.locator('[data-test=terminal-mirror]');
     await expect(mirror2).toContainText('$ grok -p (batch of 1');

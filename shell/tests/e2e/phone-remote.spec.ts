@@ -12,6 +12,7 @@ import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { audit, type Audit } from './phone/audit';
+import { resized, settled } from './settle';
 import { BASE_COMMIT, baseBuiltDir, baseShellDir, buildRenderer, builtDir, extractBaseTree, fakeRemote } from './phone/server';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
@@ -58,7 +59,7 @@ async function open(browser: Browser, size: Size, o: OpenOpts = {}) {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(s.url);
   await expect(page.locator('[data-test=sidebar]')).toBeAttached({ timeout: 30_000 });
-  await page.waitForTimeout(600);
+  await settled(page);
   return { page, s, ctx, errors };
 }
 
@@ -66,7 +67,7 @@ const tag = (size: Size) => `${size.w}x${size.h}`;
 
 /** Screenshot + audit; soft-fails on overflow, an off-screen control (outside a sideways scroller) or a small control. */
 async function check(page: Page, screen: string, size: Size, o: { allowSmall?: (c: Audit['small'][number]) => boolean; full?: boolean } = {}) {
-  await page.waitForTimeout(250);
+  await settled(page);
   await page.screenshot({ path: path.join(SHOTS, `${screen}-${tag(size)}.png`), fullPage: o.full ?? false });
   const a = await audit(page);
   results.push({ screen, size: tag(size), audit: a });
@@ -104,7 +105,7 @@ for (const size of PHONES) {
       await check(page, 'concierge-with-asks', size);
       await drawer(page);
       await openFirstChat(page, size);
-      await page.waitForTimeout(500);
+      await expect(page.locator('[data-test=concierge-thread]')).toBeVisible();
       await check(page, 'concierge-chat-with-asks', size);
       const thread = await page.locator('[data-test=concierge-thread]').boundingBox();
       const composer = await page.locator('[data-test=composer]').boundingBox();
@@ -122,7 +123,8 @@ for (const size of PHONES) {
       // The same two banners on the other screens (all but the board, which shows asks in its Needs You lane).
       for (const [id, name, sel] of [['nav-monitor', 'monitor', '[data-test=monitor]'], ['nav-teams', 'teams', '[data-test=team-grid]'], ['nav-documents', 'documents', '[data-test=documents-view]']] as const) {
         await nav(page, id);
-        await page.waitForTimeout(500);
+        await expect(page.locator(sel).first()).toBeVisible();
+        await settled(page);
         await banners(name);
         await page.screenshot({ path: path.join(SHOTS, `${name}-with-asks-${tag(size)}.png`) });
         const b = await page.locator(sel).first().boundingBox();
@@ -160,7 +162,8 @@ for (const size of PHONES) {
       const box = page.locator('[data-test=composer-text]');
       await box.click();
       await page.evaluate(() => (window as any).__keyboard(320));
-      await page.waitForTimeout(300);
+      await expect(page.locator('[data-test=concierge]')).toHaveAttribute('style', /--keyboard:\s*320px/);
+      await settled(page);
       const r = (await page.locator('[data-test=composer]').boundingBox())!;
       const send = (await page.locator('[data-test=composer-send]').boundingBox())!;
       await page.screenshot({ path: path.join(SHOTS, `concierge-keyboard-${tag(size)}.png`) });
@@ -168,7 +171,8 @@ for (const size of PHONES) {
       expect.soft(r.y, 'composer top on screen').toBeGreaterThanOrEqual(0);
       expect.soft(send.y + send.height, 'Send above the keyboard').toBeLessThanOrEqual(size.h - 320 + 1);
       await page.evaluate(() => (window as any).__keyboard(0));
-      await page.waitForTimeout(200);
+      await expect(page.locator('[data-test=concierge]')).toHaveAttribute('style', /--keyboard:\s*0px/);
+      await settled(page);
       const back = (await page.locator('[data-test=composer]').boundingBox())!;
       expect.soft(back.y + back.height, 'composer back at the bottom when the keyboard goes').toBeGreaterThan(size.h - 120);
       expect(errors).toEqual([]);
@@ -196,11 +200,9 @@ for (const size of PHONES) {
       }
       await page.locator('[data-test=open-code]:visible').first().click();
       await expect(page.locator('.code-dialog, [data-test=code-dialog], [data-test=code-browser]').first()).toBeVisible();
-      await page.waitForTimeout(500);
       await check(page, 'code-browser', size);
       const file = page.locator('[data-test="code-entry-src/refund.ts"]').first();
       await file.click();
-      await page.waitForTimeout(500);
       await check(page, 'code-file', size);
       expect(errors).toEqual([]);
     });
@@ -246,7 +248,7 @@ for (const size of PHONES) {
         await page.keyboard.press('Escape');
       }
       await page.locator('[data-test=backlog-row]').first().click();
-      await page.waitForTimeout(400);
+      await expect(page.locator('[data-test=backlog-item]')).toBeVisible();
       await check(page, 'backlog-item', size);
       expect(errors).toEqual([]);
     });
@@ -256,7 +258,6 @@ for (const size of PHONES) {
       await nav(page, 'nav-monitor');
       const mon = page.locator('[data-test=monitor]');
       await expect(mon).toBeVisible();
-      await page.waitForTimeout(800);
       await check(page, 'monitor', size);
       expect.soft(await luminance(page, '[data-test=monitor]'), 'the Monitor is dark (light theme)').toBeLessThan(0.2);
       await page.locator('[data-test=monitor-layout-toggle]').click();
@@ -277,14 +278,13 @@ for (const size of PHONES) {
       const sheet = page.locator('[data-test=logs]').first();
       await expect(sheet).toBeVisible();
       await expect(page.locator('.modal, [role=dialog]')).toHaveCount(0);
-      await page.waitForTimeout(600);
+      await settled(page);
       const b = (await sheet.boundingBox())!;
       expect.soft(Math.round(b.width), 'the page takes the width (less its padding)').toBeGreaterThanOrEqual(size.w - 40);
       await check(page, 'logs', size);
       const row = page.locator('[data-test=logs-cards] [data-test=logs-row]').first();
       if (await row.count()) {
         await row.click();
-        await page.waitForTimeout(300);
         await check(page, 'logs-entry', size);
       }
       expect(errors).toEqual([]);
@@ -295,10 +295,9 @@ for (const size of PHONES) {
       // Settings is the gear at the right of the phone top bar.
       await page.getByTestId('settings-gear').click();
       await expect(page.locator('[data-test=settings]')).toBeVisible();
-      await page.waitForTimeout(500);
       await check(page, 'settings', size);
       await page.locator('[data-test=settings] nav button, [data-test=settings] .sections button').first().click();
-      await page.waitForTimeout(500);
+      await expect(page.locator('[data-test=settings-pane]')).toBeVisible();
       await check(page, 'settings-section', size);
       await page.screenshot({ path: path.join(SHOTS, `settings-section-full-${tag(size)}.png`), fullPage: true });
       expect(errors).toEqual([]);
@@ -308,14 +307,13 @@ for (const size of PHONES) {
       const { page, errors } = await open(browser, size, { asks: false });
       await nav(page, 'nav-documents');
       await expect(page.locator('[data-test=documents-view]')).toBeVisible();
-      await page.waitForTimeout(500);
       await check(page, 'documents', size);
       await page.locator('[data-test=documents-view]').getByText('payments', { exact: true }).first().click();
-      await page.waitForTimeout(500);
+      await expect(page.locator('[data-test=docs-browser]')).toBeVisible();
       await check(page, 'documents-team', size);
       const doc = page.locator('[data-test="doc-phone-report.md"]').first();
       await doc.click();
-      await page.waitForTimeout(500);
+      await expect(page.locator('[data-test=docs-viewer]')).toBeVisible();
       await check(page, 'document', size);
       expect(errors).toEqual([]);
     });
@@ -379,9 +377,9 @@ for (const size of PHONES) {
       });
       await nav(page, 'nav-documents');
       await expect(page.locator('[data-test=documents-view]')).toBeVisible();
-      await page.waitForTimeout(500);
       await page.locator('[data-test=documents-view]').getByText('payments', { exact: true }).first().click();
-      await page.waitForTimeout(500);
+      await expect(page.locator('[data-test=docs-browser] > .bar').first()).toBeVisible();
+      await settled(page);
       const d = await barInfo('[data-test=docs-browser] > .bar');
       results.push({ screen: 'f7-documents-bar', size: tag(size), audit: d as unknown as Audit });
       expect.soft(parseFloat(d.padR), 'Documents bar padding-right under 150').toBeLessThan(150);
@@ -389,8 +387,8 @@ for (const size of PHONES) {
       expect.soft(d.maxRight, 'Documents bar controls inside the bar').toBeLessThanOrEqual(d.barRight + 1);
       await check(page, 'reverify2-visitor-documents', size);
       await nav(page, 'nav-logs');
-      await expect(page.locator('[data-test=logs]').first()).toBeVisible();
-      await page.waitForTimeout(600);
+      await expect(page.locator('[data-test=logs] .bar').first()).toBeVisible();
+      await settled(page);
       const l = await barInfo('[data-test=logs] .bar');
       results.push({ screen: 'f7-logs-bar', size: tag(size), audit: l as unknown as Audit });
       expect.soft(parseFloat(l.padR), 'Logs bar padding-right under 150').toBeLessThan(150);
@@ -453,7 +451,9 @@ for (const size of PHONES) {
         const { page, errors, ctx } = await open(browser, size, { access, asks: false });
         for (const o of openers) {
           if (!(await o.go(page))) { (seen[o.name] ??= {})[access] = 'no opener'; continue; }
-          await page.waitForTimeout(600);
+          // A sheet slides in (or the opener opened something else: then no sheet comes and the row says so).
+          await page.locator('.modal.sheet').last().waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
+          await settled(page);
           const info = await sheetInfo(page);
           (seen[o.name] ??= {})[access] = info ?? 'not a sheet';
           if (!info) continue;
@@ -471,10 +471,15 @@ for (const size of PHONES) {
             expect.soft(info.padR, `${where}: full-access header padding-right as before`).toBe('6px');
             expect.soft(info.close[1], `${where}: Close at the right edge`).toBe(size.w - 6);
           }
-          const close = page.locator('.modal.sheet [data-test=modal-close]').last();
-          await close.click();
-          await page.waitForTimeout(300);
-          while (await page.locator('.modal.sheet').count()) { await page.locator('.modal.sheet [data-test=modal-close]').last().click(); await page.waitForTimeout(200); }
+          const sheets = page.locator('.modal.sheet');
+          const closeTop = async () => {
+            const n = await sheets.count();
+            await sheets.locator('[data-test=modal-close]').last().click();
+            await expect.poll(() => sheets.count(), { message: 'Close takes the top sheet away' }).toBeLessThan(n);
+          };
+          await closeTop();
+          while (await sheets.count()) await closeTop();
+          await settled(page);
         }
         expect(errors).toEqual([]);
         await ctx.close();
@@ -493,7 +498,8 @@ for (const size of PHONES) {
       expect.soft(await luminance(page, 'body'), 'dark page').toBeLessThan(0.2);
       await check(page, 'dark-concierge', size);
       await nav(page, 'nav-monitor');
-      await page.waitForTimeout(600);
+      await expect(page.locator('[data-test=monitor]')).toBeVisible();
+      await settled(page);
       expect.soft(await luminance(page, '[data-test=monitor]')).toBeLessThan(0.2);
       await check(page, 'dark-monitor', size);
     });
@@ -525,7 +531,7 @@ test.describe('break tests: the 759 / 760 px edges and rotation', () => {
       else await expect(page.locator('[data-test=sidebar]')).not.toHaveAttribute('data-drawer', /./);
       for (const [id, name] of [['nav-board', 'board'], ['nav-monitor', 'monitor'], ['nav-teams', 'teams']] as const) {
         if (phone) await nav(page, id); else await page.locator(`[data-test=sidebar] [data-test=${id}]`).first().click();
-        await page.waitForTimeout(400);
+        await settled(page);
         await page.screenshot({ path: path.join(SHOTS, `edge-${name}-${w}.png`) });
         const a = await audit(page);
         results.push({ screen: `edge-${name}`, size: `${w}x900`, audit: a });
@@ -539,13 +545,11 @@ test.describe('break tests: the 759 / 760 px edges and rotation', () => {
     const { page } = await open(browser, { w: 759, h: 900 }, { mobile: false, asks: false });
     await nav(page, 'nav-board');
     await drawer(page);
-    await page.setViewportSize({ width: 760, height: 900 });
-    await page.waitForTimeout(300);
+    await resized(page, 760, 900);
     await expect(page.locator('.app')).not.toHaveClass(/\bphone\b/);
     await expect(page.locator('[data-test=drawer-scrim]')).toHaveCount(0);
     await expect(page.locator('[data-test=lane-tabs]')).toHaveCount(0);
-    await page.setViewportSize({ width: 759, height: 900 });
-    await page.waitForTimeout(300);
+    await resized(page, 759, 900);
     await expect(page.locator('.app')).toHaveClass(/\bphone\b/);
     await expect(page.locator('[data-test=sidebar]')).toHaveAttribute('data-drawer', 'closed');
     await expect(page.locator('[data-test=lane-tabs]')).toHaveCount(1);
@@ -557,19 +561,17 @@ test.describe('break tests: the 759 / 760 px edges and rotation', () => {
       const { page, errors } = await open(browser, size, { asks: false });
       for (const [id, name] of [['nav-board', 'board'], ['nav-monitor', 'monitor'], ['nav-backlog', 'backlog'], ['nav-documents', 'documents']] as const) {
         await nav(page, id);
-        await page.waitForTimeout(300);
+        await settled(page);
         // Landscape: 844 x 390 is wider than 760 (the desktop layout); 740 x 360 is not (still the phone layout).
         const landPhone = size.h < 760;
-        await page.setViewportSize({ width: size.h, height: size.w });
-        await page.waitForTimeout(400);
+        await resized(page, size.h, size.w);
         await page.screenshot({ path: path.join(SHOTS, `rotate-${name}-${size.h}x${size.w}.png`) });
         const land = await audit(page);
         results.push({ screen: `rotate-${name}`, size: `${size.h}x${size.w}`, audit: land });
         expect.soft(land.overflow, `${name} landscape ${size.h}x${size.w}: sideways scroll ${land.scrollWidth}; ${land.wide.join(', ')}`).toBe(false);
         if (landPhone) await expect(page.locator('.app')).toHaveClass(/\bphone\b/);
         else await expect(page.locator('.app')).not.toHaveClass(/\bphone\b/);
-        await page.setViewportSize({ width: size.w, height: size.h });
-        await page.waitForTimeout(400);
+        await resized(page, size.w, size.h);
         await expect(page.locator('.app')).toHaveClass(/\bphone\b/);
         const back = await audit(page);
         results.push({ screen: `rotate-back-${name}`, size: tag(size), audit: back });
@@ -585,7 +587,7 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
   test.skip(process.env.E2E_NO_BASE === '1', 'no base build');
   // Also the phone pages past their landing screen - a team's page, a team's documents
   // folder, and the Settings sections (Skills with a skill picked, Guardrails, Integrations, System).
-  const tap = (sel: string) => async (p: Page) => { await p.locator(sel).first().click(); await p.waitForTimeout(500); };
+  const tap = (sel: string) => async (p: Page) => { await p.locator(sel).first().click(); await settled(p); };
   const deeper: Record<string, ((p: Page) => Promise<void>)[]> = {
     'team-page': [tap('[data-test=team-open-payments]')],
     'documents-folder': [tap('[data-test=documents-team-payments]')],
@@ -606,7 +608,7 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
         // The base build has Settings in the sidebar, this one the gear at the top right.
         if (id) await page.locator(id === 'open-app-settings' ? '[data-test=sidebar] [data-test=open-app-settings], [data-test=settings-gear]' : `[data-test=sidebar] [data-test=${id}]`).first().click();
         for (const step of deeper[name] ?? []) await step(page);
-        await page.waitForTimeout(900);
+        await settled(page);
         await page.screenshot({ path: path.join(SHOTS, `desktop-1280-${name}-${which}.png`) });
         layouts[which] = await page.evaluate(() => {
           // A team's page: its members (.member-cell, an AgentCard + activity row on main, one framed
@@ -756,11 +758,11 @@ for (const size of SE) {
         // Backlog: the list, then the search-and-sort fold open (its fields).
         await nav(page, 'nav-backlog');
         await expect(page.locator('[data-test=backlog-row]').first()).toBeVisible();
-        await page.waitForTimeout(300);
+        await settled(page);
         let m = await measure(page, ['[data-test=backlog-row]'], { head: '[data-test=backlog-phone-head], .backlog-place .head' });
         rec('backlog', m); judge('backlog', m); await shot('backlog');
         const tools = page.locator('[data-test=backlog-tools-toggle]');
-        if (await tools.count()) { await tools.click(); await page.waitForTimeout(200); }
+        if (await tools.count()) { await tools.click(); await settled(page); }
         m = await measure(page, ['[data-test=backlog-row]'], { search: '[data-test=backlog-search]' });
         rec('backlog-tools', m); judge('backlog-tools', m, { at: false }); await shot('backlog-tools');
         if (after) expect.soft(m.inputs.some((i) => /backlog-search/.test(i.what)), `${where('backlog-tools')}: the search field shown`).toBe(true);
@@ -774,7 +776,8 @@ for (const size of SE) {
           await page.locator('[data-test=team-open-payments]').click();
           await expect(page.locator('[data-test=team-title]')).toBeVisible();
           if (sync) await expect(page.locator('[data-test=team-sync]')).toBeVisible();
-          await page.waitForTimeout(500);
+          await expect(page.locator('[data-test=agent-Manager]')).toBeAttached();
+          await settled(page);
           m = await measure(page, ['.tell.row'], { title: '[data-test=team-title]', sync: '[data-test=team-sync]', tell: '.tell.row', member: '[data-test=agent-Manager]' });
           rec(screen, m); judge(screen, m); await shot(screen);
           if (after) expect.soft(m.rows.tell && m.rows.tell.bottom - m.rows.tell.top, `${where(screen)}: the Tell row is one 44 px row`).toBeLessThanOrEqual(56);
@@ -791,12 +794,12 @@ for (const size of SE) {
         // Documents: the root (team folders), a team's folder, and its New file field.
         await nav(page, 'nav-documents');
         await expect(page.locator('[data-test=documents-view]')).toBeVisible();
-        await page.waitForTimeout(400);
+        await settled(page);
         m = await measure(page, ['[data-test^=documents-team-]'], { title: '[data-test=documents-view] h2' });
         rec('documents-root', m); judge('documents-root', m); await shot('documents-root');
         await page.locator('[data-test=documents-team-payments]').click();
         await expect(page.locator('[data-test=docs-browser]')).toBeVisible();
-        await page.waitForTimeout(400);
+        await settled(page);
         const firstDoc = ['[data-test=docs-list] [data-test^="doc-"]:not([data-test^="doc-delete"])', '[data-test=docs-list] li'];
         m = await measure(page, firstDoc, { bar: '[data-test=docs-browser] > .bar' });
         rec('documents-folder', m); judge('documents-folder', m); await shot('documents-folder');
@@ -815,7 +818,7 @@ for (const size of SE) {
           if (after) await page.getByTestId('settings-gear').click();
           else await nav(page, 'open-app-settings');
           await expect(page.locator('[data-test=settings]')).toBeVisible();
-          await page.waitForTimeout(400);
+          await settled(page);
         };
         await openSettings();
         m = await measure(page, ['[data-test=settings] [role=tab]']);
@@ -825,16 +828,17 @@ for (const size of SE) {
           if (!(await tab.isVisible().catch(() => false))) {
             const back = page.locator('[data-test=settings-back]');
             if (await back.isVisible().catch(() => false)) await back.click(); else await openSettings();
-            await page.waitForTimeout(200);
+            await expect(tab).toBeVisible();
+            await settled(page);
           }
           await tab.click();
-          await page.waitForTimeout(700);
+          await settled(page);
           const screen = `settings-${id.replace('open-', '')}`;
           // Where the section opened (the page scroller keeps the last section's scroll, e.g. Guardrails at its bottom),
           // recorded; then measured from its top.
           const openedAt = await page.locator('[data-test=settings]').evaluate((s) => { const t = Math.round(s.scrollTop); s.scrollTop = 0; return t; });
           if (openedAt) rec(`${screen}-opened-scrolled`, await measure(page, []), { openedAt });
-          await page.waitForTimeout(150);
+          await settled(page);
           m = await measure(page, ['[data-test=settings-pane] > section > *:not(.section-head)', '[data-test=settings-pane] > * > *:not(.section-head)', '[data-test=settings-pane] > *'],
             { head: '[data-test=settings] .section-head', back: '[data-test=settings-back]' });
           rec(screen, m); judge(screen, m); await shot(screen);
@@ -847,7 +851,7 @@ for (const size of SE) {
               sc.scrollTop = sc.scrollHeight;
               return { scroller: sc.tagName + '.' + sc.className, scrollTop: Math.round(sc.scrollTop), max: sc.scrollHeight - sc.clientHeight };
             });
-            await page.waitForTimeout(300);
+            await settled(page);
             const back = await page.evaluate(() => {
               const b = document.querySelector('[data-test=settings-back]');
               if (!b) return null;
@@ -866,7 +870,8 @@ for (const size of SE) {
             const skill = page.locator('[data-test=skill-skill-10]');
             await skill.scrollIntoViewIfNeeded();
             await skill.click();
-            await page.waitForTimeout(500);
+            await expect(page.locator('[data-test=skills-pane]')).toBeVisible();
+            await settled(page);
             const pane = await page.locator('[data-test=skills-pane]').evaluate((p) => {
               const r = p.getBoundingClientRect(); const body = p.querySelector('.body')?.getBoundingClientRect();
               return { top: Math.round(r.top), bottom: Math.round(r.bottom), title: p.textContent!.includes('skill-10'), bodyTop: body ? Math.round(body.top) : null };

@@ -9,6 +9,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { answers, createFakeCore } from './phone/fake-core';
 import { ORIGIN, buildRenderer, builtDir } from './phone/server';
+import { settled } from './settle';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
@@ -65,16 +66,18 @@ test('Settings > Skills: rendered markdown and the filter pill, light and dark',
   const theme = (t: string) => page.evaluate((v) => document.documentElement.setAttribute('data-theme', v), t);
   for (const t of ['light', 'dark']) {
     await theme(t);
-    await page.waitForTimeout(150);
+    await settled(page);
     await page.screenshot({ path: path.join(SHOTS, `skills-markdown-${t}.png`) });
   }
   await theme('dark');
   await page.locator('[data-test=skills-filter-builtin]').click();
-  await page.waitForTimeout(150);
+  await expect(page.locator('[data-test=skills-filter-builtin]')).toHaveAttribute('aria-selected', 'true');
+  await settled(page);
   await page.screenshot({ path: path.join(SHOTS, 'skills-filter-builtin-dark.png') });
   await theme('light');
   await page.locator('[data-test=skills-filter-allTeams]').click();
-  await page.waitForTimeout(150);
+  await expect(page.locator('[data-test=skills-filter-allTeams]')).toHaveAttribute('aria-selected', 'true');
+  await settled(page);
   await page.screenshot({ path: path.join(SHOTS, 'skills-filter-allteams-light.png') });
   expect(errors).toEqual([]);
   expect(await page.evaluate(() => (window as any).__x)).toBeUndefined();
