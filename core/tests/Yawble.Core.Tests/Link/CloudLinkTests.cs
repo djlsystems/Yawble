@@ -171,7 +171,7 @@ public class CloudLinkTests
                 Assert.NotNull(RemoteAccess.Refusal("integrations.mcpSave", new JsonObject { ["name"] = "x", ["command"] = "node", [key] = v }, terminals));
             }
         }
-        // a plain local server needs host terminals as before; with them it is fine
+        // a plain local server needs host terminals; with them it is fine
         var local = new JsonObject { ["name"] = "x", ["command"] = "node" };
         Assert.NotNull(RemoteAccess.Refusal("integrations.mcpSave", local, false));
         Assert.Null(RemoteAccess.Refusal("integrations.mcpSave", local, true));
