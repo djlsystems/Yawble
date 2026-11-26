@@ -14,13 +14,13 @@ using Xunit;
 namespace Yawble.Core.Tests.Logs;
 
 /// <summary>
-/// The tester's gap tests of All activity over Marlo's AllActivityTests. End to end through the real UiRpc behind the audited
-/// RpcDispatcher: a team made, its member's trigger saved and run, the team paused and deleted; then All activity's rows,
-/// its newest row, its member/team/app filters. Also: an old id-only row about a deleted thing matches no filter;
-/// org.summary's problems survive a flood of audit rows in the hour; logs.tail and logs.query take app over the wire and
-/// refuse a bad value with bad_params; the per-source Audit view keeps its columns. Test-only.
+/// All activity end to end, through the real UiRpc behind the audited RpcDispatcher: a team made, its member's trigger
+/// saved and run, the team paused and deleted; then All activity's rows, its newest row, its member/team/app filters.
+/// Also: an id-only row about a deleted thing matches no filter; org.summary's problems survive a flood of audit rows
+/// in the hour; logs.tail and logs.query take app over the wire and refuse a bad value with bad_params; the per-source
+/// Audit view keeps its columns. The rules row by row are in AllActivityTests.
 /// </summary>
-public sealed class AllActivityVerifyTests : IAsyncDisposable
+public sealed class AllActivityEndToEndTests : IAsyncDisposable
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static readonly Actor Pat = new(Actor.App, "pat");
