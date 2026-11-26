@@ -121,7 +121,7 @@ describe('agents screen: one list of tiles', () => {
     expect(calls.filter((c) => c.method === 'agents.commandLine').at(-1)!.params).toEqual({ cli: mine.name });
     expect(w.get('[data-test=cmd-headless]').text()).toContain('claude -p <prompt> --mcp-config <workspace>/.yawble/mcp.json');
     expect(w.get('[data-test=cmd-headless]').text()).toContain('YAWBLE_RUN_TOKEN');
-    expect(w.get('[data-test=cmd-interactive]').exists()).toBe(true);
+    expect(w.find('[data-test=cmd-interactive]').exists()).toBe(true);
   });
 
   it('Update asks the core for the CLI\'s own update; a refusal is shown', async () => {

@@ -304,7 +304,7 @@ describe("a member's pane as a narrow tile (320 x 300)", () => {
     const cell = document.createElement('div');
     cell.style.cssText = 'width: 320px; height: 300px; display: grid;';
     document.body.appendChild(cell);
-    const w = mount(MemberPane, { props: { card: card({ state: 'running', queuedInstructions: 3, statusLine: report, lastRunState: 'completed', ...over }, { role: 'a-rather-long-role-name' }) } as any, attachTo: cell, ...stubs });
+    const w = mount(MemberPane, { props: { card: card({ state: 'running', queuedInstructions: 3, statusLine: report, lastRunState: 'completed', ...over }, { role: 'a-rather-long-role-name' as any }) } as any, attachTo: cell, ...stubs });
     mounted.push(w);
     return w;
   };

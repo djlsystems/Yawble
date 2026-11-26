@@ -108,7 +108,7 @@ describe('BusyLabel', () => {
     } });
     expect(w.findComponent(BusyLabel).exists()).toBe(true);
     expect(w.get('[data-test=test-claude]').text()).toBe('Starting…');
-    expect(w.get('[data-test=test-claude] [data-test=btn-spinner]').exists()).toBe(true);
+    expect(w.find('[data-test=test-claude] [data-test=btn-spinner]').exists()).toBe(true);
     expect(w.get('[data-test=terminal-claude]').text()).toBe('Terminal');
   });
 });

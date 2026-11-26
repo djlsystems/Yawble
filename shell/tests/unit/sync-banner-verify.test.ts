@@ -129,7 +129,7 @@ describe('TeamSyncBanner on the real core\'s teams.syncToBase', () => {
   });
 
   it('F4b, origin null: no mark on any row', async () => {
-    const { w } = await syncWith(() => ({ ...real('status-ff-origin'), origin: null }));
+    const { w } = await syncWith(() => ({ ...real<any>('status-ff-origin'), origin: null }));
     expect(marks(w)).toEqual([false, false]);
     expect(w.find('[data-test=team-sync-came-in] [data-test=local-mark]').exists()).toBe(false);
   });

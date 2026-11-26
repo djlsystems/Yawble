@@ -22,7 +22,7 @@ const mounted: { unmount(): void }[] = [];
 afterEach(() => { while (mounted.length) mounted.pop()!.unmount(); });
 
 // The board node as the core sends it after a stop (BoardService.ListAsync + BoardProjector).
-const coreStoppedCard = (status: BoardCard['status'], lane: string): BoardCard => ({
+const coreStoppedCard = (status: BoardCard['status'], lane: BoardCard['lane']): BoardCard => ({
   id: 41, team: 'Alpha', teamId: 1, member: 'stop', item: 'B097', title: 'job stop', body: '', status, lane,
   placed: false, awaitingManager: false, deliverable: 5, createdAt: '2026-11-18T12:00:00Z', updatedAt: '2026-11-18T12:02:00Z', trailCount: 3,
   memberState: { state: 'idle', attention: 'stopped' },

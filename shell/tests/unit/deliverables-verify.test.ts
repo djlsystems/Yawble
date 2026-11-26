@@ -10,7 +10,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DeliverableDetail, DeliverablesListAnswer, YawbleApi } from '../../src/shared/api';
+import type { DeliverableDetail, DeliverablesListAnswer, TeamSummary, YawbleApi } from '../../src/shared/api';
 import DeliverablesView from '../../src/renderer/src/deliverables/DeliverablesView.vue';
 import ItemLink from '../../src/renderer/src/deliverables/ItemLink.vue';
 import { backlogRequest, sortRows, statusTip, timeBar, deliverablesRequest } from '../../src/renderer/src/deliverables/page';
@@ -47,7 +47,7 @@ function fake(list = { all: ALL, open: OPEN }, gets = GETS): Fake {
 }
 async function page(f = fake(), props: Record<string, unknown> = {}) {
   lastFake = f;
-  const w = mount(DeliverablesView, { props: { teams: [{ id: n('web'), name: 'Web' }, { id: n('cloud'), name: 'Cloud' }], api: f.api, pollMs: 600_000, ...props }, attachTo: document.body });
+  const w = mount(DeliverablesView, { props: { teams: [{ id: n('web'), name: 'Web' }, { id: n('cloud'), name: 'Cloud' }] as TeamSummary[], api: f.api, pollMs: 600_000, ...props }, attachTo: document.body });
   await flushPromises();
   return w;
 }
@@ -324,7 +324,7 @@ describe('the filter re-check: F1 stays on the Deliverables table; O2 the defaul
   it('F1: ItemLink without q marks nothing (button, nested span, plain label), as the team tiles and the dialog use it', async () => {
     const item = { label: String(ID.spec), title: 'Deliverables page', archived: false } as any;
     for (const props of [{ item }, { item, nested: true }, { item, backlog: false }]) {
-      const c = mount(ItemLink, { props });
+      const c = mount(ItemLink, { props: props as any });
       expect(c.text()).toBe(String(ID.spec));
       expect(c.find('mark').exists()).toBe(false);
     }

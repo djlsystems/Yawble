@@ -635,7 +635,7 @@ describe('the Code browser on a phone', () => {
   it('the list first (the latest file ready behind it); a file opened is full-screen with ← Files back to the list', async () => {
     screen(Phone);
     const { api } = codeApi();
-    const w = keep(mount(CodeBrowser, { props: { api, team: 'payments', member: 'DeveloperAda', renderMarkdown: (t: string) => md.render(t), tickMs: 0 }, attachTo: document.body }));
+    const w = keep(mount(CodeBrowser, { props: { api: api as any, team: 'payments', member: 'DeveloperAda', renderMarkdown: (t: string) => md.render(t), tickMs: 0 }, attachTo: document.body }));
     await settle();
     expect(shown(w, '[data-test=code-list-pane]')).toBe(true);
     expect(shown(w, '[data-test=code-file-pane]')).toBe(false);
@@ -656,7 +656,7 @@ describe('the Code browser on a phone', () => {
   it('at desktop width: the list and the file side by side, no back controls', async () => {
     screen(Desktop);
     const { api } = codeApi();
-    const w = keep(mount(CodeBrowser, { props: { api, team: 'payments', member: 'DeveloperAda', renderMarkdown: (t: string) => md.render(t), tickMs: 0 }, attachTo: document.body }));
+    const w = keep(mount(CodeBrowser, { props: { api: api as any, team: 'payments', member: 'DeveloperAda', renderMarkdown: (t: string) => md.render(t), tickMs: 0 }, attachTo: document.body }));
     await settle();
     expect(shown(w, '[data-test=code-list-pane]')).toBe(true);
     expect(shown(w, '[data-test=code-file-pane]')).toBe(true);

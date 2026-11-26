@@ -127,7 +127,7 @@ describe('Add member as a workflow member', () => {
     // Settings: types and defaults from the document.
     expect(w.findAll('[data-test=workflow-member-settings] > label').length).toBe(6);
     expect((w.get('[data-test=workflow-setting-folder] input').element as HTMLInputElement).value).toBe('INBOX');
-    expect(w.get('[data-test=workflow-setting-recipients] textarea').exists()).toBe(true);
+    expect(w.find('[data-test=workflow-setting-recipients] textarea').exists()).toBe(true);
     expect((w.get('[data-test=workflow-setting-max] input').element as HTMLInputElement).type).toBe('number');
     expect((w.get('[data-test=workflow-setting-quiet] input').element as HTMLInputElement).type).toBe('checkbox');
     expect(w.findAll('[data-test=workflow-setting-mode] option').map((o) => o.text())).toEqual(['all', 'unread']);

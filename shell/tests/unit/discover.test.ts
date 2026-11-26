@@ -334,7 +334,7 @@ describe('discover checklist', () => {
   });
 
   it('lists every other rule with a Remove button that deletes it and reloads', async () => {
-    let rules = [{ id: 7, teamId: 3, pattern: 'pr*', decision: 'allow' }, { id: 8, teamId: null, pattern: '*--force*', decision: 'deny' }];
+    let rules = [{ id: 7, teamId: 3, pattern: 'pr*', decision: 'allow' as const }, { id: 8, teamId: null, pattern: '*--force*', decision: 'deny' as const }];
     const f = fakeApi({ 'integrations.checklist': () => checklist({ otherRules: rules }), 'integrations.discoverStatus': idle,
       'integrations.deleteRule': (p) => { rules = rules.filter((r) => r.id !== p.id); return { ok: true }; } });
     const w2 = mount(DiscoverChecklist, { props: { api: f.api, cli: 'gh', teams, teamIds: [3] } });

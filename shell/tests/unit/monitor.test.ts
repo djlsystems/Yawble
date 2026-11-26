@@ -320,7 +320,7 @@ describe('the Monitor view', () => {
     expect(headers[0]!.text()).toContain('payments');
     await headers[0]!.trigger('click');
     expect(deliverablesRequest.value).toMatchObject({ teamId: 1 });
-    expect(deliverablesRequest.value?.deliverable).toBeUndefined();
+    expect((deliverablesRequest.value as { deliverable?: number | null } | null)?.deliverable).toBeUndefined();
     expect(w.emitted('openTeam')).toBeUndefined();
     deliverablesRequest.value = null;
     // A replay shows no deliverables (the wall would be faking their history).

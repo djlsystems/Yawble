@@ -150,7 +150,7 @@ describe('NetworkAskCard', () => {
     expect(w.get('[data-test=network-ask-http]').text()).toContain('only https is forwarded, even once the host is allowed');
   });
 
-  it.each([['CONNECT', 'an https refusal'], [null, 'a request_host ask']])('NoHttpHintFor_%s (%s)', (method) => {
+  it.each([['CONNECT', 'an https refusal'], [null, 'a request_host ask']])('NoHttpHintFor_%s (%s)', (method: string | null, _what: string) => {
     const { api } = fakeApi({});
     const w = mount(NetworkAskCard, { props: { ask: ask({ method, reason: method ? null : 'restore packages' }), api } });
     expect(w.find('[data-test=network-ask-http]').exists()).toBe(false);

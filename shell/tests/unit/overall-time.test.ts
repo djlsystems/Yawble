@@ -35,7 +35,7 @@ function fakeApi(access: 'full' | 'read' = 'full', drop: string[] = []): YawbleA
     onEvent: () => () => {},
   } as any;
 }
-const callFake = async (method: string, params?: unknown) => fakeApi().call<any>(method, params);
+const callFake = async (method: string, params?: Record<string, unknown>) => fakeApi().call<any>(method, params);
 
 const openTime = (overallMs: number): ItemTime => ({ createdAt: new Date(Date.now() - overallMs).toISOString(), open: true, overallMs, rebuilt: false, breakdown: [{ category: 'agent-working', ms: overallMs }] });
 const doneTime = (overallMs: number): ItemTime => ({ ...openTime(overallMs), open: false, endedAt: new Date().toISOString(), endedHow: 'done' });

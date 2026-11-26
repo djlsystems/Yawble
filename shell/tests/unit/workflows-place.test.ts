@@ -125,7 +125,7 @@ describe('the Workflows place in the nav', () => {
     expect(w.emitted('go')).toEqual([['workflows']]);
     const rail = mount(Sidebar, { props: { ...props, rail: true, view: 'workflows' } as any });
     expect(rail.get('[data-test=rail-workflows]').classes()).toContain('on');
-    expect(rail.get('[data-test=rail-workflows] svg').exists()).toBe(true);
+    expect(rail.find('[data-test=rail-workflows] svg').exists()).toBe(true);
   });
   it('buildNav has the Workflows place (icon workflows), active on the workflows view, and enabled for a Visitor too', () => {
     const s = { view: 'workflows', conversations: [], teams: [], conversationId: null, teamId: null, slots: null, readOnly: true };

@@ -462,7 +462,7 @@ describe('CompanionPanel', () => {
     const w = mount(CompanionPanel, { props: { api } });
     await flushPromises();
     expect(w.find('[data-test=companion-claude-command]').exists()).toBe(false);
-    expect(w.get('[data-test=companion-no-binary]').exists()).toBe(true);
+    expect(w.find('[data-test=companion-no-binary]').exists()).toBe(true);
     expect(w.find('[data-test=companion-steps]').exists()).toBe(false);
     expect(w.find('[data-test=companion-pair-command]').exists()).toBe(false);
     w.unmount();

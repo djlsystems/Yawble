@@ -187,7 +187,7 @@ describe('Board: a stopped run line reads Stopped in a neutral colour', () => {
   it('status "stopped": Stopped in --state-stopped, with or without the member state', () => {
     expect(StatusLabel.stopped).toBe('Stopped');
     expect(StatusColor.stopped).toBe('var(--status-stopped)'); // styles.css: --status-stopped is var(--state-stopped)
-    for (const card of [boardCard(), boardCard({ memberState: { state: 'running' } }), boardCard({ lane: 'todo' })]) {
+    for (const card of [boardCard(), boardCard({ memberState: { state: 'running', attention: null } }), boardCard({ lane: 'todo' })]) {
       expect(cardStopped(card)).toBe(true);
       expect(cardStatusLook(card)).toEqual({ label: 'Stopped', color: 'var(--state-stopped)', stopped: true });
     }
