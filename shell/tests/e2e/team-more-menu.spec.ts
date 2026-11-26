@@ -55,7 +55,7 @@ test('375 x 812: the open ⋯ menu is on screen, its items line up, and it draws
   await expect(menu).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'team-more-menu-375.png') });
   const m = await menu.evaluate((el) => {
-    const box = (e: Element) => { const b = e.getBoundingClientRect(); return { l: +b.left.toFixed(1), t: +b.top.toFixed(1), r: +b.right.toFixed(1), b: +b.bottom.toFixed(1), w: +b.width.toFixed(1), h: +b.height.toFixed(1) }; };
+    const box = (e: Element | Range) => { const b = e.getBoundingClientRect(); return { l: +b.left.toFixed(1), t: +b.top.toFixed(1), r: +b.right.toFixed(1), b: +b.bottom.toFixed(1), w: +b.width.toFixed(1), h: +b.height.toFixed(1) }; };
     const items = [...el.querySelectorAll('[role=menuitem]')].map((it) => {
       const r = it.getBoundingClientRect();
       const svg = it.querySelector('svg')!;

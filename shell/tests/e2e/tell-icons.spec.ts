@@ -24,7 +24,7 @@ test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recurs
 async function open(browser: Browser, w: number, h: number, theme: 'light' | 'dark') {
   const core = createFakeCore();
   core.setAsks(false);
-  let held: ((out: string) => void) | null = null;
+  let held: (() => void) | null = null;
   let holdTell = false;
   const phone = w < 760;
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, isMobile: phone, hasTouch: phone, deviceScaleFactor: 2, colorScheme: theme });

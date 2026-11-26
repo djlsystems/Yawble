@@ -738,7 +738,7 @@ for (const size of SE) {
           if (id === 'open-global-policy') {
             // Scroll the page's scroller to the bottom: "‹ Settings" still on screen and tappable.
             const r = await page.locator('[data-test=settings-pane]').evaluate((pane) => {
-              let s: HTMLElement | null = pane;
+              let s: HTMLElement | null = pane as HTMLElement;
               while (s && !(/(auto|scroll)/.test(getComputedStyle(s).overflowY) && s.scrollHeight > s.clientHeight + 1)) s = s.parentElement;
               const sc = s ?? document.scrollingElement as HTMLElement;
               sc.scrollTop = sc.scrollHeight;

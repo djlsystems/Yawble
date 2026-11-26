@@ -391,7 +391,7 @@ for (const s of SIZES) {
         expect(count(site.method), 'Escape: no call').toBe(before);
         await site.kept(page);
         const back = await page.evaluate(() => document.activeElement?.getAttribute('data-test') ?? document.activeElement?.tagName ?? null);
-        expect.soft(await focusBack.evaluateAll((els) => els.includes(document.activeElement as Element)), `Escape: the focus is back on the opener (it is on ${back})`).toBe(true);
+        expect.soft(await focusBack.evaluateAll((els) => els.includes(document.activeElement as HTMLElement)), `Escape: the focus is back on the opener (it is on ${back})`).toBe(true);
 
         // Cancel
         await ask();
@@ -401,7 +401,7 @@ for (const s of SIZES) {
         await page.waitForTimeout(300); // nothing may be sent: the time a stray call would take to reach the fake core
         expect(count(site.method), 'Cancel: no call').toBe(before);
         await site.kept(page);
-        expect.soft(await focusBack.evaluateAll((els) => els.includes(document.activeElement as Element)), 'Cancel: the focus is back on the opener').toBe(true);
+        expect.soft(await focusBack.evaluateAll((els) => els.includes(document.activeElement as HTMLElement)), 'Cancel: the focus is back on the opener').toBe(true);
 
         // The backdrop
         await ask();

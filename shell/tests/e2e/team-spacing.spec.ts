@@ -675,7 +675,7 @@ test('the spacing setting: the cog shows Team spacing (0.25-3, step 0.05, defaul
   const zPinned = zoomOf(await freshFrame(page));
   await sliderSet(page, 3);
   f = await settle(page, 3);
-  r.pinned3 = { zoom: +zoomOf(f).toFixed(3), zoomBefore: +zPinned.toFixed(3), hubs: await hubsOnScreen(page, f, 3), ...measure(f, 3) };
+  r.pinned3 = { zoomBefore: +zPinned.toFixed(3), hubs: await hubsOnScreen(page, f, 3), ...measure(f, 3) };
   await snap(page, path.join(SPACING_DIR, 'screens', 'spacing-3x-pinned-1280-dark.png'));
   await page.locator('[data-test=monitor-fit]').click();
   await still(page);
