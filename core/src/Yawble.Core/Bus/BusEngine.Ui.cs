@@ -193,10 +193,10 @@ public sealed partial class BusEngine
         {
             var queue = _store.Queue();
             var unstarted = _store.Pending(started: false);
-            var runs = _store.Runs();
             var held = _store.HeldTeams();
             TidyLease(_store.Clock.GetUtcNow());
             var rows = _store.MemberRows(teamId);
+            var lastRuns = _store.LastRuns(teamId);
             // A member with an open needs_decision shows "Waiting on you" (and the decision's id), whatever it said after.
             var asking = rows.Count == 0 ? new Dictionary<string, Message>(StringComparer.OrdinalIgnoreCase) : OpenDecisionByMember(rows[0].Team);
             return rows.Select(m =>
@@ -205,7 +205,7 @@ public sealed partial class BusEngine
                 var active = _active.Values.FirstOrDefault(a => a.Context.Member.Id == m.Id);
                 var position = RunScheduler.PositionOf(queue, q => q.MemberId == m.Id);
                 var qualified = $"{m.Team}/{m.Name}";
-                var last = runs.Where(r => r.MemberId == m.Id).MaxBy(r => r.Id);
+                var last = lastRuns.GetValueOrDefault(m.Id);
                 var decision = asking.GetValueOrDefault(qualified);
                 var mine = unstarted.Where(p => string.Equals(p.Subscriber, qualified, StringComparison.OrdinalIgnoreCase)).ToList();
                 var (waitState, waitsFor) = mine.Count == 0 ? (null, null) : WaitOf(m.Id, m.TeamId, mine, queue, held);

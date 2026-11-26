@@ -151,6 +151,7 @@ public sealed partial class BusStore
             ("$type", MessageTypes.NeedsDecision), ("$prefix", team.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "/%"),
             ("$person", MessageTypes.PersonSource), ("$instr", MessageTypes.InstructionPrefix));
 
-    /// <summary>The most recent ended run of a member (its card shows the reason: completed, failed, stopped...).</summary>
-    public RunRow? LastRun(long memberId) => Runs().Where(r => r.MemberId == memberId).MaxBy(r => r.Id);
+    /// <summary>A member's newest run (its card shows the reason: completed, failed, stopped...), found through ix_runs_member.</summary>
+    public RunRow? LastRun(long memberId) =>
+        ReadRuns("WHERE member_id = $m ORDER BY id DESC LIMIT 1", ("$m", memberId)).FirstOrDefault();
 }

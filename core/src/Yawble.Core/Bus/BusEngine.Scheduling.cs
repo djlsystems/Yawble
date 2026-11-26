@@ -250,7 +250,7 @@ public sealed partial class BusEngine
             var members = _store.AllMembers().ToDictionary(m => m.Id);
 
             var live = new List<SlotHolder>();
-            var runRows = _store.Runs().ToDictionary(r => r.Id);
+            var runRows = _store.RunsById(_active.Values.Select(a => a.Context.RunId)).ToDictionary(r => r.Id);
             foreach (var a in _active.Values.OrderBy(a => a.Context.RunId))
             {
                 var row = runRows.GetValueOrDefault(a.Context.RunId);
@@ -273,23 +273,53 @@ public sealed partial class BusEngine
                     SchedulerSnapshot.QueuedLabel(q.Kind, i + 1, queue.Count));
             }).ToArray();
 
-            var waits = runRows.Values.Select(r => (MemberId: r.MemberId, Wait: Ms(r.QueuedAt, r.StartedAt)))
-                .Concat(_store.Sessions().Select(s => (MemberId: s.MemberId, Wait: Ms(s.QueuedAt, s.StartedAt))))
-                .Where(w => members.ContainsKey(w.MemberId))
-                .GroupBy(w => members[w.MemberId].Team, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.Select(w => w.Wait).ToArray(), StringComparer.OrdinalIgnoreCase);
+            // Per team: how many runs and sessions it had, their summed wait and the longest one.
+            var waits = new Dictionary<string, (int Count, long Sum, long Max)>(StringComparer.OrdinalIgnoreCase);
+            void Count(long memberId, int count, long sum, long max)
+            {
+                if (!members.TryGetValue(memberId, out var m)) return;
+                var w = waits.GetValueOrDefault(m.Team);
+                waits[m.Team] = (w.Count + count, w.Sum + sum, Math.Max(w.Max, max));
+            }
+            foreach (var (memberId, w) in RunWaitTotals()) Count(memberId, w.Count, w.Sum, w.Max);
+            foreach (var s in _store.Sessions())
+            {
+                var wait = Ms(s.QueuedAt, s.StartedAt);
+                Count(s.MemberId, 1, wait, wait);
+            }
             var teams = members.Values.Select(m => m.Team).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase)
                 .Select(team =>
                 {
-                    var w = waits.GetValueOrDefault(team) ?? [];
+                    var w = waits.GetValueOrDefault(team);
                     return new TeamLoad(team,
                         live.Count(l => string.Equals(l.Team, team, StringComparison.OrdinalIgnoreCase)),
                         queued.Count(q => string.Equals(q.Team, team, StringComparison.OrdinalIgnoreCase)),
-                        w.Length, w.Sum(), w.Length == 0 ? 0 : w.Max());
+                        w.Count, w.Sum, w.Max);
                 }).ToArray();
 
             return new SchedulerSnapshot(live.Count, limit, queued.Length, live, queued, teams);
         }, ct);
+
+    // Each member's run waits so far (count, sum and longest, in ms) and the newest run they include. Under the gate.
+    private readonly Dictionary<long, (int Count, long Sum, long Max)> _runWaits = [];
+    private long _runWaitsThrough;
+
+    /// <summary>
+    /// Under the gate. Every member's run-wait totals over the whole run history. A run's queue and start times never
+    /// change after it is admitted and run ids only grow, so the totals are kept and each call adds only the runs
+    /// made since the last one: the history is read once per process, not once per snapshot.
+    /// </summary>
+    private IReadOnlyDictionary<long, (int Count, long Sum, long Max)> RunWaitTotals()
+    {
+        foreach (var r in _store.RunWaitsAfter(_runWaitsThrough))
+        {
+            var wait = Ms(r.QueuedAt, r.StartedAt);
+            var w = _runWaits.GetValueOrDefault(r.MemberId);
+            _runWaits[r.MemberId] = (w.Count + 1, w.Sum + wait, Math.Max(w.Max, wait));
+            _runWaitsThrough = r.Id;
+        }
+        return _runWaits;
+    }
 
     private static DateTimeOffset Parse(string iso) =>
         DateTimeOffset.Parse(iso, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
