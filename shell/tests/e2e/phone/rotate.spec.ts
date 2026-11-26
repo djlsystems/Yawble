@@ -1,6 +1,6 @@
 // The remote view (remote.html, the fake core of phone-remote.spec.ts) follows a rotation in WebKit with the
 // iPad and iPhone device descriptors: iPad landscape -> portrait, phone portrait -> landscape, rotated mid-test by
-// setViewportSize, on the home page, a team page (#team=1) and a deliverable (#deliverable=10). After the rotation: no
+// setViewportSize, on the home page, a team page (#team=1) and a deliverable (#deliverable=10: the Deliverables page with its pane open). After the rotation: no
 // horizontal overflow, the app root is exactly as tall as the visible viewport (no gap, nothing cut off at the bottom),
 // and the layout (the phone's drawer below 760 px, the desktop sidebar from 760 px) is the one for the new width.
 //
@@ -32,7 +32,7 @@ const ROTATIONS = [
 const PLACES = [
   { place: 'home', hash: '', ready: '.app' },
   { place: 'team page', hash: '#team=1', ready: '[data-test=agent-DeveloperAda]' },
-  { place: 'deliverable', hash: '#deliverable=10', ready: '[data-test=deliverable-10]' },
+  { place: 'deliverable', hash: '#deliverable=10', ready: '[data-test=deliverable-pane][data-id="10"]' },
 ] as const;
 
 async function measure(page: Page) {
