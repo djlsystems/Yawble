@@ -32,7 +32,8 @@ public sealed record LinkSettings(
 ///   ({type:"call", session, id, method, params, user, access}); the core answers it through the same dispatcher as the
 ///   desktop window, after <see cref="RemoteAccess"/>. "access" is the viewer's: "full", or "read" (a workgroup Visitor), who may only
 ///   call reads; a call with any other value, or none, is refused. While anyone is viewing, the core's pushes (terminal output,
-///   state) go up as {type:"event"}.</item>
+///   state) go up as {type:"event", event, data, access}: "access" is the least access a viewer needs to receive that
+///   push (<see cref="PushAccess"/>), "read" or "full", for the site to deliver it by.</item>
 /// <item>Every remote call that changes something is written to cloud-link-audit.log with who made it.</item>
 /// </list>
 /// </summary>
@@ -414,9 +415,7 @@ public sealed class CloudLink : IAsyncDisposable
         using var subscription = _events.Subscribe(async message =>
         {
             if (Volatile.Read(ref watching) == 0 || ws.State != WebSocketState.Open) return;
-            if (!Forwards(message, ShowCode)) return;
-            message["type"] = "event";
-            await Send(message).ConfigureAwait(false);
+            if (PushMessage(message, ShowCode) is { } push) await Send(push).ConfigureAwait(false);
         });
         try
         {
@@ -644,6 +643,18 @@ public sealed class CloudLink : IAsyncDisposable
         && (message["event"]?.GetValue<string>()?.StartsWith("code.", StringComparison.Ordinal) != true
             || (showCode && (message["data"] as JsonObject)?["cloud"] is JsonValue cloud && cloud.TryGetValue<bool>(out var up) && up))
         && !((message["data"] as JsonObject)?["channel"] is JsonValue v && v.TryGetValue<string>(out var channel) && RemoteAccess.IsWindowOnlyChannel(channel));
+
+    /// <summary>
+    /// A push as it goes up to the site, or null when it stays on this computer (<see cref="Forwards(JsonObject, bool)"/>):
+    /// the message marked {type:"event"} and with the least access a viewer needs to receive it (<see cref="PushAccess"/>).
+    /// </summary>
+    internal static JsonObject? PushMessage(JsonObject message, bool showCode = true)
+    {
+        if (!Forwards(message, showCode)) return null;
+        message["type"] = "event";
+        message[PushAccess.Field] = PushAccess.Of((message["event"] as JsonValue)?.TryGetValue<string>(out var name) == true ? name : null);
+        return message;
+    }
 
     /// <summary>The site's version from its welcome message: a short string, or null when missing or not a string.</summary>
     internal static string? WelcomeVersion(JsonObject message) =>

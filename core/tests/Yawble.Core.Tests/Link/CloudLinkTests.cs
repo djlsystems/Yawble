@@ -337,6 +337,7 @@ public class CloudLinkTests
         });
         Assert.False(sawCompanion);
         Assert.Equal("member:1", pushed["data"]!["channel"]!.GetValue<string>());
+        Assert.Equal("full", pushed["access"]!.GetValue<string>()); // terminal output is for full viewers only
 
         var audit = await File.ReadAllLinesAsync(link.AuditFile, Ct);
         Assert.Contains(audit, l => l.Contains("person@example.com\tteams.create\tdone"));

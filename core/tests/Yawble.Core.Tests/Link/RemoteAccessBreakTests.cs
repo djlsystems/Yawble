@@ -268,7 +268,7 @@ public class RemoteAccessBreakTests
         await fx.AnswerAsync(fx.Call("visitor", 1, "app.overview", null, "read"));
         await fx.AnswerAsync(fx.Call("visitor", 2, "board.move", null, "read"));
         Assert.Equal(RemoteAccess.Read, fx.Link.SessionAccess("visitor"));
-        // The push filter takes no access at all: a read session's pushes are the same as everyone's.
+        // Whether a push goes up does not depend on who is viewing: each push says the least access that receives it instead.
         Assert.Equal(before, pushes.Select(p => CloudLink.Forwards(p)).ToArray());
         Assert.Equal(before, pushes.Select(p => CloudLink.Forwards(p, showCode: true)).ToArray());
     }
