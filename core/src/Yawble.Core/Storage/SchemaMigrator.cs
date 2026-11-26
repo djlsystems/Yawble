@@ -31,8 +31,7 @@ public static class SchemaMigrator
     {
         var dataSource = new SqliteConnectionStringBuilder(connectionString).DataSource;
         var existed = !string.IsNullOrEmpty(dataSource) && dataSource != ":memory:" && File.Exists(dataSource) && new FileInfo(dataSource).Length > 0;
-        using var connection = new SqliteConnection(connectionString);
-        connection.Open();
+        using var connection = Db.OpenBare(connectionString);
         Execute(connection, null, "PRAGMA journal_mode=WAL;");
         Execute(connection, null, "PRAGMA foreign_keys=ON;");
         Execute(connection, null,

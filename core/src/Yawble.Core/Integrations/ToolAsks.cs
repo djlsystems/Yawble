@@ -833,8 +833,7 @@ public sealed class ToolAskService
 
     private SqliteConnection Open()
     {
-        var c = new SqliteConnection(_cs);
-        c.Open();
+        var c = Storage.Db.Open(_cs);
         return c;
     }
 

@@ -30,9 +30,7 @@ public sealed partial class DiscoverStore(string connectionString, TimeProvider 
 
     public SqliteConnection Open()
     {
-        var c = new SqliteConnection(connectionString);
-        c.Open();
-        Run(c, null, "PRAGMA foreign_keys=ON;");
+        var c = Storage.Db.Open(connectionString);
         return c;
     }
 

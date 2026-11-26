@@ -187,11 +187,7 @@ public sealed class HostTaskStore(string connectionString, TimeProvider clock)
 
     private SqliteConnection Open()
     {
-        var c = new SqliteConnection(connectionString);
-        c.Open();
-        using var fk = c.CreateCommand();
-        fk.CommandText = "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;";
-        fk.ExecuteNonQuery();
+        var c = Storage.Db.Open(connectionString);
         return c;
     }
 

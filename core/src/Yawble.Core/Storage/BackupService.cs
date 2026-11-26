@@ -86,8 +86,7 @@ public sealed class BackupService
         _gate.Wait();
         try
         {
-            using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            using var connection = Db.Open(_connectionString);
             return BackupLocked(connection, reason);
         }
         finally { _gate.Release(); }
@@ -179,8 +178,7 @@ public sealed class BackupService
     {
         try
         {
-            using var c = new SqliteConnection(_connectionString);
-            c.Open();
+            using var c = Db.Open(_connectionString);
             using var cmd = c.CreateCommand();
             cmd.CommandText = "SELECT value FROM app_meta WHERE key = $k;";
             cmd.Parameters.AddWithValue("$k", KeepDailySetting);
@@ -193,8 +191,7 @@ public sealed class BackupService
     public void SetKeepDaily(int count)
     {
         if (count < 1 || count > 365) throw new ArgumentOutOfRangeException(nameof(count), "keep between 1 and 365 daily backups");
-        using var c = new SqliteConnection(_connectionString);
-        c.Open();
+        using var c = Db.Open(_connectionString);
         using var cmd = c.CreateCommand();
         cmd.CommandText = "INSERT INTO app_meta (key, value) VALUES ($k, $v) ON CONFLICT(key) DO UPDATE SET value = $v;";
         cmd.Parameters.AddWithValue("$k", KeepDailySetting);
@@ -289,8 +286,7 @@ public sealed class BackupService
 
     private static void CheckIntact(string file, string label)
     {
-        using var check = new SqliteConnection($"Data Source={file};Mode=ReadOnly;Pooling=False");
-        check.Open();
+        using var check = Db.OpenBare($"Data Source={file};Mode=ReadOnly;Pooling=False");
         using var cmd = check.CreateCommand();
         cmd.CommandText = "PRAGMA quick_check;";
         if ((cmd.ExecuteScalar() as string) != "ok") throw new InvalidOperationException($"{label} is damaged; the current database was left alone");
@@ -327,8 +323,7 @@ public sealed class BackupService
             {
                 try
                 {
-                    using var c = new SqliteConnection(_connectionString);
-                    c.Open();
+                    using var c = Db.OpenBare(_connectionString);
                     using var cmd = c.CreateCommand();
                     cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
                     cmd.ExecuteNonQuery();

@@ -30,8 +30,7 @@ public static class BackupConnections
     {
         try
         {
-            using var c = new SqliteConnection(connectionString);
-            c.Open();
+            using var c = Db.Open(connectionString);
             using var cmd = c.CreateCommand();
             cmd.CommandText = "SELECT id, name, kind FROM connections ORDER BY id;";
             using var r = cmd.ExecuteReader();

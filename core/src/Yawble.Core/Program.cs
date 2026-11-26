@@ -529,6 +529,8 @@ try
 catch (OperationCanceledException)
 {
 }
+// A clean stop: the query planner's statistics are refreshed for the next start.
+Db.Optimize($"Data Source={dbPath}", line => Console.Error.WriteLine(line));
 return 0;
 
 /// <summary>Adapts the backup service's list to the doctor's lister seam.</summary>

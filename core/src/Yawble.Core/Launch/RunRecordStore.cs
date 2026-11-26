@@ -127,8 +127,7 @@ public sealed class RunRecordStore(string connectionString, TimeProvider? clock 
 
     private SqliteConnection Open()
     {
-        var c = new SqliteConnection(connectionString);
-        c.Open();
+        var c = Storage.Db.Open(connectionString);
         return c;
     }
 

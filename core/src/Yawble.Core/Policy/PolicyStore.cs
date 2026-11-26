@@ -359,8 +359,7 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
 
     private SqliteConnection Open()
     {
-        var c = new SqliteConnection(connectionString);
-        c.Open();
+        var c = Storage.Db.Open(connectionString);
         return c;
     }
 

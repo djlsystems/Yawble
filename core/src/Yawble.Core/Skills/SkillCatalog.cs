@@ -177,8 +177,7 @@ public sealed partial class SkillCatalog(string connectionString)
 
     private SqliteConnection Open()
     {
-        var c = new SqliteConnection(connectionString);
-        c.Open();
+        var c = Storage.Db.Open(connectionString);
         return c;
     }
 

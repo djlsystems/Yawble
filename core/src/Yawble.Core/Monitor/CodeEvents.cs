@@ -81,8 +81,7 @@ public sealed class CodeEvents(string connectionString, TimeProvider? clock = nu
     /// <summary>Stores the events; one already stored (same kind, team, branch and sha) is skipped. Returns how many were new.</summary>
     public int Add(IEnumerable<CodeEvent> events)
     {
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.Open(connectionString);
         using var tx = c.BeginTransaction();
         var added = 0;
         var now = Text(_clock.GetUtcNow());
@@ -122,8 +121,7 @@ public sealed class CodeEvents(string connectionString, TimeProvider? clock = nu
     public IReadOnlyList<CodeEvent> Read(string? team = null, DateTimeOffset? since = null, DateTimeOffset? until = null, long after = 0, int limit = 2000)
     {
         limit = Math.Clamp(limit, 1, MaxLimit);
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.Open(connectionString);
         using var cmd = c.CreateCommand();
         var where = new List<string> { "id > $after", "kind <> '" + CodeEvent.BranchDeleted + "'" };
         cmd.Parameters.AddWithValue("$after", after);

@@ -979,11 +979,7 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
 
     private SqliteConnection Open()
     {
-        var c = new SqliteConnection(connectionString);
-        c.Open();
-        using var fk = c.CreateCommand();
-        fk.CommandText = "PRAGMA foreign_keys=ON;";
-        fk.ExecuteNonQuery();
+        var c = Storage.Db.Open(connectionString);
         return c;
     }
 

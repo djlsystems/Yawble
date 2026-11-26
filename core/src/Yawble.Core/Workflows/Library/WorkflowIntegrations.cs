@@ -66,8 +66,7 @@ public sealed class IntegrationWorkflowDirectory(string connectionString, Task<I
 {
     public IReadOnlyList<WorkflowIntegrationInfo> Integrations()
     {
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.Open(connectionString);
         var list = new List<WorkflowIntegrationInfo>();
         list.AddRange(Read(c, "SELECT id, name, enabled_all FROM email_integrations ORDER BY name COLLATE NOCASE;",
             "SELECT team_id FROM email_integration_teams WHERE email_id = $id ORDER BY team_id;", "email"));

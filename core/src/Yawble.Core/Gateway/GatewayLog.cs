@@ -205,8 +205,7 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
         long id;
         lock (_lock)
         {
-            using var connection = new SqliteConnection(connectionString);
-            connection.Open();
+            using var connection = Storage.Db.OpenLog(connectionString);
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO gateway_events (run_id, member, at, kind, guardrail, vhost, method, target, status, detail, count)
@@ -235,8 +234,7 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
     {
         lock (_lock)
         {
-            using var connection = new SqliteConnection(connectionString);
-            connection.Open();
+            using var connection = Storage.Db.OpenLog(connectionString);
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "UPDATE gateway_events SET count = count + 1 WHERE id = $id;";
             cmd.Parameters.AddWithValue("$id", id);
@@ -249,8 +247,7 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
     {
         lock (_lock)
         {
-            using var connection = new SqliteConnection(connectionString);
-            connection.Open();
+            using var connection = Storage.Db.OpenLog(connectionString);
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO usage_events (at, run_key, run_number, member, vhost, path, status, model, input_tokens, output_tokens,
@@ -276,8 +273,7 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
     /// <summary>The events of one run (or all, when null), oldest first.</summary>
     public IReadOnlyList<GatewayEvent> Read(long? runId = null)
     {
-        using var connection = new SqliteConnection(connectionString);
-        connection.Open();
+        using var connection = Storage.Db.OpenLog(connectionString);
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT run_id, member, at, kind, guardrail, vhost, method, target, status, detail, count FROM gateway_events"
             + (runId is null ? "" : " WHERE run_id = $run") + " ORDER BY id;";

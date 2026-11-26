@@ -524,13 +524,17 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         return gone.Count;
     }
 
-    /// <summary>Sweeps now, then once a day, until <paramref name="ct"/> ends.</summary>
+    /// <summary>
+    /// Sweeps now, then once a day, until <paramref name="ct"/> ends. After each sweep the query planner's statistics
+    /// are refreshed, so its plans follow the tables as they grow and shrink.
+    /// </summary>
     public async Task RunDailyAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
             try { Sweep(); }
             catch (Exception e) when (e is SqliteException or IOException) { log?.Invoke($"Logs: the daily sweep failed: {e.Message}"); }
+            Storage.Db.Optimize(connectionString, log);
             try { await Task.Delay(TimeSpan.FromDays(1), _clock, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
         }
@@ -540,8 +544,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
 
     private SqliteConnection Open()
     {
-        var c = new SqliteConnection(connectionString);
-        c.Open();
+        var c = Storage.Db.OpenLog(connectionString);
         LogSources.AddFunctions(c);
         return c;
     }

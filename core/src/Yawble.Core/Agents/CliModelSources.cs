@@ -321,8 +321,7 @@ public sealed class SqliteModelsUsed(string connectionString, TimeProvider? cloc
 
     public IReadOnlyList<string> Used(AgentCli cli, TimeSpan within)
     {
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.Open(connectionString);
         using var cmd = c.CreateCommand();
         cmd.CommandText = """
             SELECT u.model FROM usage_events u JOIN run_records r ON r.run_key = u.run_key

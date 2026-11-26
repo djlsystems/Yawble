@@ -35,8 +35,7 @@ public sealed class TranscriptStore(string dataDir, string connectionString, Tim
 
     public TranscriptInfo? Find(long runId)
     {
-        using var connection = new SqliteConnection(connectionString);
-        connection.Open();
+        using var connection = Storage.Db.OpenLog(connectionString);
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT run_id, member, path, started_at, ended_at, bytes FROM transcripts WHERE run_id = $r;";
         cmd.Parameters.AddWithValue("$r", runId);
@@ -65,8 +64,7 @@ public sealed class TranscriptStore(string dataDir, string connectionString, Tim
 
     private void Exec(string sql, params (string Name, object Value)[] args)
     {
-        using var connection = new SqliteConnection(connectionString);
-        connection.Open();
+        using var connection = Storage.Db.OpenLog(connectionString);
         using var cmd = connection.CreateCommand();
         cmd.CommandText = sql;
         foreach (var (name, value) in args) cmd.Parameters.AddWithValue(name, value);
