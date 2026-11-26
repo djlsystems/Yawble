@@ -5,12 +5,10 @@ using Yawble.Core.Bus;
 namespace Yawble.Core.Agents;
 
 /// <summary>
-/// The model a member pane names, and where the name comes from. Source <c>member</c> / <c>agent</c> / <c>settings</c> (the
-/// model the person's own CLI settings name): the model a run is launched with (<see cref="AgentModels.Resolve(string?, string?, Policy.AgentCli, ICliModelSettings?)"/>,
-/// the same order). Source <c>observed</c>: the CLI picks its own
-/// model, and this is the one the member's last run used most (the gateway's usage_events, by output tokens, so a CLI's
-/// small side-task model does not win); <see cref="At"/> is that run's last request. Source <c>cli</c>: the CLI's own
-/// default and no run reported a model yet; <see cref="Model"/> is empty.
+/// The model a member pane names, and where the name comes from. Source <c>member</c>, <c>agent</c> or <c>settings</c>:
+/// the model a run is launched with (<see cref="AgentModels.Resolve(string?, string?, Policy.AgentCli, ICliModelSettings?)"/>).
+/// Source <c>observed</c>: the CLI picks its own model, and this is the one the member's last run used most (by output
+/// tokens); <see cref="At"/> is that run's last request. Source <c>cli</c>: no run reported a model yet; <see cref="Model"/> is empty.
 /// </summary>
 public sealed record MemberModel(string Model, string Source, string? At = null);
 

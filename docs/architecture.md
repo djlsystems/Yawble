@@ -138,6 +138,18 @@ native library.
   `com.apple.system.opendirectoryd.libinfo` (user and group lookups). SecurityServer serves only keychains whose files
   the run can read, and `~/Library/Keychains` is always denied (the invariants require it), so no login-keychain item
   reaches a run; the data-protection keychain service stays closed.
+- **Linux name lookups.** The sandbox binds `/run/systemd/resolve`, `/run/NetworkManager` and `/run/resolvconf`
+  read-only so that a symlinked `/etc/resolv.conf` resolves. A read-only bind does not stop a connect on a socket, and
+  with `hosts: ... resolve` in `nsswitch.conf` a lookup asks systemd-resolved over its socket, which answers from the
+  host without the gateway seeing it. The system bus, Avahi's socket and nscd's socket are the same kind of path.
+  Every such path that is on the host is an implicit denial in every Linux request (`LinuxResolverMasks`), which the
+  sandbox turns into a mask: an empty tmpfs over a folder, `/dev/null` over a file. With `/etc/nsswitch.conf` masked,
+  glibc uses its built-in `hosts: dns files` and loads no lookup module; with `/etc/resolv.conf` masked it asks
+  `127.0.0.1:53`, the sandbox's own loopback. Plain DNS to any nameserver is closed by the proxy-only firewall, and the
+  guardrail check proves it. One cost: with `nsswitch.conf` empty, users are looked up in `/etc/passwd` only, so a user
+  who exists only in sssd or LDAP has no passwd entry inside (`id -un` prints the number). The launcher writes no
+  passwd file: the request can only grant a host path at its own place or mask it, and `passwd: sss` would reopen a
+  host route through sssd's socket. `HOME` is set, git takes its identity from config, and nothing inside logs in.
 - **macOS run temp folder.** Each macOS run gets its own folder, `<DARWIN_USER_TEMP_DIR>yr-<8 hex>` (the hex is from
   the SHA-256 of the run id). It is granted read-write to that run only, which also lets a Unix socket bind in it.
   `TMPDIR` points at it and `TMPPREFIX` is `<folder>/zsh`; `CLAUDE_CODE_TMPDIR` stays the member's `tmp/`. The point is
