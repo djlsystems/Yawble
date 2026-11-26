@@ -122,9 +122,15 @@ internal sealed class ScriptedRunner : IAgentRunner
 
 internal static class Wait
 {
+    /// <summary>
+    /// How long a wait lasts when the caller gives no timeout. A passing wait ends as soon as its condition holds,
+    /// so the length costs only a failing test; it is long enough for a busy machine.
+    /// </summary>
+    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
+
     public static async Task UntilAsync(Func<Task<bool>> condition, string what, TimeSpan? timeout = null)
     {
-        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(20));
+        var deadline = DateTime.UtcNow + (timeout ?? DefaultTimeout);
         while (!await condition())
         {
             if (DateTime.UtcNow > deadline) Assert.Fail($"timed out waiting for: {what}");

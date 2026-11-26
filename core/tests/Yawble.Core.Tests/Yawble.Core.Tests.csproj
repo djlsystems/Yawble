@@ -11,6 +11,11 @@
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Runner settings: test classes run on half the logical processors (the suite is bound by disk and process
+         starts, and shares the machine with the running app), and a test that runs over 30 seconds is named as a
+         "[Long Running Test]" diagnostic message: in the diagnostic log under dotnet test (the "diagnostic" option; see the README),
+         on the console when the test program is started directly. -->
+    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- Golden files: the exact sandbox requests the compiler must produce (Policy/GoldenRequestTests.cs). -->
     <None Include="Golden/*.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- Discover: captured/recorded CLI help (cli/version/path_words.txt) the parser and the walker are tested on. -->

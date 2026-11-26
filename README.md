@@ -166,6 +166,10 @@ dotnet test --project core/tests/Yawble.Core.Tests -- --report-trx --report-trx-
 pwsh scripts/test-times.ps1 ~/yawble-runs/core.trx
 ```
 
+The core tests run on half the logical processors and name every test that runs over 30 seconds as a
+`[Long Running Test]` line in the diagnostic log (`-- --diagnostic --diagnostic-output-directory ~/yawble-runs`);
+both are set in `core/tests/Yawble.Core.Tests/xunit.runner.json`.
+
 Tests that start real sandboxes skip themselves on a host whose sandbox backend is missing. Agent runs in tests use
 stand-in CLIs and fake model servers. The tests that check the CLIs installed on the machine (trait
 `Category=HostCli`) assert only the CLIs that `YAWBLE_HOSTCLI_EXPECT` lists, e.g. `claude:npm grok:native`.
