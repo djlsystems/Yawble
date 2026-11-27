@@ -10,6 +10,7 @@ import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
 import { useKeyboardInset, usePhone } from '../phone';
+import { NEW_CHAT_DRAFT } from '../conciergeDrafts';
 
 // The Concierge (the app's home): a new chat (a greeting and the message box) or an open conversation. Each message
 // is answered by one headless run of the chosen agent, which sees every team and acts through its tools.
@@ -215,7 +216,7 @@ watch(() => props.defaultCli, (c) => { if (!props.conversationId) cli.value = c;
       <h1><img class="mark" :src="mark" alt="" data-test="concierge-mark" />{{ greeting }}</h1>
       <p class="sub">What should your teams work on?</p>
       <Composer ref="composer" v-model:cli="cli" :team-id="teamId" :teams="teams" :agents="agents" :agents-loaded="agentsLoaded" :running="false" autofocus
-        @update:team-id="changeTeam" @send="send" />
+        :draft-key="NEW_CHAT_DRAFT" @update:team-id="changeTeam" @send="send" />
       <div class="suggest">
         <button v-for="s in suggestions" :key="s" class="chip-btn" data-test="concierge-suggestion" @click="composer?.set(s)">{{ s }}</button>
       </div>
@@ -246,7 +247,7 @@ watch(() => props.defaultCli, (c) => { if (!props.conversationId) cli.value = c;
           </span>
         </div>
         <Composer v-model:cli="cli" :team-id="teamId" :teams="teams" :agents="agents" :agents-loaded="agentsLoaded" :running="running" :stopping="work.is('stop')" placeholder="Reply to the Concierge…" autofocus
-          :note="phone ? hint : undefined" @update:team-id="changeTeam" @send="send" @stop="stop" @pickers="pickersOpen = $event" />
+          :draft-key="conversationId ?? NEW_CHAT_DRAFT" :note="phone ? hint : undefined" @update:team-id="changeTeam" @send="send" @stop="stop" @pickers="pickersOpen = $event" />
         <!-- On a phone the note folds away with the composer's pickers: the thread keeps those lines. -->
         <p v-if="!phone" class="hint" data-test="concierge-hint">{{ hint }}</p>
       </div>

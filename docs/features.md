@@ -388,6 +388,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 
 - The Concierge is a chat with an agent that knows every team on this computer and acts for you.
 - Conversations are kept. Each reply is one sandboxed run of the conversation's agent CLI.
+- Text typed but not sent stays in the message box while you look at another page, one draft per conversation,
+  until the app closes. **Clear**, or Esc pressed twice, empties the box.
 - A new conversation starts on the default agent from Settings > Concierge while that agent still exists; otherwise
   on the first CLI that is installed and signed in. Existing conversations keep their own agent.
 - It can read teams, status, activity, deliverables, documents, the backlog, the board, git state, integrations,
