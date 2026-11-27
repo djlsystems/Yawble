@@ -15,6 +15,8 @@ public sealed record TriggerFire(string Outcome, long? Seq, string? Reason, long
 ///   is busy and the trigger is "only when idle" (skipped, the next fire armed).
 /// - Fires that passed while the app was not running are recorded as missed, never caught up: the trigger is armed
 ///   at its next occurrence from now. A once that passed fires late, once.
+/// - A workflow member's fire starts its workflow run instead (no deliverable); while its run is going or waiting, a folder
+///   change is queued by the runner and runs when that run ends (recorded fired, the reason saying queued), any other fire is skipped.
 /// - A wake (the wake_me tool) tells the same member its note inside the deliverable it asked from.
 /// Event and folder triggers exist too (<c>Triggers/</c>, including <c>FolderWatch</c>).
 /// </summary>
@@ -259,9 +261,11 @@ public sealed partial class BusEngine
         var fire = Fire(row, now, change.Describe(row.Watch.Root == FolderWatch.Documents ? $"the team's documents{(row.Watch.Path.Length > 0 ? "/" + row.Watch.Path : "")}" : folder),
             Workflows.Running.WorkflowPayloads.FolderChange(folder, change.Added, change.Removed, change.Changed));
         // Only a change that was told is taken as the new baseline: a skipped one (busy, paused) fires at the next look,
-        // with the same list (only the kinds the trigger fires on).
-        if (fire.Outcome == "fired") _store.SetWatchState(row.Id, state);
-        _store.RecordTriggerOutcome(row.Id, fire.Outcome == "fired" ? now : null, next, fire.Outcome, fire.Reason, fire.Seq, row.MissedCount);
+        // with the same list (only the kinds the trigger fires on). A workflow member's change queued while its run goes on
+        // (it runs when that run ends) counts as told; the trigger records it as fired, the reason saying it was queued.
+        var told = fire.Outcome is "fired" or "queued";
+        if (told) _store.SetWatchState(row.Id, state);
+        _store.RecordTriggerOutcome(row.Id, told ? now : null, next, told ? "fired" : fire.Outcome, fire.Reason, fire.Seq, row.MissedCount);
     }
 
     /// <summary>The folder a watch means: inside the team's documents, or the absolute folder on this computer.</summary>
