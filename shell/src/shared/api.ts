@@ -697,11 +697,13 @@ export interface Overview { slots: RunSlots; teams: TeamSummary[]; needsYou?: nu
 /** How the person answers a folder ask: read-write (only for a read-write ask), read-only, or deny. Never wider than asked. */
 export type FolderAskChoice = 'readwrite' | 'read' | 'deny';
 /**
- * A folder an agent asked to read or write with request_folder, waiting for the person in Needs you (folder.asks; core:
- * Integrations/FolderAsks.cs; contract: docs/folder-asks.md). member is the member the access is for, askedBy who asked
- * (the member itself, or its Manager), both "Team/Name". path: the resolved absolute path. exists: whether the folder
- * exists now (while pending; the value when it was asked once answered). choices: what the person may answer (empty once
- * answered). grantedAccess: what was granted (approved only). state closed: the member was removed while it waited.
+ * A folder an agent asked to read or write with request_folder, or the Concierge asked for with folder_request, waiting
+ * for the person in Needs you (folder.asks; core: Integrations/FolderAsks.cs; contract: docs/folder-asks.md). member is
+ * the member the access is for ("Team/Name"), askedBy who asked: the member itself or its Manager ("Team/Name"), or
+ * "Concierge". path: the resolved absolute path. exists: whether the folder exists now (while pending; the value when it
+ * was asked once answered). choices: what the person may answer (empty once answered). scopes: whom an approval may
+ * cover (empty once answered; absent from a core that grants the member only). grantedAccess: what was granted (approved
+ * only). state closed: the member was removed while it waited.
  */
 export interface FolderAsk {
   id: number; at: string; teamId: number; team: string; memberId: number; member: string; memberName: string; askedBy: string;
@@ -709,9 +711,23 @@ export interface FolderAsk {
   state: 'pending' | 'approved' | 'denied' | 'closed'; grantedAccess: 'read' | 'readwrite' | null;
   decidedBy: string | null; decidedVia: string | null; decidedAt: string | null; note: string | null; deliverable: number | null;
   choices: FolderAskChoice[];
+  scopes?: FolderAskScope[];
 }
-/** folder.answer {id, choice, note?}'s reply: told is who was told ("Team/Name": the Manager after an approval, the asker after a deny), or null. */
-export interface FolderAnswer { ok: boolean; id: number; choice: FolderAskChoice; path: string; member: string; grantedAccess: 'read' | 'readwrite' | null; told: string | null }
+/**
+ * Whom an approval of a folder ask covers: the ask's member (the default), every member of its team (the team's folder
+ * list, later hires too), or every agent of every team (the global policy).
+ */
+export type FolderAskScope = 'member' | 'team' | 'everywhere';
+/** askedBy of a folder ask the Concierge raised for the person. */
+export const FOLDER_ASK_CONCIERGE = 'Concierge';
+/**
+ * folder.answer {id, choice, note?, scope?}'s reply: told is who was told ("Team/Name": the Manager after an approval, the
+ * asker after a deny), or null; scope is where an approval was written (null for a deny).
+ */
+export interface FolderAnswer {
+  ok: boolean; id: number; choice: FolderAskChoice; path: string; member: string; grantedAccess: 'read' | 'readwrite' | null; told: string | null;
+  scope?: FolderAskScope | null;
+}
 export const FOLDER_ASKS = 'folder.asks';
 export const FOLDER_ANSWER = 'folder.answer';
 /** Pushed when a folder ask is raised or answered: Needs you, the You node and the Monitor refresh. */
@@ -741,6 +757,13 @@ export interface HostProblem { host: string; problem: string | null }
 export interface TeamHost { host: string; addedBy: string; addedVia: string | null; addedAt: string }
 /** policy.teamHosts {teamId} and policy.removeTeamHost {teamId, host}: the team's list, oldest first. */
 export interface TeamHosts { teamId: number; hosts: TeamHost[] }
+/**
+ * One folder on a team's folder list (policy.teamFolders; core: Policy/PolicyStore.cs): a folder outside the members' own
+ * folders that every member of the team may read (read) or read and write (readwrite). addedVia: how it was added (app, cloud).
+ */
+export interface TeamFolder { path: string; access: 'read' | 'readwrite'; addedBy: string; addedVia: string | null; addedAt: string }
+/** policy.teamFolders {teamId}, policy.addTeamFolder {teamId, path, access} and policy.removeTeamFolder {teamId, path}: the team's list, oldest first. */
+export interface TeamFolders { teamId: number; folders: TeamFolder[] }
 /**
  * network.answer's reply: closed lists every ask the answer closed (the team's or everyone's for that host or domain).
  * allowed: what the policy now lists, the host or the domain allow ("*.digicert.com"); a grouped answer lists each, comma separated.
@@ -1151,6 +1174,8 @@ export interface MemberPolicyView {
   loosenApprovedAt: string | null;
   /** The member's team's network allow list (policy.teamHosts has who added each and when). */
   teamHosts?: string[];
+  /** The member's team's folder list (policy.teamFolders has who added each and when). */
+  teamFolders?: { path: string; access: 'read' | 'readwrite' }[];
   effective: {
     readonly: string[]; readwrite: string[]; denied: string[]; allowHosts: string[];
     compute: ComputeValues; clipboard: string; loosened: string[]; notes: string[];

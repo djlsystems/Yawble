@@ -13,6 +13,7 @@ import { errorText, resolveApi } from '../api';
 import Modal from './Modal.vue';
 import IntegrationDialog from './IntegrationDialog.vue';
 import TeamNetworkAllows from './TeamNetworkAllows.vue';
+import TeamFolders from './TeamFolders.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
@@ -21,14 +22,14 @@ import { vChange } from '../remoteAccess';
 import { envEntries, envHint, envRows, type EnvRow } from '../teamEnv';
 
 /**
- * A team's housekeeping: pause or resume it, who its Manager may hire, its repositories, its environment variables, archive it, delete it. Archive and delete need
+ * A team's housekeeping: pause or resume it, who its Manager may hire, its repositories, its environment variables, its network allows, its folders, archive it, delete it. Archive and delete need
  * a quiet team (nothing running, nothing waiting) and say what is still working when it is not.
  */
 const props = defineProps<{ team: TeamSummary; api?: YawbleApi }>();
 const emit = defineEmits<{ close: []; changed: []; deleted: [] }>();
 const api = resolveApi(props.api);
 
-type Tab = 'general' | 'hiring' | 'state' | 'repos' | 'env' | 'network' | 'integrations' | 'reset' | 'delete';
+type Tab = 'general' | 'hiring' | 'state' | 'repos' | 'env' | 'network' | 'folders' | 'integrations' | 'reset' | 'delete';
 const tab = ref<Tab>('general');
 const tabs: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
@@ -37,6 +38,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: 'repos', label: 'Repositories' },
   { id: 'env', label: 'Environment' },
   { id: 'network', label: 'Network' },
+  { id: 'folders', label: 'Folders' },
   { id: 'integrations', label: 'Integrations' },
   { id: 'reset', label: 'Reset' },
   { id: 'delete', label: 'Delete' },
@@ -444,6 +446,11 @@ onMounted(() => { void models.loadProfiles(); void loadHiring(); void loadLesson
         </template>
       </div>
       <p class="muted small">Each member's own policy (its override and Loosen…) is in the member's settings, on its Policy tab, next to this list.</p>
+    </section>
+
+    <section v-else-if="tab === 'folders'" class="pane" data-test="team-folders-tab">
+      <div class="block"><TeamFolders :team-id="team.id" :team-name="team.name" :api="api" @changed="emit('changed')" /></div>
+      <p class="muted small">A folder for one member only is in that member's settings, on its Policy tab. An agent, or the Concierge for you, can also ask for a folder: you approve it in Needs you, for the member, this team or all teams.</p>
     </section>
 
     <section v-else-if="tab === 'integrations'" class="pane" data-test="team-integrations">

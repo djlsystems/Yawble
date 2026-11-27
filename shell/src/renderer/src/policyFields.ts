@@ -79,10 +79,11 @@ export const FOLDER_LISTS: { list: FolderList; label: string }[] = [
   { list: 'readonly', label: 'Read-only' },
   { list: 'denied', label: 'Denied' },
 ];
-/** Where an effective folder comes from: the global policy, the app's implicit folders, this member's loosening or override. */
-export type FolderSource = 'global' | 'implicit' | 'loosen' | 'override';
+/** Where an effective folder comes from: the global policy, the app's implicit folders, this member's loosening or override, or its team's folder list. */
+export type FolderSource = 'global' | 'implicit' | 'loosen' | 'override' | 'team';
 export const SOURCE_LABEL: Record<FolderSource, string> = {
   global: 'global', implicit: 'implicit', loosen: 'this member (loosened)', override: 'this member (override)',
+  team: 'the team (its Settings > Folders)',
 };
 
 export interface FolderRow {
@@ -160,6 +161,8 @@ export function folderRows(view: MemberPolicyView, list: FolderList, resolved?: 
   const rows: FolderRow[] = effective.map((p) => {
     if (implicit.some((i) => samePath(i, p))) return { path: p, source: 'implicit', own: null };
     if (loosened.has(`filesystem.${list} + ${p}`)) return { path: p, source: 'loosen', own: loosen.find((l) => ownIs(l, p)) ?? p };
+    // The team's folder list: changed in the team's settings, so the row has no Remove here.
+    if (loosened.has(`filesystem.${list} + ${p} (team)`)) return { path: p, source: 'team', own: null };
     const o = override.find((x) => samePath(x, p));
     if (o !== undefined && !global.some((g) => samePath(g, p))) return { path: p, source: 'override', own: o };
     return { path: p, source: 'global', own: null };

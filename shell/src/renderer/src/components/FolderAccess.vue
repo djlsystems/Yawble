@@ -94,7 +94,7 @@ async function previewOf(doc: PolicyPatchDoc): Promise<string[]> {
 }
 const saveLoosen = (doc: PolicyPatchDoc, confirmed: string[]) => () =>
   props.api.call<MemberPolicyView>('policy.saveLoosen', { memberId: props.memberId, loosen: doc, confirmed });
-/** The member's loosened items now, as the core lists them (team hosts aside: the loosen block never holds those). */
+/** The member's loosened items now, as the core lists them (the team's hosts and folders aside: the loosen block never holds those). */
 const currentLoosened = () => (props.view.effective.loosened ?? []).filter((l) => !l.endsWith(' (team)'));
 
 const add = () => props.work.run('folder-add', doAdd);

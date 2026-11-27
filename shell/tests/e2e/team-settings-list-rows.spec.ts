@@ -1,6 +1,6 @@
 // Team Settings on a phone (a list of sections, one section under a sticky
 // Back + title) and the phone sheet's Close, in headless Chrome against the FAKE core of phone-remote.spec.ts.
-//  - 360x740 and 390x844: the list's nine rows are one line, >= 44 px, full width, label not cut; every section opens
+//  - 360x740 and 390x844: the list's ten rows are one line, >= 44 px, full width, label not cut; every section opens
 //    alone under the head with its title; in the list and in every section nothing in the dialog is wider than the
 //    screen, neither the page nor the sheet's body scrolls sideways (long env names/values, long repository paths).
 //  - Back returns to the list from every section and from General's Repositories link; the head stays at the top of the
@@ -18,11 +18,11 @@ import { settled } from './settle';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(120_000);
 
-const IDS = ['general', 'hiring', 'state', 'repos', 'env', 'network', 'integrations', 'reset', 'delete'];
-const LABELS = ['General', 'Hiring', 'Pause and archive', 'Repositories', 'Environment', 'Network', 'Integrations', 'Reset', 'Delete'];
+const IDS = ['general', 'hiring', 'state', 'repos', 'env', 'network', 'folders', 'integrations', 'reset', 'delete'];
+const LABELS = ['General', 'Hiring', 'Pause and archive', 'Repositories', 'Environment', 'Network', 'Folders', 'Integrations', 'Reset', 'Delete'];
 const PANES: Record<string, string> = {
   general: '[data-test=team-general]', hiring: '[data-test=team-hiring]', state: '[data-test=team-approvals]', repos: '[data-test=repo-main]', env: '[data-test=env-add]',
-  network: '[data-test=team-network]', integrations: '[data-test=team-integrations]', reset: '[data-test=team-reset]', delete: '[data-test=team-delete-pane]',
+  network: '[data-test=team-network]', folders: '[data-test=team-folders-tab] [data-test=team-folder]', integrations: '[data-test=team-integrations]', reset: '[data-test=team-reset]', delete: '[data-test=team-delete-pane]',
 };
 
 // Long content for the overflow checks; set for this file only and put back after it (the fake core is shared by the
@@ -36,6 +36,7 @@ const OVERRIDES: Record<string, (p?: any) => unknown> = {
     main: { name: 'payments', path: LONG, baseBranch: 'main', origin: 'https://git.example.com/some-organisation/payments-service-backend-with-a-long-name.git', managed: false },
     extras: [{ name: 'docs-site', path: `${LONG}-docs-site-reference`, baseBranch: 'main', writable: false, source: 'https://git.example.com/some-organisation/docs-site.git' }],
   }),
+  'policy.teamFolders': () => ({ teamId: 1, folders: [{ path: `${LONG}-shared-data`, access: 'read', addedBy: 'someone-with-a-long-name@example.com', addedVia: 'cloud', addedAt: '2026-11-27T10:00:00Z' }] }),
   'integrations.list': () => ({ integrations: [] }),
   'integrations.mcpList': () => [],
   'integrations.apiList': () => [],

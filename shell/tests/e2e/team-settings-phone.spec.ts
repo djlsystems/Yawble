@@ -1,6 +1,6 @@
 // The team Settings dialog on a phone, in a real browser (headless Chrome) against the FAKE core
 // of phone-remote.spec.ts (remote.html, canned answers). At 390x844 (an iPhone) it is laid out like the app's Settings on
-// a phone: it opens at the list of its nine sections (full-width rows, one line each, at least 44 px tall, a › chevron);
+// a phone: it opens at the list of its ten sections (full-width rows, one line each, at least 44 px tall, a › chevron);
 // a tap opens that section alone under a Back + title head; Back returns to the list. Nothing is wider than the screen.
 // The sheet's Close keeps its 44 px tap target. At 1280x800 it is one row of tabs, one line each.
 //
@@ -15,6 +15,8 @@ answers['teams.env'] = () => ({ API_BASE_URL: 'http://localhost:5173/api/v1/some
 answers['integrations.list'] = () => ({ integrations: [] });
 answers['integrations.mcpList'] = () => [];
 answers['integrations.apiList'] = () => [];
+// The team's folder list: one folder with a long path (the Folders section must not be wider than the screen).
+answers['policy.teamFolders'] = () => ({ teamId: 1, folders: [{ path: 'D:\\shared\\recorded-smoke-sessions\\2026\\november\\payments-and-refunds', access: 'readwrite', addedBy: 'tester@example.com', addedVia: 'cloud', addedAt: '2026-11-27T10:00:00Z' }] });
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
@@ -22,12 +24,12 @@ test.setTimeout(90_000);
 
 test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 
-const IDS = ['general', 'hiring', 'state', 'repos', 'env', 'network', 'integrations', 'reset', 'delete'];
-const LABELS = ['General', 'Hiring', 'Pause and archive', 'Repositories', 'Environment', 'Network', 'Integrations', 'Reset', 'Delete'];
+const IDS = ['general', 'hiring', 'state', 'repos', 'env', 'network', 'folders', 'integrations', 'reset', 'delete'];
+const LABELS = ['General', 'Hiring', 'Pause and archive', 'Repositories', 'Environment', 'Network', 'Folders', 'Integrations', 'Reset', 'Delete'];
 // Each section's own pane (a data-test inside it that only it has).
 const PANES: Record<string, string> = {
   general: '[data-test=team-general]', hiring: '[data-test=team-hiring]', state: '[data-test=team-approvals]', repos: '[data-test=repo-main]', env: '[data-test=env-add]',
-  network: '[data-test=team-network]', integrations: '[data-test=team-integrations]', reset: '[data-test=team-reset]', delete: '[data-test=team-delete-pane]',
+  network: '[data-test=team-network]', folders: '[data-test=team-folders-tab] [data-test=team-folder]', integrations: '[data-test=team-integrations]', reset: '[data-test=team-reset]', delete: '[data-test=team-delete-pane]',
 };
 
 async function openSettings(browser: Browser, w: number, h: number) {
@@ -88,7 +90,7 @@ test('phone 390x844: a list of sections; a tap opens one under Back; Back return
   expect(close && Math.round(close.width)).toBe(44);
   expect(close && Math.round(close.height)).toBe(44);
 
-  // The list: nine full-width rows in order, one line each, >= 44 px, a chevron; no pane under it.
+  // The list: ten full-width rows in order, one line each, >= 44 px, a chevron; no pane under it.
   const rows = await rowInfo(page);
   expect(rows.map((r) => r.id)).toEqual(IDS.map((t) => `manage-tab-${t}`));
   expect(rows.map((r) => r.text)).toEqual(LABELS);

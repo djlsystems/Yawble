@@ -1,4 +1,4 @@
-import type { TeamHosts, YawbleApi } from '../../shared/api';
+import type { TeamFolder, TeamFolders, TeamHosts, YawbleApi } from '../../shared/api';
 
 /** window.yawble, or the one a test passes in. */
 export function resolveApi(api?: YawbleApi): YawbleApi {
@@ -16,6 +16,24 @@ export function teamHosts(api: YawbleApi, teamId: number): Promise<TeamHosts> {
 /** Takes a host off the team's list (policy.removeTeamHost; the core audits it) and answers the list as it is now. A host not on it: not_found. */
 export function removeTeamHost(api: YawbleApi, teamId: number, host: string): Promise<TeamHosts> {
   return api.call<TeamHosts>('policy.removeTeamHost', { teamId, host });
+}
+
+/** The team's folder list, oldest first (policy.teamFolders). */
+export function teamFolders(api: YawbleApi, teamId: number): Promise<TeamFolders> {
+  return api.call<TeamFolders>('policy.teamFolders', { teamId });
+}
+
+/**
+ * Adds a folder to the team's list, or changes the access of one on it (policy.addTeamFolder; the core checks it for
+ * every member and audits it), and answers the list as it is now. A folder that may not be granted: policy_refused, with the reason.
+ */
+export function addTeamFolder(api: YawbleApi, teamId: number, path: string, access: TeamFolder['access']): Promise<TeamFolders> {
+  return api.call<TeamFolders>('policy.addTeamFolder', { teamId, path, access });
+}
+
+/** Takes a folder off the team's list (policy.removeTeamFolder; the core audits it) and answers the list as it is now. A folder not on it: not_found. */
+export function removeTeamFolder(api: YawbleApi, teamId: number, path: string): Promise<TeamFolders> {
+  return api.call<TeamFolders>('policy.removeTeamFolder', { teamId, path });
 }
 
 /** An IPC error as the person should read it (Electron prefixes "Error invoking remote method ..."). */
