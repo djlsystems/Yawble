@@ -363,6 +363,7 @@ public static partial class DeliverableDigest
             FailureClasses.Idle => "ended for being idle",
             FailureClasses.Stopped => "stopped by the person",
             FailureClasses.Interrupted => "interrupted (the app stopped)",
+            FailureClasses.NotBroughtIn => "finished, but its work was not brought in",
             null or FailureClasses.Failed => "failed",
             var c => $"failed ({c})",
         } + Exit(r) + (r.Reason is { Length: > 0 } why && r.FailureClass != FailureClasses.Stopped ? $": {Quote(why)}" : ""),

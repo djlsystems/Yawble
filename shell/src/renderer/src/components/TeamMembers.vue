@@ -3,7 +3,7 @@ import { ref } from 'vue';
 import { usePoll } from '../usePoll';
 import type { AgentCard, YawbleApi } from '../../../shared/api';
 import MemberAvatar from '../faces/MemberAvatar.vue';
-import { displayName, memberStateOf, MemberStateLabel } from '../faces/faces';
+import { displayName, memberStateLabel, memberStateOf } from '../faces/faces';
 import { cardState, waitSays } from '../waiting';
 import { hireRoleOf } from '../agentModels';
 
@@ -28,7 +28,7 @@ function tip(card: AgentCard): string {
   const line = doing ? `\n${doing.length > 160 ? `${doing.slice(0, 159)}…` : doing}` : '';
   const role = hireRoleOf(c.member);
   const kind = c.member.role === 'manager' ? 'manager' : 'member';
-  return `${displayName(c.member.name)} · ${kind}${role ? ` · ${role}` : ''}\n${MemberStateLabel[memberStateOf(c)]}${queued}${line}`;
+  return `${displayName(c.member.name)} · ${kind}${role ? ` · ${role}` : ''}\n${memberStateLabel(c)}${queued}${line}`;
 }
 
 usePoll(load, Math.max(5000, props.pollMs ?? 5000));

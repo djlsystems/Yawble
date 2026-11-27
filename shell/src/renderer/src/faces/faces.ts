@@ -137,6 +137,18 @@ export const MemberStateLabel: Record<MemberState, string> = {
   stopped: 'Stopped', idle: 'Idle',
 };
 
+/** The failure class of a run whose agent finished, but whose branch the app could not bring into the team repository. */
+export const NotBroughtIn = 'not_brought_in';
+
+/**
+ * A member's state in words. A run that finished but whose work was not brought in says that, not "Last run failed":
+ * the agent did its part, and what needs a look is the branch.
+ */
+export function memberStateLabel(card: Parameters<typeof memberStateOf>[0]): string {
+  const state = memberStateOf(card);
+  return state === 'failed' && card.lastRunFailureClass === NotBroughtIn ? 'Work not brought in' : MemberStateLabel[state];
+}
+
 /**
  * A member's display name from its id: the words of a camel-case id split apart ("DeveloperPriya" is "Developer
  * Priya"); "Manager" stays as it is.

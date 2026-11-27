@@ -75,6 +75,13 @@ public static class FailureClasses
     /// </summary>
     public const string NotStarted = "not_started";
 
+    /// <summary>
+    /// The agent finished its run, and the app then could not bring the member's branch into the team repository (it
+    /// does not merge cleanly, a commit message is refused, a file error). The run is recorded failed so the work is
+    /// looked at; the card says the run finished and what was not brought in.
+    /// </summary>
+    public const string NotBroughtIn = "not_brought_in";
+
     /// <summary>The model API's usage or rate limit stopped the run; the failed row's run.retryAfter says when to come back.</summary>
     public const string Rate = "rate";
 }

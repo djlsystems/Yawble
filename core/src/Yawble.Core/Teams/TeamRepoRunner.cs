@@ -83,6 +83,9 @@ public sealed class TeamRepoRunner(IAgentRunner inner, TeamRepos repos, Action<s
         }
         log?.Invoke($"{run.Member.Qualified}: run {run.RunId}: branch not fetched back: {problem}");
         var reason = $"the member's branch was not brought into the team repository: {problem}";
-        return RunResult.Fail(result.Succeeded ? reason : $"{result.Reason}; {reason}");
+        // A run that finished says so on its card: only the bring-in failed.
+        return result.Succeeded
+            ? new RunResult(false, reason, FailureClasses.NotBroughtIn, result.Details)
+            : RunResult.Fail($"{result.Reason}; {reason}");
     }
 }

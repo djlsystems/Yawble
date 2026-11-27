@@ -264,6 +264,8 @@ public static class BatchText
                 if (message.Type == MessageTypes.Completed) sb.Append(who).Append("'s run ended.");
                 else if (S("failureClass") == FailureClasses.Interrupted)
                     sb.Append(who).Append("'s run was interrupted: the app stopped while it ran, so its work is unfinished. Tell it again if the work is still needed.");
+                else if (S("failureClass") == FailureClasses.NotBroughtIn)
+                    sb.Append(who).Append("'s run finished, but ").Append(S("reason")).Append('.');
                 else sb.Append(who).Append("'s run failed: ").Append(S("reason")).Append('.');
                 if (root.TryGetProperty("handedBack", out var hb) && hb.ValueKind == JsonValueKind.False)
                 {

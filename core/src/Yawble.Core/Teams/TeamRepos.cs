@@ -639,8 +639,9 @@ public sealed partial class TeamRepos
             {
                 await UpdateSharedAtAsync(sharedPath, repoPath, baseBranch, ct);
             }
-            catch (GitException e)
+            catch (Exception e) when (e is GitException or IOException or UnauthorizedAccessException)
             {
+                // The branch is in the team repository; only the members' copy of it is stale, until the next update.
                 _log?.Invoke($"team {member.Team}: the shared view of {repoPath} was not updated: {e.Message}");
             }
             return new FetchResult(true, sha, null);
@@ -792,13 +793,19 @@ public sealed partial class TeamRepos
                 File.Move(temp, bundle, overwrite: true);
                 return;
             }
-            catch (IOException) when (attempt < 20)
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException && attempt < BundleSwapAttempts)
             {
-                // A member may be reading the old bundle right now (Windows will not replace an open file).
-                await Task.Delay(250, ct);
+                // A member may be reading the old bundle right now. Windows will not replace an open file, and says so
+                // with either a sharing violation (IOException) or "Access to the path is denied"
+                // (UnauthorizedAccessException), depending on how the reader opened it.
+                await Task.Delay(BundleSwapDelay, ct);
             }
         }
     }
+
+    /// <summary>How often, and how far apart, the new bundle is moved over one a member is still reading.</summary>
+    internal int BundleSwapAttempts = 20;
+    internal TimeSpan BundleSwapDelay = TimeSpan.FromMilliseconds(250);
 
     /// <summary>The bundle of every branch in the shared view, in the shared view's folder (so it is granted with it).</summary>
     public const string SharedBundleFile = "team.bundle";

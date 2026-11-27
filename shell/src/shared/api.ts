@@ -1180,7 +1180,7 @@ export interface TerminalBanner {
 }
 
 /** A failed run's class (core Bus/Messages.cs FailureClasses); a string for a class this shell does not know. */
-export type RunFailureClass = 'failed' | 'timeout' | 'idle' | 'stopped' | 'credential' | 'start_failed' | 'interrupted' | 'rate' | (string & {});
+export type RunFailureClass = 'failed' | 'timeout' | 'idle' | 'stopped' | 'credential' | 'start_failed' | 'interrupted' | 'rate' | 'not_brought_in' | (string & {});
 
 /**
  * Whether a run (a member's last run, a feed row, a run row) was stopped by the person: failure class "stopped",

@@ -745,6 +745,9 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
   Delete, and the section says which member's next start moves it.
 - Clones have no remote and no credential helper. After each run the app cleans the clone's git config and fetches
   the member's branch into the team repository. It never runs git inside a clone an agent used.
+- When a run finishes but its branch cannot be brought in (it does not merge cleanly, a commit message is refused, a
+  file error), the member's card says **Work not brought in** with the reason, and the Manager is told the same. The
+  work stays in the member's clone.
 - When the team repository has an origin, branches are pushed with your own git setup at each run's end. Pushes are
   never forced. The origin can be on any git host, or there can be none: a team repository with no origin keeps
   every branch on this computer.

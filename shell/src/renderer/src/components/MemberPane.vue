@@ -11,7 +11,7 @@ import Icon from './Icon.vue';
 import MemberActivity from './MemberActivity.vue';
 import FolderAsks from './FolderAsks.vue';
 import TerminalApp from '../TerminalApp.vue';
-import { displayName, memberStateOf, MemberStateLabel } from '../faces/faces';
+import { displayName, memberStateOf, memberStateLabel, NotBroughtIn } from '../faces/faces';
 import { renderMarkdown } from '../markdown';
 import { memberReport, WaitingLabel } from '../reportFormat';
 import { leaseText } from '../heavyLease';
@@ -52,6 +52,8 @@ const stateLine = computed(() => {
   if (c.state === 'running') return '';
   // A run the person stopped (class "stopped", recorded failed) is no failure: it says who stopped it.
   if (c.lastRunState !== 'completed' && c.lastRunState !== 'interrupted' && isStoppedRun({ state: c.lastRunState, failureClass: c.lastRunFailureClass, attention: c.attention })) return 'last run stopped by you';
+  // The agent finished; the app could not bring its branch into the team repository (the reason says why).
+  if (c.lastRunState === 'failed' && c.lastRunFailureClass === NotBroughtIn) return `last run finished, but ${c.lastRunReason ?? 'its branch was not brought into the team repository'}`;
   if (c.lastRunState === 'failed' || c.lastRunState === 'interrupted') return `last run ${c.lastRunState}: ${c.lastRunReason ?? ''}`;
   if (c.lastRunState === 'completed') return 'last run completed';
   return '';
@@ -72,7 +74,7 @@ const waiting = computed(() => report.value.kind === 'waiting');
 const said = computed(() => (waiting.value ? report.value.body : props.card.statusLine?.trim() || ''));
 const saidHtml = computed(() => (said.value ? renderMarkdown(report.value.body) : ''));
 /** The title's state word: "Waiting on you" while a decision is open. */
-const stateLabel = computed(() => (waiting.value ? WaitingLabel : MemberStateLabel[face.value]));
+const stateLabel = computed(() => (waiting.value ? WaitingLabel : memberStateLabel(props.card)));
 /** Scrolls the team page to the decision this member waits on (its card, or the first decision card). */
 function openDecision() {
   const id = report.value.decisionId;

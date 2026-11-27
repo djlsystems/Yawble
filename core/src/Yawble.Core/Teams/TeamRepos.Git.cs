@@ -192,7 +192,7 @@ public sealed partial class TeamRepos
         {
             await UpdateSharedAtAsync(SharedPathOf(team, repo), repo.Path, repo.BaseBranch, ct);
         }
-        catch (GitException e)
+        catch (Exception e) when (e is GitException or IOException or UnauthorizedAccessException)
         {
             _log?.Invoke($"team {team}: the shared view was not updated: {e.Message}");
         }
