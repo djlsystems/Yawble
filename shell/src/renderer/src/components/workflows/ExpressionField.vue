@@ -13,6 +13,8 @@ const props = defineProps<{
   required?: boolean;
   suggestions: readonly Suggestion[];
   readonly?: boolean;
+  /** A hint shown while the field is empty. */
+  placeholder?: string;
   /** For data-test. */
   name?: string;
 }>();
@@ -61,7 +63,7 @@ function close() { setTimeout(() => { at.value = null; }, 120); }
     <span class="lab">{{ label }}<span v-if="required" class="req" title="Required" data-test="expr-required">*</span>
       <span v-if="type" class="type" data-test="expr-type">{{ type }}</span></span>
     <span class="wrap">
-      <input ref="input" :value="valueText(modelValue)" :readonly="readonly" spellcheck="false" autocomplete="off" data-test="expr-input"
+      <input ref="input" :value="valueText(modelValue)" :readonly="readonly" :placeholder="placeholder" spellcheck="false" autocomplete="off" data-test="expr-input"
         @input="onInput" @focus="refresh" @click="refresh" @keydown="onKey" @blur="close" />
       <ul v-if="shown.length" class="list" role="listbox" data-test="expr-suggestions">
         <li v-for="(s, i) in shown" :key="s.text" role="option" :aria-selected="i === active" :class="{ on: i === active }" :data-kind="s.kind"

@@ -339,6 +339,71 @@ public sealed class WorkflowRunStore(string connectionString, TimeProvider? cloc
             """, ("$k", TellOtherTeamsKey), ("$v", on ? "true" : "false"), ("$t", Now()));
     }
 
+    // ------------------------------------------------------------------ folder fires queued while a run is going (app_defaults)
+
+    /// <summary>A member's queued folder fires are kept under this key and the member's id (no table of their own).</summary>
+    public const string FolderQueueKeyPrefix = "workflows.folderQueue.";
+
+    private static string FolderQueueKey(long memberId) => FolderQueueKeyPrefix + memberId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The member's queued folder fires as JSON (<see cref="WorkflowFolderQueue"/>); null when none are queued.</summary>
+    public string? FolderQueue(long memberId)
+    {
+        using var c = Open();
+        return Scalar(c, "SELECT value FROM app_defaults WHERE key = $k;", ("$k", FolderQueueKey(memberId))) as string;
+    }
+
+    /// <summary>Stores the member's queued folder fires; null or an empty queue removes them.</summary>
+    public void SetFolderQueue(long memberId, string? json)
+    {
+        using var c = Open();
+        if (json is null || json == "[]")
+        {
+            Exec(c, "DELETE FROM app_defaults WHERE key = $k;", ("$k", FolderQueueKey(memberId)));
+            return;
+        }
+        Exec(c, """
+            INSERT INTO app_defaults (key, value, updated_at) VALUES ($k, $v, $t)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;
+            """, ("$k", FolderQueueKey(memberId)), ("$v", json), ("$t", Now()));
+    }
+
+    /// <summary>The members that have queued folder fires.</summary>
+    public IReadOnlyList<long> MembersWithFolderQueues()
+    {
+        using var c = Open();
+        using var cmd = Cmd(c, "SELECT key FROM app_defaults WHERE key LIKE $p ORDER BY key;", ("$p", FolderQueueKeyPrefix + "%"));
+        using var r = cmd.ExecuteReader();
+        var list = new List<long>();
+        while (r.Read())
+            if (long.TryParse(r.GetString(0).AsSpan(FolderQueueKeyPrefix.Length), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id))
+                list.Add(id);
+        return list;
+    }
+
+    /// <summary>Whether a queued folder fire may still run.</summary>
+    public enum QueuedFire
+    {
+        /// <summary>The trigger is the member's enabled folder trigger, its team at work: the fire runs.</summary>
+        Live,
+        /// <summary>Its team is paused or archived: the fire stays queued.</summary>
+        Held,
+        /// <summary>The trigger was deleted, disabled or is no longer a folder trigger of the member: the fire is dropped.</summary>
+        Gone,
+    }
+
+    public QueuedFire FolderFire(long memberId, long triggerId)
+    {
+        using var c = Open();
+        using var cmd = Cmd(c, """
+            SELECT t.enabled, t.kind, tm.paused_at, tm.archived_at FROM triggers t JOIN teams tm ON tm.id = t.team_id
+            WHERE t.id = $id AND t.member_id = $m;
+            """, ("$id", triggerId), ("$m", memberId));
+        using var r = cmd.ExecuteReader();
+        if (!r.Read() || r.GetInt64(0) == 0 || r.GetString(1) != Yawble.Core.Triggers.TriggerKinds.Folder) return QueuedFire.Gone;
+        return r.IsDBNull(2) && r.IsDBNull(3) ? QueuedFire.Live : QueuedFire.Held;
+    }
+
     public void Log(long runId, string line)
     {
         var text = Scrub(line) ?? "";

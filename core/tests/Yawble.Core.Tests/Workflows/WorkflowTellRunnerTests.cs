@@ -49,6 +49,7 @@ public class WorkflowTellRunnerTests
         public WorkflowRunner Runner = null!;
         public BusWorkflowTells Tells = null!;
         public long Alpha, Beta, GoWorkflow, WaitWorkflow;
+        public string? Docs, Granted;
 
         public async Task<Rig> InitAsync()
         {
@@ -60,7 +61,7 @@ public class WorkflowTellRunnerTests
             Library = new WorkflowLibrary(Db.ConnectionString, () => FakeCatalog.MailAndSms()); // the real checker
             Library.SaveSchema("Triage", "A refund decision.", Triage);
             Store = new WorkflowRunStore(Db.ConnectionString);
-            Tells = new BusWorkflowTells(Bus, Store);
+            Tells = new BusWorkflowTells(Bus, Store, Docs is null ? null : _ => Docs, Clock);
             Runner = runner = NewRunner();
             Bus.WorkflowMembers = runner;
             var go = Library.Save(TellWorkflow("tell-go", wait: false));
@@ -72,7 +73,8 @@ public class WorkflowTellRunnerTests
         }
 
         public WorkflowRunner NewRunner() =>
-            new(Store, Library, NoWorkflowActions.Instance, SeamWorkflowEngine.Instance, Path.Combine(Db.Dir, "workflows"), clock: Clock)
+            new(Store, Library, NoWorkflowActions.Instance, SeamWorkflowEngine.Instance, Path.Combine(Db.Dir, "workflows"), clock: Clock,
+                grantedFolders: Granted is null ? null : _ => [Granted])
             {
                 Tellers = Tells, WaitSources = [Tells],
             };
@@ -203,6 +205,61 @@ public class WorkflowTellRunnerTests
         Assert.Contains("maxTells is 0", outcome.Run.Reason);
         Assert.Empty(r.Instructions("Alpha/Manager"));
         Assert.Equal(5, r.Store.Member(await r.MemberAsync(r.GoWorkflow, name: "Default"))!.MaxTells);
+    }
+
+    [Fact]
+    public async Task ATellWithAttachments_CopiesThemIntoTheTeamsDocuments_AndTheInstructionNamesTheCopies()
+    {
+        using var temp = new TempFolder();
+        var granted = temp.Sub("photos");
+        var photo = Path.Combine(granted, "IMG 0001.jpg");
+        File.WriteAllBytes(photo, [0xFF, 0xD8, 0xFF, 1, 2]);
+        await using var r = await new Rig { Docs = temp.Sub("documents"), Granted = granted }.InitAsync();
+        var saved = r.Library.Save("""
+            { "format": "yawble-workflow/1", "id": "tell-attach", "name": "tell-attach", "trigger": { "accepts": ["once"] },
+              "settings": [ { "name": "photo", "type": "string", "default": "" } ],
+              "start": "a",
+              "steps": [ { "id": "a", "type": "tell", "text": "Look at this photo.", "attachments": ["{settings.photo}"], "next": null } ] }
+            """);
+        Assert.True(saved.Ok, saved.Check.ToJsonString());
+        var bot = await r.MemberAsync(saved.Id, new JsonObject { ["photo"] = photo });
+
+        var outcome = await r.RunAsync(bot);
+
+        Assert.True(outcome.Succeeded, Why(outcome.Run));
+        var copy = Assert.Single(Directory.GetFiles(Path.Combine(r.Docs!, Attachments.Folder)));
+        Assert.EndsWith("-IMG-0001.jpg", copy);
+        Assert.Equal(File.ReadAllBytes(photo), File.ReadAllBytes(copy));
+        var text = Payload.Field(Assert.Single(r.Instructions("Alpha/Manager")), "text")!;
+        Assert.Contains("Look at this photo.\n\nThe workflow attached a file, copied into the team's documents. Open it with your file-reading tool:\n- " + copy, text);
+        Assert.Contains($"attached {photo} as {copy}", Logged(outcome));
+    }
+
+    [Fact]
+    public async Task ATellWithAttachmentsTheBusRefuses_DeletesTheCopies_AndTellsNothing()
+    {
+        using var temp = new TempFolder();
+        var granted = temp.Sub("photos");
+        var photo = Path.Combine(granted, "IMG 0001.jpg");
+        File.WriteAllBytes(photo, [0xFF, 0xD8, 0xFF, 1, 2]);
+        await using var r = await new Rig { Docs = temp.Sub("documents"), Granted = granted }.InitAsync();
+        var saved = r.Library.Save("""
+            { "format": "yawble-workflow/1", "id": "tell-attach-nobody", "name": "tell-attach-nobody", "trigger": { "accepts": ["once"] },
+              "settings": [ { "name": "photo", "type": "string", "default": "" } ],
+              "start": "a",
+              "steps": [ { "id": "a", "type": "tell", "member": "Nobody", "text": "Look at this photo.", "attachments": ["{settings.photo}", "{settings.photo}"], "next": null } ] }
+            """);
+        Assert.True(saved.Ok, saved.Check.ToJsonString());
+        var bot = await r.MemberAsync(saved.Id, new JsonObject { ["photo"] = photo });
+
+        var outcome = await r.RunAsync(bot);
+
+        Assert.Equal((RunStatus.Failed, "a"), (outcome.Run.Status, outcome.Run.FailedStepId));
+        Assert.Contains("has no agent member named 'Nobody'", outcome.Run.Reason);
+        Assert.Empty(Directory.GetFiles(Path.Combine(r.Docs!, Attachments.Folder)));
+        Assert.True(File.Exists(photo));
+        using var s = r.Db.OpenStore();
+        Assert.DoesNotContain(s.AllMessages(), m => m.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal));
     }
 
     // ------------------------------------------------------------------ waiting

@@ -22,12 +22,14 @@ public interface IWorkflowActions
 /// <summary>
 /// A <c>tell</c> step's work for an agent member: <see cref="Member"/> (the Manager by default), <see cref="Team"/> (null: the
 /// workflow member's own team), the evaluated <see cref="Text"/>, whether the run waits, and the reply schema the agent is asked
-/// to end with (its name and JSON Schema), if any.
+/// to end with (its name and JSON Schema), if any. <see cref="Attachments"/>: the real files the step attaches (checked: they
+/// exist and the run may read them); the teller copies them where the told team can read them and names the copies.
 /// </summary>
-public sealed record WorkflowTellCall(string StepId, string Member, string? Team, string Text, bool Wait, string? ReplySchemaName, JsonObject? ReplySchema);
+public sealed record WorkflowTellCall(string StepId, string Member, string? Team, string Text, bool Wait, string? ReplySchemaName, JsonObject? ReplySchema,
+    IReadOnlyList<string>? Attachments = null);
 
-/// <summary>A tell that went: the deliverable it started, and the member and team it went to.</summary>
-public sealed record WorkflowTellSent(long Deliverable, string Member, string Team);
+/// <summary>A tell that went: the deliverable it started, the member and team it went to, and the attachments' copies (in the order given).</summary>
+public sealed record WorkflowTellSent(long Deliverable, string Member, string Team, IReadOnlyList<string>? Attached = null);
 
 /// <summary>
 /// Gives a tell step's work to the team's agents (the bus, in the app; tests fake it). A refusal (no such agent member, a workflow
@@ -92,6 +94,12 @@ public sealed record WorkflowRunRequest
     public required string DataFolder { get; init; }
 
     public IReadOnlyList<WorkflowFolderGrant> AllowedFolders { get; init; } = [];
+
+    /// <summary>
+    /// The run's team's Documents folder (what agents see as YAWBLE_TEAM_DOCS): <c>docs:/...</c> paths are under it, writable.
+    /// Null: a docs:/ path fails its step.
+    /// </summary>
+    public string? TeamDocumentsFolder { get; init; }
 
     public bool DryRun { get; init; }
 

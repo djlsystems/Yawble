@@ -57,6 +57,9 @@ public static class WorkflowStepTypes
     public const string FileReadLines = "file.readLines";
     public const string FileExists = "file.exists";
     public const string FileDelete = "file.delete";
+    public const string FileMove = "file.move";
+    public const string FileCopy = "file.copy";
+    public const string FileList = "file.list";
 }
 
 /// <summary>The codes a <see cref="WorkflowCheckIssue"/> carries.</summary>
@@ -80,6 +83,8 @@ public static class WorkflowCheckCodes
     public const string UnknownArgument = "unknown-argument";
     /// <summary>A step's option is out of range or does not go with the others (a tell's timeout over 7 days, a reply without wait).</summary>
     public const string BadValue = "bad-value";
+    /// <summary>A file step's literal "docs:" path is malformed ("docs:" without "/", "..", an absolute path after docs:/, the folder itself for a file).</summary>
+    public const string BadDocsPath = "bad-docs-path";
 }
 
 /// <summary>
@@ -92,9 +97,20 @@ public static class WorkflowChecker
     [
         "set", "if", "switch", "forEach", WorkflowLoop.StepType, "integration", "log", "end", WorkflowTell.StepType, WorkflowCode.StepType,
         WorkflowStepTypes.FileWriteAllText, WorkflowStepTypes.FileAppendLine, WorkflowStepTypes.FileReadAllText, WorkflowStepTypes.FileReadLines, WorkflowStepTypes.FileExists, WorkflowStepTypes.FileDelete,
+        WorkflowStepTypes.FileMove, WorkflowStepTypes.FileCopy, WorkflowStepTypes.FileList,
     ];
 
     private static readonly string[] RootNames = ["input", "settings", "vars", "steps"];
+
+    /// <summary>What file.list gives: a list of { path, name, size, modifiedAt }, one per file, sorted by path.</summary>
+    public static WorkflowType FileListType { get; } = WorkflowType.ListOf(WorkflowType.ObjectOf(null, JsonNode.Parse("""
+        { "type": "object", "properties": {
+            "path": { "type": "string", "description": "The file's full path." },
+            "name": { "type": "string", "description": "The file's name, e.g. IMG_0001.jpg." },
+            "size": { "type": "integer", "description": "Its size in bytes." },
+            "modifiedAt": { "type": "string", "format": "date-time", "description": "When it was last written (UTC)." } },
+          "required": ["path", "name", "size", "modifiedAt"] }
+        """)!.AsObject()));
 
     /// <summary>Parses and checks a document; a document that does not parse gives one <c>invalid-document</c> issue.</summary>
     public static WorkflowCheckResult Check(string json, IWorkflowSchemaLookup schemas, IWorkflowActionCatalog catalog)
@@ -372,23 +388,35 @@ public static class WorkflowChecker
                     break;
                 }
                 case WorkflowStepTypes.FileWriteAllText or WorkflowStepTypes.FileAppendLine:
-                    Text(step, "path", ctx);
+                    FilePath(step, "path", ctx, needsFile: true);
                     Text(step, "text", ctx);
                     break;
                 case WorkflowStepTypes.FileReadAllText:
-                    Text(step, "path", ctx);
+                    FilePath(step, "path", ctx, needsFile: true);
                     Into(step, WorkflowType.String);
                     break;
                 case WorkflowStepTypes.FileReadLines:
-                    Text(step, "path", ctx);
+                    FilePath(step, "path", ctx, needsFile: true);
                     Into(step, WorkflowType.ListOf(WorkflowType.String));
                     break;
                 case WorkflowStepTypes.FileExists:
-                    Text(step, "path", ctx);
+                    FilePath(step, "path", ctx, needsFile: true);
                     Into(step, WorkflowType.Bool);
                     break;
                 case WorkflowStepTypes.FileDelete:
-                    Text(step, "path", ctx);
+                    FilePath(step, "path", ctx, needsFile: true);
+                    break;
+                case WorkflowStepTypes.FileMove or WorkflowStepTypes.FileCopy:
+                    FilePath(step, "path", ctx, needsFile: true);
+                    FilePath(step, "to", ctx, needsFile: false);
+                    Flag(step, "overwrite", ctx);
+                    Into(step, WorkflowType.String);
+                    break;
+                case WorkflowStepTypes.FileList:
+                    FilePath(step, "path", ctx, needsFile: false);
+                    if (step.Has("pattern")) Text(step, "pattern", ctx);
+                    Flag(step, "recursive", ctx);
+                    Into(step, FileListType);
                     break;
                 case "log":
                     Text(step, "text", ctx);
@@ -458,7 +486,59 @@ public static class WorkflowChecker
                 else _refs.Add(new(reply, "", step.Id));
             }
 
+            if (step.Has("attachments")) Attachments(step, ctx);
+
             Into(step, TellResultOf(step));
+        }
+
+        /// <summary>
+        /// A tell's attachments: a list of paths (text or expressions; an expression may give a list of paths, or file.list's items),
+        /// or one expression that gives a path or a list of them. A path written out in full must not be empty, and a docs: one must
+        /// be well formed (as a file step's). Whether a literal absolute path is in a granted folder is the member's, known at run time.
+        /// </summary>
+        private void Attachments(WorkflowStep step, ImmutableList<string> ctx)
+        {
+            var node = step["attachments"];
+            if (node is JsonArray list)
+            {
+                if (list.Count > WorkflowTell.MaxAttachments)
+                    Issue(step.Id, WorkflowCheckCodes.BadValue, $"tell attaches {list.Count} files; the most is {WorkflowTell.MaxAttachments}");
+                for (var i = 0; i < list.Count; i++) AttachmentPath(step, list[i], $"attachments[{i}]", ctx);
+                return;
+            }
+            if (node is JsonValue v && v.GetValueKind() == JsonValueKind.String)
+            {
+                AttachmentPath(step, node, "attachments", ctx);
+                return;
+            }
+            Issue(step.Id, WorkflowCheckCodes.InvalidDocument, "tell's 'attachments' is a list of file paths (text or expressions)");
+        }
+
+        private void AttachmentPath(WorkflowStep step, JsonNode? node, string label, ImmutableList<string> ctx)
+        {
+            if (node is not JsonValue v || v.GetValueKind() != JsonValueKind.String)
+            {
+                Issue(step.Id, WorkflowCheckCodes.InvalidDocument, $"tell's {label} is a file's path (text or an expression), not {node?.ToJsonString() ?? "null"}");
+                return;
+            }
+            var type = ValueType(node, ctx);
+            var ok = type.Kind switch
+            {
+                WorkflowTypeKind.String or WorkflowTypeKind.Any or WorkflowTypeKind.Null or WorkflowTypeKind.Object => true,
+                WorkflowTypeKind.List => type.Element!.Kind is WorkflowTypeKind.String or WorkflowTypeKind.Any or WorkflowTypeKind.Object,
+                _ => false,
+            };
+            if (!ok) { Issue(step.Id, WorkflowCheckCodes.TypeMismatch, $"tell's {label} is {type}, not a file's path or a list of paths"); return; }
+            WorkflowTemplate template;
+            try { template = WorkflowTemplate.Parse(v.GetValue<string>()); }
+            catch (WorkflowExpressionException) { return; } // ValueType has reported it
+            if (!template.HasExpressions)
+            {
+                var path = v.GetValue<string>();
+                if (path.Trim().Length == 0) Issue(step.Id, WorkflowCheckCodes.BadValue, $"tell's {label} is empty; name a file");
+                else if (Engine.WorkflowFiles.IsDocsPath(path) && Engine.WorkflowFiles.DocsPathProblem(path, needsFile: true) is { } problem)
+                    Issue(step.Id, WorkflowCheckCodes.BadDocsPath, $"tell's {label}: {problem}");
+            }
         }
 
         /// <summary>The tell's result type: TellResult with data typed by its reply schema, when that schema exists.</summary>
@@ -533,6 +613,37 @@ public static class WorkflowChecker
             var type = ValueType(step[property], ctx);
             if (type.Kind is WorkflowTypeKind.List or WorkflowTypeKind.Object)
                 Issue(step.Id, WorkflowCheckCodes.TypeMismatch, $"'{property}' is {type}, not text");
+        }
+
+        /// <summary>
+        /// A file step's path: text, and a "docs:" path written out in full (no {expression}) must be well formed (docs:/ and then a
+        /// path inside the team's Documents folder, no "..", not absolute; a step that needs a file cannot name the folder itself).
+        /// A template that starts with literal "docs:" text is checked as far as the prefix goes.
+        /// </summary>
+        private void FilePath(WorkflowStep step, string property, ImmutableList<string> ctx, bool needsFile)
+        {
+            Text(step, property, ctx);
+            if (step[property] is not JsonValue v || v.GetValueKind() != JsonValueKind.String) return;
+            WorkflowTemplate template;
+            try { template = WorkflowTemplate.Parse(v.GetValue<string>()); }
+            catch (WorkflowExpressionException) { return; } // Text has reported it
+            var literal = string.Concat(template.Parts.TakeWhile(p => p is string).Cast<string>());
+            if (!Engine.WorkflowFiles.IsDocsPath(literal)) return;
+            string? problem;
+            if (!template.HasExpressions) problem = Engine.WorkflowFiles.DocsPathProblem(literal, needsFile);
+            else if (!literal.StartsWith(Engine.WorkflowFiles.DocsPrefix, StringComparison.OrdinalIgnoreCase))
+                problem = Engine.WorkflowFiles.DocsPathProblem(literal, needsFile: false);
+            else problem = Engine.WorkflowFiles.DocsPathProblem(literal[..(literal.LastIndexOfAny(['/', '\\']) + 1)], needsFile: false);
+            if (problem is not null) Issue(step.Id, WorkflowCheckCodes.BadDocsPath, $"{step.Type}'s '{property}': {problem}");
+        }
+
+        /// <summary>An optional true/false option (file.move's overwrite, file.list's recursive): a bool, or an expression that can be one.</summary>
+        private void Flag(WorkflowStep step, string property, ImmutableList<string> ctx)
+        {
+            if (!step.Has(property)) return;
+            var type = ValueType(step[property], ctx);
+            if (type.Kind is not (WorkflowTypeKind.Bool or WorkflowTypeKind.Any or WorkflowTypeKind.Null))
+                Issue(step.Id, WorkflowCheckCodes.TypeMismatch, $"'{property}' is {type}, not true or false");
         }
 
         /// <summary>The integration step's action signature, when its requirement's kind is described by the catalog.</summary>
@@ -830,6 +941,8 @@ public static class WorkflowChecker
             WorkflowStepTypes.FileReadAllText => WorkflowType.String,
             WorkflowStepTypes.FileReadLines => WorkflowType.ListOf(WorkflowType.String),
             WorkflowStepTypes.FileExists => WorkflowType.Bool,
+            WorkflowStepTypes.FileMove or WorkflowStepTypes.FileCopy => WorkflowType.String,
+            WorkflowStepTypes.FileList => FileListType,
             WorkflowTell.StepType => TellResultOf(step),
             WorkflowCode.StepType => ReturnsOf(step),
             _ => null,

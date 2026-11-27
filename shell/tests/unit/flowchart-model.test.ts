@@ -272,6 +272,17 @@ describe('edits', () => {
     const fileTypes = STEP_TYPES.filter((t) => t.kind === 'file').map((t) => t.type).sort();
     expect(FILE_OPERATIONS.map((o) => o.type).sort()).toEqual(fileTypes);
   });
+
+  it('Move, Copy and List files: their labels and blank steps', () => {
+    const t = (type: string) => STEP_TYPES.find((s) => s.type === type);
+    expect(t('file.move')).toEqual({ type: 'file.move', kind: 'file', label: 'Move a file', template: { type: 'file.move', path: '', to: '', next: null } });
+    expect(t('file.copy')).toEqual({ type: 'file.copy', kind: 'file', label: 'Copy a file', template: { type: 'file.copy', path: '', to: '', next: null } });
+    expect(t('file.list')).toEqual({ type: 'file.list', kind: 'file', label: 'List files', template: { type: 'file.list', path: '', pattern: '*', next: null } });
+    const op = (type: string) => FILE_OPERATIONS.find((o) => o.type === type);
+    expect(op('file.move')).toMatchObject({ writes: true, reads: false, into: true, fields: ['to', 'overwrite'] });
+    expect(op('file.copy')).toMatchObject({ writes: true, reads: false, into: true, fields: ['to', 'overwrite'] });
+    expect(op('file.list')).toMatchObject({ writes: false, reads: true, into: true, fields: ['pattern', 'recursive'] });
+  });
 });
 
 describe('withFileOperation', () => {
@@ -282,6 +293,19 @@ describe('withFileOperation', () => {
   it('a read keeps into; a delete drops text and into', () => {
     expect(withFileOperation(read, 'file.exists')).toEqual({ ...read, type: 'file.exists' });
     expect(withFileOperation({ ...read, type: 'file.appendLine', text: 'x' }, 'file.delete')).toEqual({ id: 'f', type: 'file.delete', path: '{settings.p}', next: 'n' });
+  });
+  it('move and copy gain to, keep into and drop text; overwrite stays off until checked', () => {
+    expect(withFileOperation({ id: 'f', type: 'file.writeAllText', path: '{settings.p}', text: 'x', next: 'n' }, 'file.move')).toEqual({ id: 'f', type: 'file.move', path: '{settings.p}', to: '', next: 'n' });
+    expect(withFileOperation(read, 'file.copy')).toEqual({ ...read, type: 'file.copy', to: '' });
+    const move = { id: 'f', type: 'file.move', path: 'a', to: 'b', overwrite: true, next: 'n' };
+    expect(withFileOperation(move, 'file.copy')).toEqual({ ...move, type: 'file.copy' });
+    expect(withFileOperation(move, 'file.delete')).toEqual({ id: 'f', type: 'file.delete', path: 'a', next: 'n' });
+  });
+  it('list gains pattern *, drops to and overwrite; leaving it drops pattern and recursive', () => {
+    const move = { id: 'f', type: 'file.move', path: 'in', to: 'b', overwrite: true, into: 'p', next: 'n' };
+    expect(withFileOperation(move, 'file.list')).toEqual({ id: 'f', type: 'file.list', path: 'in', pattern: '*', into: 'p', next: 'n' });
+    const list = { id: 'f', type: 'file.list', path: 'in', pattern: '*.jpg', recursive: true, next: 'n' };
+    expect(withFileOperation(list, 'file.readLines')).toEqual({ id: 'f', type: 'file.readLines', path: 'in', next: 'n' });
   });
   it('an unknown type or the same one leaves the step as it is', () => {
     expect(withFileOperation(read, 'log')).toBe(read);

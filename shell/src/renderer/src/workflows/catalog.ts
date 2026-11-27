@@ -255,7 +255,11 @@ export interface StepIO {
   out: { type: string; into: string | null } | null;
 }
 
-const FILE_RESULTS: Record<string, string> = { 'file.readAllText': 'string', 'file.readLines': 'list<string>', 'file.exists': 'bool' };
+/** What a file step produces: move and copy the final path; list its files (path, name, size, modifiedAt). */
+const FILE_RESULTS: Record<string, string> = {
+  'file.readAllText': 'string', 'file.readLines': 'list<string>', 'file.exists': 'bool',
+  'file.move': 'string', 'file.copy': 'string', 'file.list': 'list<object>',
+};
 
 /** The catalog's action a step calls (through the member's binding for an alias). */
 export function actionOf(ctx: DesignContext, step: WorkflowStep): CatalogAction | null {
@@ -305,6 +309,8 @@ export function stepIO(ctx: DesignContext, step: WorkflowStep): StepIO {
       if (!step.type.startsWith('file.')) return { in: [], out: null };
       const ins = [{ name: 'path', type: 'string' }];
       if (step.type === 'file.writeAllText' || step.type === 'file.appendLine') ins.push({ name: 'text', type: 'string' });
+      if (step.type === 'file.move' || step.type === 'file.copy') ins.push({ name: 'to', type: 'string' }, { name: 'overwrite', type: 'bool' });
+      if (step.type === 'file.list') ins.push({ name: 'pattern', type: 'string' }, { name: 'recursive', type: 'bool' });
       const result = FILE_RESULTS[step.type];
       return { in: ins, out: result ? { type: result, into } : null };
     }

@@ -63,20 +63,42 @@ export const STEP_TYPES: readonly { type: string; kind: FlowKind; label: string;
   { type: 'file.readLines', kind: 'file', label: "Read a file's lines", template: { type: 'file.readLines', path: '', next: null } },
   { type: 'file.exists', kind: 'file', label: 'Check a file exists', template: { type: 'file.exists', path: '', next: null } },
   { type: 'file.delete', kind: 'file', label: 'Delete a file', template: { type: 'file.delete', path: '', next: null } },
+  { type: 'file.move', kind: 'file', label: 'Move a file', template: { type: 'file.move', path: '', to: '', next: null } },
+  { type: 'file.copy', kind: 'file', label: 'Copy a file', template: { type: 'file.copy', path: '', to: '', next: null } },
+  { type: 'file.list', kind: 'file', label: 'List files', template: { type: 'file.list', path: '', pattern: '*', next: null } },
   { type: 'tell', kind: 'tell', label: 'Tell a team member', template: { type: 'tell', member: 'Manager', text: '', next: null } },
   { type: 'code', kind: 'code', label: 'Code', template: { type: 'code', inputs: {}, code: '', returns: 'any', next: null } },
   { type: 'end', kind: 'end', label: 'End', template: { type: 'end' } },
 ];
 
-/** The file step types: one File block on the palette, the operation picked on its form. */
-export const FILE_OPERATIONS: readonly { type: string; label: string; writes: boolean; reads: boolean }[] = [
-  { type: 'file.readAllText', label: 'Read the text', writes: false, reads: true },
-  { type: 'file.readLines', label: 'Read the lines', writes: false, reads: true },
-  { type: 'file.writeAllText', label: 'Write the text', writes: true, reads: false },
-  { type: 'file.appendLine', label: 'Append a line', writes: true, reads: false },
-  { type: 'file.exists', label: 'Check it exists', writes: false, reads: true },
-  { type: 'file.delete', label: 'Delete it', writes: false, reads: false },
+/** A file step's fields besides path, into and next. */
+export type FileField = 'text' | 'to' | 'overwrite' | 'pattern' | 'recursive';
+
+/** The value a field gets when an operation switch adds it (overwrite and recursive are off when absent). */
+const FILE_FIELD_DEFAULTS: Partial<Record<FileField, unknown>> = { text: '', to: '', pattern: '*' };
+
+/**
+ * The file step types: one File block on the palette, the operation picked on its form. writes: it changes files;
+ * reads: it reads them; into: it has a result to save; fields: the ones besides path, into and next.
+ */
+export const FILE_OPERATIONS: readonly { type: string; label: string; writes: boolean; reads: boolean; into: boolean; fields: readonly FileField[] }[] = [
+  { type: 'file.readAllText', label: 'Read the text', writes: false, reads: true, into: true, fields: [] },
+  { type: 'file.readLines', label: 'Read the lines', writes: false, reads: true, into: true, fields: [] },
+  { type: 'file.writeAllText', label: 'Write the text', writes: true, reads: false, into: false, fields: ['text'] },
+  { type: 'file.appendLine', label: 'Append a line', writes: true, reads: false, into: false, fields: ['text'] },
+  { type: 'file.exists', label: 'Check it exists', writes: false, reads: true, into: true, fields: [] },
+  { type: 'file.delete', label: 'Delete it', writes: true, reads: false, into: false, fields: [] },
+  { type: 'file.move', label: 'Move it', writes: true, reads: false, into: true, fields: ['to', 'overwrite'] },
+  { type: 'file.copy', label: 'Copy it', writes: true, reads: false, into: true, fields: ['to', 'overwrite'] },
+  { type: 'file.list', label: 'List the files in a folder', writes: false, reads: true, into: true, fields: ['pattern', 'recursive'] },
 ];
+
+const ALL_FILE_FIELDS: readonly FileField[] = ['text', 'to', 'overwrite', 'pattern', 'recursive'];
+
+/** The file operation of a step type (undefined for any other type). */
+export function fileOperation(type: string) {
+  return FILE_OPERATIONS.find((o) => o.type === type);
+}
 
 /** The palette: the blocks in groups. Each block adds a step of its type (File adds a read; its form picks the operation). */
 export const PALETTE: readonly { group: string; blocks: readonly { key: string; type: string; kind: FlowKind; label: string }[] }[] = [
@@ -99,13 +121,19 @@ export const PALETTE: readonly { group: string; blocks: readonly { key: string; 
   ] },
 ];
 
-/** A file step switched to another operation: the path stays; text only where it writes, into only where it reads. */
+/**
+ * A file step switched to another operation: the path stays; the new operation's fields are kept or added with their
+ * defaults (text '', to '', pattern '*'; overwrite and recursive stay off), the others go; into only where it has a result.
+ */
 export function withFileOperation(step: WorkflowStep, type: string): WorkflowStep {
-  const op = FILE_OPERATIONS.find((o) => o.type === type);
+  const op = fileOperation(type);
   if (!op || step.type === type) return step;
   const next: WorkflowStep = { ...step, type };
-  if (op.writes) { if (!('text' in next)) next.text = ''; } else delete next.text;
-  if (!op.reads) delete next.into;
+  for (const f of ALL_FILE_FIELDS) {
+    if (!op.fields.includes(f)) delete next[f];
+    else if (!(f in next) && f in FILE_FIELD_DEFAULTS) next[f] = FILE_FIELD_DEFAULTS[f];
+  }
+  if (!op.into) delete next.into;
   return next;
 }
 
@@ -169,6 +197,8 @@ function detailOf(step: WorkflowStep): string {
     case 'tell': return tellDetail(step);
     case 'code': return codeDetail(step);
     case 'end': return step.outputs && typeof step.outputs === 'object' ? Object.keys(step.outputs).join(', ') : '';
+    case 'file.move':
+    case 'file.copy': return `${show(step.path)} → ${show(step.to)}`;
     default: return kindOf(step.type) === 'file' ? show(step.path) : '';
   }
 }

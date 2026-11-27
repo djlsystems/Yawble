@@ -55,6 +55,15 @@ and say in plain words when it would fire ("every 5 minutes, starting now", "wee
 - `schedule` is a trigger's schedule: `every` (an interval of at least 10 seconds), `cron` (5 or 6 fields, with a
   timezone), `once` (a time), `event` (an integration watch) or `folder` (a folder and file pattern). Pick a kind the
   workflow's `trigger.accepts` lists.
+- A member runs one run at a time. An `every`, `cron` or `once` fire while its run is going, or waiting on a tell, is
+  skipped (a skipped run in its list). A `folder` fire then is queued instead: the trigger's changes are merged, each
+  file once, and ONE run starts with them when the member's run ends, however it ends. A file first queued as added
+  stays in `trigger.added` even if it changes again (a photo that is still being written); added then removed leaves
+  the fire (no run saw it); removed or changed, then added again, is changed; otherwise the latest kind wins. One
+  trigger's queued fire holds at most 10,000 files: new files past that are dropped, with one warning in the log. The queue
+  is kept over an app restart; a queued fire is dropped if its trigger is deleted or turned off. If the queued run
+  cannot start (only drafts, for example) the fire stays queued and is tried again when the member's next run ends,
+  the app starts again or a trigger fires.
 - Turning a trigger on, or changing the schedule of one that is on, needs the person's yes in the window. Turning one
   off (`enabled: false`) needs none.
 
@@ -127,12 +136,33 @@ top level). Every step must be reachable from `start`; a loop body must end with
 | `file.writeAllText`, `file.appendLine` | `path`, `text`, `next` | writes a text file |
 | `file.readAllText`, `file.readLines`, `file.exists` | `path`, `into`, `next` | reads (string, `list<string>`, bool) |
 | `file.delete` | `path`, `next` | deletes a file |
+| `file.move`, `file.copy` | `path`, `to`, `overwrite`, `into`, `next` | moves or copies a file, any kind (bytes as they are); `into` gets the final path (string) |
+| `file.list` | `path`, `pattern`, `recursive`, `into`, `next` | the files in a folder: `list<{ path, name, size, modifiedAt }>` sorted by path |
 | `log` | `text`, `next` | a line in the run's log |
-| `tell` | `member`, `team`, `text`, `wait`, `timeout`, `reply`, `into`, `next` | gives work to an agent member of a team (section Tell) |
+| `tell` | `member`, `team`, `text`, `attachments`, `wait`, `timeout`, `reply`, `into`, `next` | gives work to an agent member of a team (section Tell) |
 | `end` | `outputs` (optional) | ends the run, setting declared outputs |
 
 - File paths: relative ones are in the member's data folder; an absolute path must be in a folder the team granted
-  (writing needs a writable grant).
+  (writing needs a writable grant). Links and junctions are not followed: a path (in the data folder, a granted folder
+  or `docs:/`, at either end of a move or copy, a free name, a tell's attachment) that goes through one fails its step:
+  `'docs:/j/x.jpg' goes through a link, which is not followed`.
+- `docs:/` paths are in the team's Documents folder (the one the person reads in Documents, and agents see as
+  `YAWBLE_TEAM_DOCS`): `docs:/smoke/smokesessions.json` is `smoke\smokesessions.json` there. The team's workflow
+  members can read and write it with every `file.*` step, at either end of a move or copy, and `file.list` can list
+  `docs:/` or a folder in it. After `docs:/` comes a path inside the folder: no `..`, no drive or absolute path; one that
+  leaves the folder fails its step. `workflow_check` reports a written-out path that breaks these rules (`docs:`
+  without `/`, `docs:/../x`, `docs:/C:/x`, `docs:/` alone where a file is needed) as `bad-docs-path`. A dry run writes
+  the dry run's own copy, and its log names the real file: `would write <Documents>\smoke\smokesessions.json (dry run: ...)`.
+- `file.move` and `file.copy` need a writable folder at both ends. A `to` that ends in `/` or names a folder that exists
+  means the same name inside it (the folder is made when missing). When the target is there and `overwrite` is not
+  `true`, the file takes the first free name: `IMG_0001 (1).jpg`, `IMG_0001 (2).jpg`... A move to another drive copies,
+  then deletes the source. A move that changes only the letter case (`a.JPG` to `a.jpg`) renames the file.
+- `file.list`: `pattern` is one or more names with `*` and `?`, split by `;` (`*.jpg;*.jpeg;*.heic;*.png`, any case;
+  default `*`); `recursive: true` takes the subfolders too. Links, junctions, hidden and system files are not listed,
+  and a recursive list does not go into a linked folder. `size` is in bytes, `modifiedAt` a UTC datetime. A folder
+  that does not exist fails the step. Declare its variable as `list<any>` (or a schema with those fields).
+- A dry run changes no real file: writes, moves and copies go to the dry run's own copies, which later steps see, and
+  the log says `would move <from> -> <to>` / `would copy <from> -> <to>` with the real paths.
 - `email` results: `list` gives `EmailList { messages: list<EmailMessage>, cursorReset }`; `get`, `markRead`, `move`
   give `EmailMessage`; `search`, `thread` give `list<EmailMessage>`. `EmailMessage` has `id threadId messageId folder
   from to cc subject receivedAt snippet body hasAttachments unread`; `from` is `EmailAddress { name, address }`.
@@ -194,18 +224,30 @@ A workflow never runs an agent. A `tell` step gives work to an agent member of a
 - `team`: default the workflow member's own team. Another team is named here. Settings > Workflows **Workflows may tell
   other teams** (on by default) turned off fails such a step with that reason.
 - `text`: the instruction, a template. The deliverable says which workflow, member and run it came from.
+- `attachments` (optional): files the agent should open, as a list of paths: `["{trigger.added}"]`,
+  `["docs:/smoke/report.pdf", "{vars.photo}"]`. Each item is a path or an expression that gives a path, a list of paths
+  or `file.list`'s items. Each file must exist and be one the workflow member may read (its data folder, a granted
+  folder, `docs:/`), at most 20 files of 100 MB each; otherwise the step fails with the reason and tells nothing.
+  The files are copied (the originals stay) into the told team's Documents, `attachments\<time>-<name>`, and the
+  instruction ends with the copies' paths, so the agent can open them without access to the source folder. The log
+  says `attached <file> as <copy>`. If one file cannot be copied, the copies already made are deleted and the step fails
+  with nothing sent; so are they when the tell itself is refused. HEIC/HEIF photos (`.heic`, `.heif`, `.hif`) are copied as they are, not converted to JPEG:
+  the log and the instruction say so, and an agent's image tools may not open them. `workflow_check` reports an
+  item that is not text, an empty path or a malformed `docs:` path; whether an absolute path is in a granted folder is
+  known only when the step runs.
 - `wait`: `false` (default) goes on at once. `true` parks the run (state `waiting`) until the deliverable is done, fails
   or is blocked, or `timeout` passes: `30m`, `4h`, `2d`; default `24h`, at most `7d`. A waiting run holds no run slot,
-  its run timeout stops, and it resumes after an app restart. It is still the member's run, so its triggers that fire
-  meanwhile are skipped: a poller that tells should not wait. Cancelling the run leaves the deliverable alone.
+  its run timeout stops, and it resumes after an app restart. It is still the member's run: an `every`, `cron` or
+  `once` trigger that fires meanwhile is skipped (a poller that tells should not wait), and a `folder` trigger's fire
+  is queued and runs once the wait ends. Cancelling the run leaves the deliverable alone.
 - `reply` (only with `wait`): a schema's name. The instruction asks the agent to end its answer with JSON of that
   schema; a reply that does not match fails the step.
 - `into`: a variable of type `TellResult { outcome, deliverable, reply, data }`. `outcome` is one of `sent` (`wait`
   false), `done`, `failed`, `blocked`, `timedOut` or `dryRun`; `reply` is the agent's closing summary; `data` is the
   reply's JSON (of the `reply` schema), or null.
 - A run tells at most 5 times (a member setting, at most 50); the next tell fails the run.
-- A dry run or a test run never sends a tell: the log says `would tell <member> of <team>: ...` and `into` gets
-  outcome `dryRun`. The Workflows place's Test run takes a made-up reply for each tell that waits.
+- A dry run or a test run never sends a tell: the log says `would tell <member> of <team>: ...`, then
+  `would attach <file>` for each attachment (nothing is copied), and `into` gets outcome `dryRun`. The Workflows place's Test run takes a made-up reply for each tell that waits.
 
 ## Values and expressions
 
@@ -309,6 +351,53 @@ the app.
 
 Write the names `integrations_status` gives in place of `Support inbox` and `Twilio`. Its member uses those
 integrations (turned on for its team) and sets `recipients` and `fromNumber`; a 5-minute `every` trigger runs it.
+
+## Example: moves new photos into a subfolder
+
+```json
+{
+  "format": "yawble-workflow/1",
+  "id": "sort-photos",
+  "name": "Sort photos",
+  "description": "Moves the photos in a folder into its SmokeSessions subfolder.",
+  "trigger": { "accepts": ["every", "once"] },
+  "settings": [
+    { "name": "folder", "type": "string", "label": "Photo folder (a writable folder grant)" }
+  ],
+  "variables": [
+    { "name": "photos", "type": "list<any>", "scope": "run" },
+    { "name": "moved", "type": "int", "scope": "run", "initial": 0 }
+  ],
+  "start": "list",
+  "steps": [
+    { "id": "list", "type": "file.list", "path": "{settings.folder}", "pattern": "*.jpg;*.jpeg;*.heic;*.png",
+      "into": "photos", "next": "each" },
+    { "id": "each", "type": "forEach", "items": "{vars.photos}", "as": "p", "body": "move", "then": "log" },
+    { "id": "move", "type": "file.move", "path": "{p.path}", "to": "{settings.folder}/SmokeSessions/", "next": "count" },
+    { "id": "count", "type": "set", "var": "moved", "value": "{vars.moved + 1}", "next": null },
+    { "id": "log", "type": "log", "text": "{vars.moved} photos moved into SmokeSessions", "next": "done" },
+    { "id": "done", "type": "end" }
+  ]
+}
+```
+
+The list is not recursive, so the photos already in `SmokeSessions` are not listed again. A photo whose name is already
+there keeps both: the new one becomes `name (1).jpg`. The team grants the folder writable; a dry run lists the folder,
+logs each `would move` and moves nothing.
+
+## Example: keeps a list in the team's Documents
+
+Steps that, after the photos are listed, write their names to the team's Documents, where the person and the agents
+read them:
+
+```json
+    { "id": "names", "type": "code", "inputs": { "photos": "{vars.photos}" },
+      "code": "return JSON.stringify(inputs.photos.map(p => ({ name: p.name, size: p.size })), null, 2);",
+      "returns": "string", "into": "json", "next": "save" },
+    { "id": "save", "type": "file.writeAllText", "path": "docs:/smoke/smokesessions.json", "text": "{vars.json}", "next": "done" }
+```
+
+The file is `smoke\smokesessions.json` in Documents (the folder `smoke` is made when missing); no grant is needed.
 
 ## What to tell the person
 

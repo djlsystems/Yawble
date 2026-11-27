@@ -76,7 +76,7 @@ public static class WorkflowEngine
             _began = began;
             _doc = req.Document;
             _files = new WorkflowFiles(req.DataFolder, req.AllowedFolders,
-                req.DryRun ? req.DryRunFolder ?? Path.Combine(req.DataFolder, "dry-run") : null);
+                req.DryRun ? req.DryRunFolder ?? Path.Combine(req.DataFolder, "dry-run") : null, req.TeamDocumentsFolder);
         }
 
         private WorkflowSchema? Find(string name) => BuiltInSchemas.Find(name) ?? _req.Schemas?.Find(name);
@@ -360,8 +360,10 @@ public static class WorkflowEngine
                 "integration" => new JsonObject { ["use"] = step.Text("use"), ["action"] = step.Text("action"), ["args"] = ev.EvaluateValue(step["args"]) ?? new JsonObject() },
                 WorkflowStepTypes.FileWriteAllText or WorkflowStepTypes.FileAppendLine => Pick("path", "text"),
                 WorkflowStepTypes.FileReadAllText or WorkflowStepTypes.FileReadLines or WorkflowStepTypes.FileExists or WorkflowStepTypes.FileDelete => Pick("path"),
+                WorkflowStepTypes.FileMove or WorkflowStepTypes.FileCopy => Pick("path", "to", "overwrite"),
+                WorkflowStepTypes.FileList => Pick("path", "pattern", "recursive"),
                 "log" => Pick("text"),
-                WorkflowTell.StepType => Pick("member", "team", "text", "wait", "timeout", "reply"),
+                WorkflowTell.StepType => Pick("member", "team", "text", "wait", "timeout", "reply", "attachments"),
                 WorkflowCode.StepType => new JsonObject { ["inputs"] = ev.EvaluateValue(step["inputs"]) ?? new JsonObject() },
                 "end" => step["outputs"] is { } o ? new JsonObject { ["outputs"] = ev.EvaluateValue(o) } : null,
                 _ => null,
@@ -452,6 +454,22 @@ public static class WorkflowEngine
                     if (existed) File.Delete(full);
                     return (new JsonObject { ["deleted"] = existed, ["path"] = full }, next);
                 }
+                case WorkflowStepTypes.FileMove or WorkflowStepTypes.FileCopy:
+                    return (Result(step, JsonValue.Create(await MoveOrCopyAsync(step.Type == WorkflowStepTypes.FileMove, input))), next);
+                case WorkflowStepTypes.FileList:
+                {
+                    var pattern = input?["pattern"] is null ? "*" : Text(input, "pattern");
+                    var patterns = pattern.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                    var files = _files.List(Text(input, "path"), patterns.Length == 0 ? ["*"] : patterns, Bool(input, "recursive"));
+                    var list = new JsonArray(files.Select(f => (JsonNode?)new JsonObject
+                    {
+                        ["path"] = f.Path,
+                        ["name"] = Path.GetFileName(f.Path),
+                        ["size"] = f.Info.Length,
+                        ["modifiedAt"] = WorkflowValues.FormatInstant(f.Info.LastWriteTimeUtc),
+                    }).ToArray());
+                    return (Result(step, list), next);
+                }
                 case "log":
                     await LogAsync(Text(input, "text"));
                     return (null, next);
@@ -483,6 +501,81 @@ public static class WorkflowEngine
             if (value is JsonArray or JsonObject) throw new WorkflowStepException($"'{name}' is {WorkflowValues.Describe(value)}, not text");
             return WorkflowValues.Format(value);
         }
+
+        /// <summary>
+        /// A file.move or file.copy: the bytes as they are (a file copy, never text), the target from <see cref="WorkflowFiles.ForTarget"/>.
+        /// A move across volumes is a copy, then the source deleted. A dry run puts the bytes in the target's dry-run copy (a move also
+        /// marks its source deleted for the rest of the dry run) and changes no real file. Gives the final real path.
+        /// </summary>
+        private async Task<string> MoveOrCopyAsync(bool move, JsonNode? input)
+        {
+            var verb = move ? "move" : "copy";
+            var (read, source) = _files.ForSource(Text(input, "path"));
+            var overwrite = Bool(input, "overwrite");
+            var target = _files.ForTarget(Text(input, "to"), source, overwrite, move);
+            var same = string.Equals(source, target, OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+            // a.JPG -> a.jpg where names ignore case: the same file, renamed (only a move gets here; a copy took a free name).
+            // The name on disk counts, not how the step spelled the source.
+            var caseOnly = same && !string.Equals(_files.DryRun ? source : OnDisk(source), target, StringComparison.Ordinal);
+            if (_files.DryRun)
+            {
+                if (!same || caseOnly) _files.DryPut(read, target);
+                if (move && !same) _files.DryDelete(source);
+                await LogAsync($"would {verb} {source} -> {target}");
+                return target;
+            }
+            if (caseOnly)
+            {
+                RenameCase(source, target);
+                return target;
+            }
+            if (same) return target;
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            if (!move) File.Copy(source, target, overwrite);
+            else if (!string.Equals(Path.GetPathRoot(source), Path.GetPathRoot(target), StringComparison.OrdinalIgnoreCase))
+            {
+                File.Copy(source, target, overwrite);
+                File.Delete(source);
+            }
+            else File.Move(source, target, overwrite);
+            return target;
+        }
+
+        /// <summary>
+        /// Renames a file to the same name in another letter case, through a free temporary name in its folder (a file system
+        /// that ignores case may take a direct rename for "no change"). When the second step fails the file gets its old name back.
+        /// </summary>
+        private static string OnDisk(string path)
+        {
+            var folder = Path.GetDirectoryName(path)!;
+            return Directory.EnumerateFiles(folder).FirstOrDefault(f => string.Equals(f, path, StringComparison.Ordinal))
+                ?? Directory.EnumerateFiles(folder).FirstOrDefault(f => string.Equals(f, path, StringComparison.OrdinalIgnoreCase))
+                ?? path;
+        }
+
+        private static void RenameCase(string source, string target)
+        {
+            var folder = Path.GetDirectoryName(source)!;
+            string temp;
+            do temp = Path.Combine(folder, $".{Path.GetFileName(source)}.{Guid.NewGuid():N}.renaming");
+            while (File.Exists(temp) || Directory.Exists(temp));
+            File.Move(source, temp);
+            try { File.Move(temp, target); }
+            catch
+            {
+                File.Move(temp, source);
+                throw;
+            }
+        }
+
+        /// <summary>An optional true/false input (absent: false); text "true"/"false" from a template counts.</summary>
+        private static bool Bool(JsonNode? input, string name) => WorkflowValues.FromNode(input?[name]) switch
+        {
+            null => false,
+            bool b => b,
+            string s when bool.TryParse(s.Trim(), out var b) => b,
+            var other => throw new WorkflowStepException($"'{name}' is {WorkflowValues.Describe(other)}, not true or false"),
+        };
 
         private JsonNode? SetVar(string name, JsonNode? value)
         {
@@ -523,6 +616,7 @@ public static class WorkflowEngine
             }
             var replyName = wait ? step.Text("reply") : null;
             var replySchema = replyName is null ? null : Find(replyName) ?? throw new WorkflowStepException($"reply: no schema named '{replyName}'");
+            var attachments = AttachmentsOf(input["attachments"]);
 
             if (_tells >= _req.MaxTells)
                 throw new WorkflowStepException($"a run may tell at most {_req.MaxTells} time{(_req.MaxTells == 1 ? "" : "s")} (the member's maxTells is {_req.MaxTells}); this would be tell {_tells + 1}");
@@ -531,6 +625,8 @@ public static class WorkflowEngine
             if (_req.DryRun || _req.DryTells)
             {
                 await LogAsync($"would tell {member} of {team ?? _req.Team ?? "its team"}: {text}");
+                foreach (var a in attachments)
+                    await LogAsync($"would attach {a}" + (WorkflowTell.IsHeif(a) ? $" ({WorkflowTell.HeifNote})" : ""));
                 string reply = "";
                 JsonNode? data = null;
                 if (wait && _req.TellReplies is { } replies && replies.TryGetPropertyValue(step.Id, out var madeUp))
@@ -540,10 +636,21 @@ public static class WorkflowEngine
 
             var teller = _req.Teller ?? throw new WorkflowStepException("this run has no team to tell");
             WorkflowTellSent sent;
-            try { sent = await teller.TellAsync(new WorkflowTellCall(step.Id, member, team, text, wait, replyName, (JsonObject?)replySchema?.Schema.DeepClone()), _ct); }
+            try
+            {
+                sent = await teller.TellAsync(new WorkflowTellCall(step.Id, member, team, text, wait, replyName, (JsonObject?)replySchema?.Schema.DeepClone(),
+                    attachments.Count == 0 ? null : attachments), _ct);
+            }
             catch (Exception e) when (e is not OperationCanceledException and not WorkflowActionException)
             {
                 throw new WorkflowActionException($"tell {member}: {e.Message}");
+            }
+            if (attachments.Count > 0)
+            {
+                var copies = sent.Attached ?? [];
+                for (var i = 0; i < attachments.Count; i++)
+                    await LogAsync($"attached {attachments[i]}" + (i < copies.Count ? $" as {copies[i]}" : "")
+                        + (WorkflowTell.IsHeif(attachments[i]) ? $" ({WorkflowTell.HeifNote})" : ""));
             }
             if (!wait) return Result(step, WorkflowTell.Result(WorkflowTell.Outcomes.Sent, sent.Deliverable, "", null));
 
@@ -559,6 +666,52 @@ public static class WorkflowEngine
                 Input = input.DeepClone(),
             };
             return new JsonObject { ["waiting"] = true, ["deliverable"] = sent.Deliverable, ["member"] = sent.Member, ["team"] = sent.Team };
+        }
+
+        /// <summary>
+        /// A tell's attachments: a path, a list of paths (a list in the list is taken item by item), or objects with a <c>path</c>
+        /// (file.list's items). Each must be a file the run may read (the data folder, a granted folder, docs:/) that exists, at most
+        /// <see cref="WorkflowTell.MaxAttachmentBytes"/>; at most <see cref="WorkflowTell.MaxAttachments"/> of them. Gives the real paths.
+        /// </summary>
+        private List<string> AttachmentsOf(JsonNode? node)
+        {
+            var paths = new List<string>();
+            void Add(object? v)
+            {
+                switch (v)
+                {
+                    case null: return;
+                    case JsonArray a:
+                        foreach (var i in a) Add(WorkflowValues.FromNode(i));
+                        return;
+                    case JsonObject o when o["path"] is JsonValue p && p.TryGetValue<string>(out var s):
+                        paths.Add(s);
+                        return;
+                    case string s:
+                        paths.Add(s);
+                        return;
+                    default:
+                        throw new WorkflowStepException($"an attachment is {WorkflowValues.Describe(v)}, not a file's path");
+                }
+            }
+            Add(WorkflowValues.FromNode(node));
+            if (paths.Count > WorkflowTell.MaxAttachments)
+                throw new WorkflowStepException($"tell attaches {paths.Count} files; the most is {WorkflowTell.MaxAttachments}");
+            var real = new List<string>();
+            foreach (var path in paths)
+            {
+                if (string.IsNullOrWhiteSpace(path)) throw new WorkflowStepException("an attachment's path is empty");
+                var (full, _, _) = _files.Locate(path);
+                var read = _files.ForRead(path);
+                if (!File.Exists(read))
+                    throw new WorkflowStepException(Directory.Exists(full)
+                        ? $"'{path}' is a folder; tell attaches files"
+                        : $"'{path}' does not exist, so tell cannot attach it");
+                if (new FileInfo(read).Length > WorkflowTell.MaxAttachmentBytes)
+                    throw new WorkflowStepException($"'{path}' is larger than {WorkflowTell.MaxAttachmentBytes / 1024 / 1024} MB, the most tell attaches");
+                real.Add(full);
+            }
+            return real;
         }
 
         /// <summary>A waiting tell's end: its outcome, the closing summary, and for done with a reply schema the reply's checked data.</summary>
