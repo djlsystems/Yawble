@@ -172,7 +172,7 @@ public sealed class ConciergeActions(
     [
         "backlog_edit", "backlog_ready", "backlog_dispatch", "backlog_archive", "backlog_restore", "board_move", "board_comment",
         "git_branches_delete", "git_branch_realign", "git_prune", "git_push_branch", "git_sync_branch", "git_pr_open", "git_pr_merge",
-        "team_archive", "team_unarchive", "team_delete", "team_env_set", "team_agent_change", "doctor_fix",
+        "team_archive", "team_unarchive", "team_delete", "team_env_set", "team_agent_change", "doctor_fix", "folder_request",
     ];
 
     /// <summary>Null when <paramref name="name"/> is not one of these tools.</summary>
@@ -337,6 +337,13 @@ public sealed class ConciergeActions(
                 await ui("members.update", new JsonObject { ["memberId"] = member.Id, ["cli"] = cli, ["instructions"] = member.Instructions, ["model"] = model,
                     ["credential"] = cli == member.Cli ? member.Credential : "default" }, ct);
                 return $"ok: {team.Name}/{member.Name} now uses {cli}{(model.Length > 0 ? $" ({model})" : "")}; it applies from its next run.";
+            }
+            case "folder_request":
+            {
+                // Only raises the ask: the person answers it in Needs you, and chooses there whom the approval covers.
+                var team = await TeamAsync(Required(args, "team"), ct);
+                var asks = bus.FolderAsks ?? throw new ArgumentException("folder requests are not available on this computer");
+                return await asks.RequestFromConciergeAsync(team.Name, Optional(args, "member"), Required(args, "path"), Required(args, "access"), Required(args, "reason"), ct);
             }
         }
         throw new ArgumentException($"unknown tool: {name}");
@@ -631,6 +638,9 @@ public sealed class ConciergeActions(
             ("fix", "string", "The fix's id, as the doctor lists it.", true), ("confirm", "string", "The token, after the person's yes.", false)),
         Tool("team_agent_change", "Change which agent CLI (and model) a team member uses; it applies from its next run.",
             ("team", "string", "The team.", true), ("member", "string", "The member's name.", true), ("cli", "string", "claude, grok, codex, copilot or antigravity.", false), ("model", "string", "Model (optional).", false)),
+        Tool("folder_request", "Ask the person to give a team's member read or read-write access to a folder on this computer outside its own folders (a data folder a workflow reads or writes, an output folder). It only raises the request: the person approves or denies it in Needs you, and chooses there whether it covers that member, every member of the team, or all teams. Folders that may never be granted are refused at once with the reason. Calling it again for a folder already granted says so. Never tell the person to edit settings or the policy by hand for this.",
+            ("team", "string", "The team.", true), ("member", "string", "The member that needs the folder (a workflow member, an agent); the team's Manager when left out.", false),
+            ("path", "string", "The folder's full absolute path.", true), ("access", "string", "read or readwrite.", true), ("reason", "string", "One line on what the folder is needed for.", true)),
     ];
 
     private static JsonObject Tool(string name, string description, params (string Name, string Type, string Description, bool Required)[] parameters)

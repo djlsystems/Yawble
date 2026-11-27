@@ -18,7 +18,9 @@ namespace Yawble.Core.Tests.Integrations;
 /// Folder asks: request_folder raises an ask the person answers in Needs you; an approval writes the
 /// member's loosen block through the policy store and its effective policy has the folder; read narrows; deny changes
 /// nothing and tells the asker; a repeat reuses the open ask; a Manager may ask for its own team's member only; each
-/// refusal is said at once with no ask. Fakes only: a temporary database, a fixed fictional Windows machine
+/// refusal is said at once with no ask. An approval covers the member, the whole team (the team's folder list) or all
+/// teams (the global policy); the Concierge raises the same ask and wakes no agent; only the person adds to or removes
+/// from a team's folder list. Fakes only: a temporary database, a fixed fictional Windows machine
 /// (PolicyFixtures: the person "alice", teams alpha and beta), a recording tell, a fake "exists".
 /// </summary>
 public sealed class FolderAskTests : IDisposable
@@ -83,8 +85,9 @@ public sealed class FolderAskTests : IDisposable
     private Task<string> Ask(MemberRef who, string path, string access = "readwrite", string? member = null) =>
         _asks.RequestFromAgentAsync(who, path, access, "read the recorded smoke sessions the tests replay", member, deliverable: 70, causation: 71, Ct);
 
-    private EffectivePolicy Effective(long memberId) =>
-        _policies.Effective(memberId, PolicyFixtures.Layout(TargetOs.Windows, AgentCli.Claude, new Yawble.Core.Policy.MemberRef("alpha", _names[memberId]))).Policy;
+    private RunLayout Layout(long memberId) => PolicyFixtures.Layout(TargetOs.Windows, AgentCli.Claude, new Yawble.Core.Policy.MemberRef("alpha", _names[memberId]));
+
+    private EffectivePolicy Effective(long memberId) => _policies.Effective(memberId, Layout(memberId)).Policy;
 
     // ------------------------------------------------------------------ ask, approve, deny
 
@@ -189,6 +192,232 @@ public sealed class FolderAskTests : IDisposable
             await _asks.AnswerAsync(id, FolderAccess.Read, null, Ct);
         var closed = _asks.Asks(openOnly: false).Single();
         Assert.Equal(("person@example.com", Actor.Cloud), (closed.DecidedBy, closed.DecidedVia));
+    }
+
+    // ------------------------------------------------------------------ whom an approval covers
+
+    [Fact]
+    public async Task AWaitingAsk_OffersTheThreeScopes_AndAnAnsweredOneNone()
+    {
+        await Ask(Dev1, @"Z:\smokesessions");
+        var ask = _asks.Asks().Single();
+        Assert.Equal(["member", "team", "everywhere"], _asks.ToJson(ask)["scopes"]!.AsArray().Select(n => n!.GetValue<string>()));
+        await Assert.ThrowsAsync<ArgumentException>(() => _asks.AnswerAsync(ask.Id, FolderAccess.Read, null, Ct, "the-world"));
+        Assert.Single(_asks.Asks());
+
+        // No scope is the ask's member only: nobody else on the team has the folder.
+        var answer = await _asks.AnswerAsync(ask.Id, FolderAccess.ReadWrite, null, Ct);
+        Assert.Equal("member", answer["scope"]!.GetValue<string>());
+        Assert.DoesNotContain(@"Z:\smokesessions", Effective(_dev2).Readwrite);
+        Assert.Empty(_policies.TeamFolders(_alpha));
+        Assert.Empty(_asks.ToJson(_asks.Asks(openOnly: false).Single())["scopes"]!.AsArray());
+    }
+
+    [Fact]
+    public async Task ApprovedForTheTeam_GoesOnTheTeamsFolderList_ForEveryMemberAndLaterHires()
+    {
+        await Ask(Dev1, @"Z:\smokesessions");
+        var id = _asks.Asks().Single().Id;
+        JsonObject answer;
+        using (Actor.Use(new Actor(Actor.App, "alice")))
+            answer = await _asks.AnswerAsync(id, FolderAccess.ReadWrite, null, Ct, FolderScope.Team);
+        Assert.Equal(("team", "readwrite"), (answer["scope"]!.GetValue<string>(), answer["grantedAccess"]!.GetValue<string>()));
+
+        var row = Assert.Single(_policies.TeamFolders(_alpha));
+        Assert.Equal((@"Z:\smokesessions", "readwrite", "alice", Actor.App), (row.Path, row.Access, row.AddedBy, row.AddedVia));
+        // The team's list, not each member's own loosen block.
+        Assert.True(_policies.GetMember(_dev1).Loosen.IsEmpty);
+        foreach (var member in new[] { _manager, _dev1, _dev2 }) Assert.Contains(@"Z:\smokesessions", Effective(member).Readwrite);
+        var hired = Member(_alpha, "dev3", "member");
+        Assert.Contains(@"Z:\smokesessions", Effective(hired).Readwrite);
+        Assert.Empty(_policies.TeamFolders(_beta));
+
+        Assert.Contains(@"Every member of the team can now read and write Z:\smokesessions", Assert.Single(_told).Text);
+        Assert.Contains(@"read-write Z:\smokesessions for every member of team alpha", _asks.Events(id).Last().Detail);
+        Assert.Equal("approved", _asks.Asks(openOnly: false).Single().State);
+    }
+
+    [Fact]
+    public async Task ApprovedForTheTeam_IsNeverWiderThanAsked_AndNeverNarrowsWhatTheTeamHas()
+    {
+        await Ask(Dev1, @"Z:\smokesessions", "read");
+        var read = _asks.Asks().Single().Id;
+        await Assert.ThrowsAsync<ArgumentException>(() => _asks.AnswerAsync(read, FolderAccess.ReadWrite, null, Ct, FolderScope.Team));
+        Assert.Empty(_policies.TeamFolders(_alpha));
+        await _asks.AnswerAsync(read, FolderAccess.Read, null, Ct, FolderScope.Team);
+        Assert.Equal("read", Assert.Single(_policies.TeamFolders(_alpha)).Access);
+        Assert.Contains(@"Z:\smokesessions", Effective(_dev2).Readonly);
+
+        // A read ask that waited while the person gave the team the folder read-write: approving it for the team
+        // leaves the team's folder read-write.
+        await Ask(Dev1, @"Z:\output", "read");
+        await _asks.AddTeamFolderAsync(_alpha, @"Z:\output", "readwrite", Ct);
+        await _asks.AnswerAsync(_asks.Asks().Single().Id, FolderAccess.Read, null, Ct, FolderScope.Team);
+        Assert.Equal("readwrite", _policies.TeamFolders(_alpha).Single(f => f.Path == @"Z:\output").Access);
+        // A folder inside one the team has is not asked for at all.
+        Assert.Contains("already read-write", await _asks.RequestFromConciergeAsync("alpha", "dev2", @"Z:\output\reports", "read", "read the reports", Ct));
+        Assert.Empty(_asks.Asks());
+    }
+
+    [Fact]
+    public async Task ApprovedForTheTeam_WhenOneMemberCannotHaveIt_ChangesNothing_AndTheAskStaysWaiting()
+    {
+        _policies.SaveOverride(_dev2, new PolicyPatch(Filesystem: new FilesystemPatch(Denied: [@"Z:\smokesessions"])), Layout(_dev2));
+        await Ask(Dev1, @"Z:\smokesessions");
+        var id = _asks.Asks().Single().Id;
+        var e = await Assert.ThrowsAsync<PolicyException>(() => _asks.AnswerAsync(id, FolderAccess.ReadWrite, null, Ct, FolderScope.Team));
+        Assert.Contains(e.Errors, x => x.Contains("dev2"));
+        Assert.Empty(_policies.TeamFolders(_alpha));
+        Assert.DoesNotContain(@"Z:\smokesessions", Effective(_dev1).Readwrite);
+        Assert.Single(_asks.Asks());
+        Assert.Empty(_told);
+        // The person can still approve it for the one member.
+        await _asks.AnswerAsync(id, FolderAccess.ReadWrite, null, Ct, FolderScope.Member);
+        Assert.Contains(@"Z:\smokesessions", Effective(_dev1).Readwrite);
+    }
+
+    [Fact]
+    public async Task ApprovedForAllTeams_GoesInTheGlobalPolicy()
+    {
+        await Ask(Dev1, @"Z:\smokesessions");
+        var id = _asks.Asks().Single().Id;
+        var answer = await _asks.AnswerAsync(id, FolderAccess.Read, null, Ct, FolderScope.Everywhere);
+        Assert.Equal("everywhere", answer["scope"]!.GetValue<string>());
+        Assert.Contains(@"Z:\smokesessions", _policies.GetGlobal().Filesystem.Readonly);
+        Assert.Empty(_policies.TeamFolders(_alpha));
+        Assert.True(_policies.GetMember(_dev1).Loosen.IsEmpty);
+        var beta = _policies.Effective(_betaManager, PolicyFixtures.Layout(TargetOs.Windows, AgentCli.Claude, new Yawble.Core.Policy.MemberRef("beta", "manager"))).Policy;
+        Assert.Contains(@"Z:\smokesessions", beta.Readonly);
+        Assert.Contains(@"Z:\smokesessions", Effective(_dev2).Readonly);
+        Assert.Contains("Every agent can now read", Assert.Single(_told).Text);
+        Assert.Contains("for every agent of every team", _asks.Events(id).Last().Detail);
+    }
+
+    [Fact]
+    public async Task ADeny_HasNoScope()
+    {
+        await Ask(Dev1, @"Z:\smokesessions");
+        var answer = await _asks.AnswerAsync(_asks.Asks().Single().Id, FolderAccess.Deny, null, Ct, FolderScope.Everywhere);
+        Assert.Null(answer["scope"]);
+        Assert.Empty(_policies.TeamFolders(_alpha));
+        Assert.DoesNotContain(@"Z:\smokesessions", _policies.GetGlobal().Filesystem.Readonly.Concat(_policies.GetGlobal().Filesystem.Readwrite));
+    }
+
+    // ------------------------------------------------------------------ the Concierge's request
+
+    private Task<string> ConciergeAsks(string team, string? member, string path, string access = "read") =>
+        _asks.RequestFromConciergeAsync(team, member, path, access, "the nightly workflow reads the recorded sessions", Ct);
+
+    [Fact]
+    public async Task TheConciergeRaisesTheAsk_ThePersonAnswersIt_AndNoAgentIsWoken()
+    {
+        var text = await ConciergeAsks("Alpha", "DEV1", @"Z:\smokesessions", "readwrite");
+        var ask = Assert.Single(_asks.Asks());
+        Assert.StartsWith($"asked (folder request {ask.Id})", text);
+        Assert.Contains(@"read-write access to Z:\smokesessions for alpha/dev1", text);
+        Assert.Contains("this member, the whole team, or all teams", text);
+        Assert.Contains("You cannot answer it for them", text);
+        Assert.Equal(("alpha/dev1", FolderAskService.ConciergeAsker, _dev1, "readwrite"), (ask.Member, ask.AskedBy, ask.MemberId, ask.Access));
+        Assert.Null(ask.Deliverable);
+        Assert.Contains("(asked by the Concierge)", Assert.Single(_asks.PendingLines()));
+        Assert.Contains("already waiting", await ConciergeAsks("alpha", "dev1", @"Z:\smokesessions", "readwrite"));
+        Assert.Single(_asks.Asks());
+
+        // Nothing is granted until the person answers; the Concierge can never answer.
+        Assert.DoesNotContain(@"Z:\smokesessions", Effective(_dev1).Readwrite);
+        using (Actor.Use(new Actor(Actor.Concierge, "alice")))
+            await Assert.ThrowsAsync<ArgumentException>(() => _asks.AnswerAsync(ask.Id, FolderAccess.ReadWrite, null, Ct, FolderScope.Team));
+        Assert.Empty(_policies.TeamFolders(_alpha));
+
+        var answer = await _asks.AnswerAsync(ask.Id, FolderAccess.ReadWrite, null, Ct, FolderScope.Team);
+        Assert.Null(answer["told"]);
+        Assert.Empty(_told); // no run was blocked on it: the Manager is not woken
+        Assert.Contains(@"Z:\smokesessions", Effective(_dev2).Readwrite);
+
+        // Asked again once granted: it says so and raises nothing.
+        var again = await ConciergeAsks("alpha", "dev2", @"Z:\smokesessions", "readwrite");
+        Assert.Contains("already read-write for alpha/dev2", again);
+        Assert.Contains("Nothing is asked.", again);
+        Assert.Empty(_asks.Asks());
+    }
+
+    [Fact]
+    public async Task AConciergeAskDenied_TellsNoAgent()
+    {
+        await ConciergeAsks("alpha", "dev1", @"Z:\smokesessions");
+        var answer = await _asks.AnswerAsync(_asks.Asks().Single().Id, FolderAccess.Deny, "no", Ct);
+        Assert.Null(answer["told"]);
+        Assert.Empty(_told);
+        Assert.Equal("denied", _asks.Asks(openOnly: false).Single().State);
+    }
+
+    [Fact]
+    public async Task TheConciergesRequest_WithNoMember_IsForTheTeamsManager()
+    {
+        Assert.StartsWith("asked", await ConciergeAsks("alpha", null, @"Z:\smokesessions"));
+        Assert.Equal(("alpha/manager", _manager), (_asks.Asks().Single().Member, _asks.Asks().Single().MemberId));
+    }
+
+    [Theory]
+    [InlineData("gamma", null, "no team named 'gamma'")]
+    [InlineData("alpha", "nobody", "no member named 'nobody' on team 'alpha'")]
+    [InlineData("beta", "dev1", "no member named 'dev1' on team 'beta'")]
+    public async Task TheConciergesRequest_ForAnUnknownTeamOrMember_IsRefused(string team, string? member, string why)
+    {
+        var text = await ConciergeAsks(team, member, @"Z:\smokesessions");
+        Assert.StartsWith("refused:", text);
+        Assert.Contains(why, text);
+        Assert.Empty(_asks.Asks(openOnly: false));
+    }
+
+    [Theory]
+    [InlineData(@"C:\Users\alice\.ssh", "read", "secrets")]
+    [InlineData(@"D:\repos\beta-app", "read", "another team")]
+    [InlineData(@"C:\Users\alice\AppData\Local\Yawble\data", "read", "Yawble's own data")]
+    [InlineData(@"C:\Windows", "read", "Windows system folder")]
+    [InlineData("sessions", "read", "not an absolute path")]
+    public async Task TheConciergesRequest_ForAFolderNeverGranted_IsRefusedAtOnce(string path, string access, string why)
+    {
+        var text = await ConciergeAsks("alpha", "dev1", path, access);
+        Assert.StartsWith("refused:", text);
+        Assert.Contains(why, text, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(_asks.Asks(openOnly: false));
+        await Assert.ThrowsAsync<ArgumentException>(() => _asks.RequestFromConciergeAsync("alpha", "dev1", @"Z:\x", "everything", "why", Ct));
+        await Assert.ThrowsAsync<ArgumentException>(() => _asks.RequestFromConciergeAsync("alpha", "dev1", @"Z:\x", "read", " ", Ct));
+    }
+
+    // ------------------------------------------------------------------ the team's folder list, as Team settings changes it
+
+    [Fact]
+    public async Task ThePersonAddsAndRemovesATeamFolder_AndNobodyElseCan()
+    {
+        foreach (var via in new[] { Actor.Concierge, Actor.Agent, Actor.External, Actor.Trigger, Actor.Host })
+            using (Actor.Use(new Actor(via, "someone")))
+            {
+                await Assert.ThrowsAsync<ArgumentException>(() => _asks.AddTeamFolderAsync(_alpha, @"Z:\smokesessions", "readwrite", Ct));
+                Assert.Throws<ArgumentException>(() => _asks.RemoveTeamFolder(_alpha, @"Z:\smokesessions"));
+            }
+        Assert.Empty(_policies.TeamFolders(_alpha));
+
+        JsonObject listed;
+        using (Actor.Use(Actor.CloudViewer("person@example.com")))
+            listed = await _asks.AddTeamFolderAsync(_alpha, @"Z:\smokesessions\", "readwrite", Ct);
+        var folder = Assert.Single(listed["folders"]!.AsArray())!;
+        Assert.Equal((@"Z:\smokesessions", "readwrite", "person@example.com", Actor.Cloud),
+            (folder["path"]!.GetValue<string>(), folder["access"]!.GetValue<string>(), folder["addedBy"]!.GetValue<string>(), folder["addedVia"]!.GetValue<string>()));
+        Assert.Contains(@"Z:\smokesessions", Effective(_dev2).Readwrite);
+        Assert.Contains(@"- Z:\smokesessions: read-write (added by person@example.com on ", Assert.Single(_asks.TeamFolderLines(_alpha)));
+
+        // A refusal names the reason and writes nothing; another team's folder (the caller's list) is one.
+        var refused = await Assert.ThrowsAsync<PolicyException>(() => _asks.AddTeamFolderAsync(_alpha, BetaRepo, "read", Ct));
+        Assert.Contains(refused.Errors, x => x.Contains("another team"));
+        await Assert.ThrowsAsync<ArgumentException>(() => _asks.AddTeamFolderAsync(_alpha, @"Z:\x", "everything", Ct));
+        await Assert.ThrowsAsync<ArgumentException>(() => _asks.AddTeamFolderAsync(_alpha, " ", "read", Ct));
+        Assert.Single(_policies.TeamFolders(_alpha));
+
+        Assert.Empty(_asks.RemoveTeamFolder(_alpha, @"Z:\smokesessions")!["folders"]!.AsArray());
+        Assert.Null(_asks.RemoveTeamFolder(_alpha, @"Z:\smokesessions"));
+        Assert.DoesNotContain(@"Z:\smokesessions", Effective(_dev2).Readwrite);
     }
 
     // ------------------------------------------------------------------ who may ask for whom

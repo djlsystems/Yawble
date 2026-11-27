@@ -342,6 +342,20 @@ public sealed class ConciergeTools(
             sb.AppendLine("Open decisions (answer with the answer tool):");
             foreach (var d in decisions) sb.AppendLine($"- question {d.Seq} from {From(d)}: {Field(d, "question")}");
         }
+        if (bus.FolderAsks is { } folders)
+        {
+            // What the team's Settings > Folders lists, and the folder requests still waiting for the person.
+            var granted = folders.TeamFolderLines(team.Id);
+            sb.AppendLine(granted.Count == 0 ? "Team folders (outside its own folders, for every member): none."
+                : "Team folders (outside its own folders; every member has them from its next run; the person changes them in the team's Settings > Folders):");
+            foreach (var l in granted) sb.AppendLine(l);
+            var waiting = folders.PendingLines(team.Id);
+            if (waiting.Count > 0)
+            {
+                sb.AppendLine("Folder requests waiting for the person (answered in Needs you, not from here):");
+                foreach (var l in waiting) sb.AppendLine(l);
+            }
+        }
         return sb.ToString().TrimEnd();
     }
 
@@ -531,7 +545,7 @@ public sealed class ConciergeTools(
     [
         Tool("team_list", "Every team on this computer: agents, running, queued, open decisions, repository."),
         Tool("team_current", "The team the person has in focus in this conversation, if any (a hint, not a limit)."),
-        Tool("team_status", "One team: each agent's state and what it says, its queue, and the open decisions waiting for the person.",
+        Tool("team_status", "One team: each agent's state and what it says, its queue, the open decisions waiting for the person, the team's folders (Settings > Folders) and its waiting folder requests.",
             ("team", "string", "The team's name.", true)),
         Tool("team_activity", "One team's latest messages: who was told what, progress, hand-backs, completions, failures.",
             ("team", "string", "The team's name.", true), ("limit", "integer", "How many messages (default 25, at most 100).", false)),

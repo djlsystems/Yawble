@@ -38,6 +38,26 @@ public static class FolderAccess
 }
 
 /// <summary>
+/// Whom an approval covers (folder.answer's scope): the member the ask is for (its loosen block), every member of its
+/// team (the team's folder list, which members hired later get too), or every agent of every team (the global policy).
+/// A deny has no scope.
+/// </summary>
+public static class FolderScope
+{
+    public const string Member = "member", Team = "team", Everywhere = "everywhere";
+
+    public static readonly IReadOnlyList<string> All = [Member, Team, Everywhere];
+
+    public static string? Parse(string? scope) => (scope ?? "").Trim().ToLowerInvariant() switch
+    {
+        "" or "member" => Member,
+        "team" => Team,
+        "everywhere" or "all" or "all-teams" => Everywhere,
+        _ => null,
+    };
+}
+
+/// <summary>
 /// Which folders an agent may ask for at all. Pure: every rule reads the member's run layout (the app's own folders,
 /// the implicit denials, other teams' roots), the global policy's denied list and the other teams' folders the caller
 /// names. A refusal is said to the agent at once and no ask is raised. None of this changes a policy rule: what may be
@@ -148,11 +168,15 @@ public static class FolderAskRules
 /// Folder asks: an agent's request_folder names a folder and read or read-write access, for itself or (a Manager)
 /// for a member of its own team. Paths an agent may never have are refused at once (<see cref="FolderAskRules"/>, then
 /// the policy merger's own checks), so the person is only asked about a folder that can be granted. The person answers
-/// in Needs you (folder.answer): read-write (only when asked), read-only, or deny. An approval writes the path into the
-/// member's loosen block through the policy store (<see cref="PolicyStore.PreviewLoosen"/> and
-/// <see cref="PolicyStore.SaveLoosen"/>, the same code as policy.saveLoosen: loosen_summary and loosen_approved_at set),
-/// confirmed as exactly that one path; the team's Manager is told to retry. A deny tells the asker. Either applies from
-/// the member's next run. Each ask and answer is in folder_ask_events, and the answer call in the audit log.
+/// in Needs you (folder.answer): read-write (only when asked), read-only, or deny, and for an approval whom it covers
+/// (<see cref="FolderScope"/>). For the member, the path goes into its loosen block through the policy store
+/// (<see cref="PolicyStore.PreviewLoosen"/> and <see cref="PolicyStore.SaveLoosen"/>, the same code as policy.saveLoosen:
+/// loosen_summary and loosen_approved_at set), confirmed as exactly that one path; for the team, into the team's folder
+/// list (<see cref="PolicyStore.AddTeamFolder"/>); for all teams, into the global policy. The team's Manager is told to
+/// retry. A deny tells the asker. Either applies from the member's next run. The Concierge raises the same ask for the
+/// person (folder_request) and can never answer one. The team's folder list is also what Team settings > Folders shows
+/// and changes (policy.teamFolders, policy.addTeamFolder, policy.removeTeamFolder). Each ask and answer is in
+/// folder_ask_events, and the answer call in the audit log.
 /// </summary>
 public sealed class FolderAskService
 {
@@ -207,18 +231,62 @@ public sealed class FolderAskService
             return Refused(forMember is null || caller.Role == MemberRole.Manager
                 ? $"there is no member named '{forMember}' on your team {caller.Team}; a Manager may ask only for a member of its own team"
                 : "only your Manager may ask for a folder for another member; ask for yourself (leave member out)");
+        return await RaiseAsync(target, caller.Qualified, target.Id == caller.Id ? "you" : target.Name, path, wanted, reason, deliverable, causation, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Who a folder ask raised by the Concierge (for the person, in a chat) is asked by.</summary>
+    public const string ConciergeAsker = "Concierge";
+
+    /// <summary>
+    /// The Concierge's folder_request: raises the same ask an agent's request_folder does, for a member of a team the
+    /// person is talking about (the team's Manager when no member is named). The Concierge never grants anything: the
+    /// person answers in Needs you, and chooses there whom the approval covers.
+    /// </summary>
+    public async Task<string> RequestFromConciergeAsync(string team, string? member, string path, string access, string reason, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("give a reason: one line on what the folder is needed for");
+        var wanted = FolderAccess.Parse(access) ?? throw new ArgumentException($"access is read or readwrite, not '{access.Trim()}'");
+        if (MemberOfTeam(team, member) is not { } target)
+            return Refused(string.IsNullOrWhiteSpace(member)
+                ? $"there is no team named '{team.Trim()}' with a Manager"
+                : $"there is no member named '{member.Trim()}' on team '{team.Trim()}'");
+        return await RaiseAsync(target, ConciergeAsker, target.Qualified, path, wanted, reason, null, null, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>A team's member by name (its Manager when no name is given), or null.</summary>
+    private MemberRef? MemberOfTeam(string team, string? member)
+    {
+        using var c = Open();
+        var named = !string.IsNullOrWhiteSpace(member);
+        using var cmd = Command(c,
+            "SELECT m.id, t.id, t.name, m.name, m.role FROM members m JOIN teams t ON t.id = m.team_id WHERE t.name = $t COLLATE NOCASE AND " +
+            (named ? "m.name = $n COLLATE NOCASE" : "m.role = 'manager'") + " LIMIT 1;",
+            ("$t", team.Trim()), ("$n", member?.Trim()));
+        using var r = cmd.ExecuteReader();
+        return r.Read()
+            ? new MemberRef(r.GetInt64(0), r.GetInt64(1), r.GetString(2), r.GetString(3), r.GetString(4) == "manager" ? MemberRole.Manager : MemberRole.Member)
+            : null;
+    }
+
+    /// <summary>
+    /// Checks the path for the member and raises (or finds) its ask. <paramref name="askedBy"/>: the asking member
+    /// ("Team/Name") or <see cref="ConciergeAsker"/>; <paramref name="whom"/>: the member in the answer's words.
+    /// </summary>
+    private async Task<string> RaiseAsync(MemberRef target, string askedBy, string whom, string path, string wanted, string reason,
+        long? deliverable, long? causation, CancellationToken ct)
+    {
+        var fromConcierge = askedBy == ConciergeAsker;
         var layout = await _layoutFor(target.Id, ct).ConfigureAwait(false);
         var paths = new PolicyPaths(layout.Os, layout.Home, _canonicalize);
         var raw = path.Trim();
         if (!IsAbsolute(raw, layout.Os) || paths.Resolve(raw) is not { } resolved)
             return Refused($"'{raw}' is not an absolute path on this computer; give the full path, e.g. {(layout.Os == TargetOs.Windows ? @"Z:\data\sessions" : "/srv/data/sessions")}");
-        var whom = target.Id == caller.Id ? "you" : target.Name;
 
-        // Already granted (the member's own folders, its team's documents, or an earlier answer): nothing to ask.
+        // Already granted (the member's own folders, its team's documents or folder list, or an earlier answer): nothing to ask.
         var effective = _policies.Effective(target.Id, layout).Policy;
         if (Granted(paths, effective, layout, resolved) is { } has && (has == FolderAccess.ReadWrite || wanted == FolderAccess.Read))
             return $"{resolved} is already {(has == FolderAccess.ReadWrite ? "read-write" : "readable")} for {whom} (from the next run that starts; a run that started before it was granted does not have it). " +
-                   "Nothing is asked. If this run cannot reach it, hand back blocked on it so the work is retried in a new run.";
+                   (fromConcierge ? "Nothing is asked." : "Nothing is asked. If this run cannot reach it, hand back blocked on it so the work is retried in a new run.");
 
         var others = await _otherTeamFolders(target.TeamId, ct).ConfigureAwait(false);
         if (FolderAskRules.Problem(paths, resolved, wanted, layout, _policies.GetGlobal(), others) is { } problem) return Refused(problem);
@@ -246,7 +314,7 @@ public sealed class FolderAskService
             {
                 id = open.Id;
                 first = false;
-                Event(c, tx, id, "asked again", null, Provenance.Actor.Agent, $"{caller.Qualified}: {clean}");
+                Event(c, tx, id, "asked again", null, Provenance.Actor.Agent, $"{askedBy}: {clean}");
             }
             else
             {
@@ -255,18 +323,23 @@ public sealed class FolderAskService
                            INSERT INTO folder_asks (at, team_id, member_id, member, asked_by, path, access, reason, path_exists, deliverable, causation_seq)
                            VALUES ($now, $t, $mid, $m, $by, $p, $a, $r, $e, $w, $c) RETURNING id;
                            """,
-                           ("$now", Stamp(_clock.GetUtcNow())), ("$t", target.TeamId), ("$mid", target.Id), ("$m", target.Qualified), ("$by", caller.Qualified),
+                           ("$now", Stamp(_clock.GetUtcNow())), ("$t", target.TeamId), ("$mid", target.Id), ("$m", target.Qualified), ("$by", askedBy),
                            ("$p", resolved), ("$a", wanted), ("$r", clean), ("$e", exists ? 1 : 0), ("$w", deliverable), ("$c", causation)))
                 {
                     cmd.Transaction = tx;
                     id = (long)cmd.ExecuteScalar()!;
                 }
                 first = true;
-                Event(c, tx, id, "asked", null, Provenance.Actor.Agent, $"{caller.Qualified} for {target.Qualified}: {FolderAccess.Words(wanted)} {resolved}: {clean}");
+                Event(c, tx, id, "asked", null, Provenance.Actor.Agent, $"{askedBy} for {target.Qualified}: {FolderAccess.Words(wanted)} {resolved}: {clean}");
             }
             tx.Commit();
         }
         if (first) Changed?.Invoke();
+        if (fromConcierge)
+            return $"asked (folder request {id}){(first ? "" : "; it was already waiting")}: the person is asked in Needs you (in the app, or over the Cloud Link) to allow " +
+                   $"{FolderAccess.Words(wanted)} access to {resolved} for {whom}{(exists ? "" : "; that folder does not exist on this computer yet")}. " +
+                   "Tell the person it is waiting there, and that when approving they choose whom it covers: this member, the whole team, or all teams. " +
+                   "You cannot answer it for them. It applies from the member's next run; call folder_request again to see whether it is granted.";
         return $"asked (ask {id}); the person decides; it applies from your next run. " +
                $"The person is asked in Needs you to allow {FolderAccess.Words(wanted)} access to {resolved} for {whom}{(first ? "" : " (it was already waiting)")}" +
                $"{(exists ? "" : "; that folder does not exist on this computer yet")}. " +
@@ -360,12 +433,15 @@ public sealed class FolderAskService
         ["state"] = a.State, ["grantedAccess"] = a.GrantedAccess, ["decidedBy"] = a.DecidedBy, ["decidedVia"] = a.DecidedVia, ["decidedAt"] = a.DecidedAt,
         ["note"] = a.Note, ["deliverable"] = a.Deliverable,
         ["choices"] = new JsonArray((a.State == "pending" ? FolderAccess.ChoicesFor(a.Access) : []).Select(ch => (JsonNode?)ch).ToArray()),
+        ["scopes"] = new JsonArray((a.State == "pending" ? FolderScope.All : []).Select(s => (JsonNode?)s).ToArray()),
     };
 
     /// <summary>The waiting asks as plain lines (the Concierge's and the companion's status reads).</summary>
-    public IReadOnlyList<string> PendingLines() => Asks().Select(a =>
-        $"- {a.Member} asks for {FolderAccess.Words(a.Access)} access to {a.Path}" + (a.AskedBy == a.Member ? "" : $" (asked by {a.AskedByName})") +
-        $": \"{Clip(a.Reason, 200)}\" since {a.At} (folder request {a.Id})").ToList();
+    public IReadOnlyList<string> PendingLines() => Asks().Select(Line).ToList();
+
+    private static string Line(FolderAskRow a) =>
+        $"- {a.Member} asks for {FolderAccess.Words(a.Access)} access to {a.Path}" + (a.AskedBy == a.Member ? "" : $" (asked by {(a.AskedBy == ConciergeAsker ? "the Concierge" : a.AskedByName)})") +
+        $": \"{Clip(a.Reason, 200)}\" since {a.At} (folder request {a.Id})";
 
     // ------------------------------------------------------------------ the person's answer
 
@@ -378,9 +454,9 @@ public sealed class FolderAskService
                 // [FolderAsk]: the waiting asks (all: true for answered ones too; teamId: one team's)
                 "folder.asks" => new JsonArray(Asks(p?["all"] is JsonValue all && all.TryGetValue<bool>(out var b) && b ? false : true, OptLong(p, "teamId"))
                     .Select(a => (JsonNode?)ToJson(a)).ToArray()),
-                // { id, choice: readwrite | read | deny, note? }
+                // { id, choice: readwrite | read | deny, note?, scope?: member | team | everywhere }
                 "folder.answer" => await AnswerAsync(OptLong(p, "id") ?? throw new ArgumentException("id is required"),
-                    OptStr(p, "choice") ?? throw new ArgumentException("choice is required (readwrite, read or deny)"), OptStr(p, "note"), ct),
+                    OptStr(p, "choice") ?? throw new ArgumentException("choice is required (readwrite, read or deny)"), OptStr(p, "note"), ct, OptStr(p, "scope")),
                 _ => throw new RpcException("unknown_method", $"no method named '{method}'"),
             };
         }
@@ -395,11 +471,13 @@ public sealed class FolderAskService
     }
 
     /// <summary>
-    /// The person's answer: readwrite (only for a read-write ask), read, or deny. An approval writes the member's loosen
-    /// block first (a policy refusal leaves the ask waiting), checks the member's effective policy now has the path with
-    /// that access, then closes the ask and tells the team's Manager to retry; a deny closes it and tells the asker.
+    /// The person's answer: readwrite (only for a read-write ask), read, or deny. An approval changes the policy first (a
+    /// policy refusal leaves the ask waiting), checks the member's effective policy now has the path with that access, then
+    /// closes the ask and tells the team's Manager to retry; a deny closes it and tells the asker.
+    /// <paramref name="scope"/> (an approval only) is where the folder is written: the ask's member's loosen block (the
+    /// default), the team's folder list, or the global policy.
     /// </summary>
-    public async Task<JsonObject> AnswerAsync(long id, string choice, string? note, CancellationToken ct)
+    public async Task<JsonObject> AnswerAsync(long id, string choice, string? note, CancellationToken ct, string? scope = null)
     {
         var who = Provenance.Actor.Current ?? Provenance.Actor.Window;
         // Never without the person's click: an agent, the Concierge, a trigger or a paired program cannot answer.
@@ -407,11 +485,12 @@ public sealed class FolderAskService
             throw new ArgumentException("a folder request is answered by the person, in Needs you");
         var c0 = (choice ?? "").Trim().ToLowerInvariant();
         if (c0 is not (FolderAccess.ReadWrite or FolderAccess.Read or FolderAccess.Deny)) throw new ArgumentException($"'{choice}' is not a choice (readwrite, read or deny)");
+        var s0 = FolderScope.Parse(scope) ?? throw new ArgumentException($"'{scope}' is not a scope (member, team or everywhere)");
         lock (_lock)
             if (!_answering.Add(id)) throw new ArgumentException($"folder request {id} is being answered already");
         try
         {
-            return await AnswerClaimedAsync(id, c0, note, who, ct);
+            return await AnswerClaimedAsync(id, c0, note, who, ct, s0);
         }
         finally
         {
@@ -419,18 +498,27 @@ public sealed class FolderAskService
         }
     }
 
-    private async Task<JsonObject> AnswerClaimedAsync(long id, string choice, string? note, Provenance.Actor who, CancellationToken ct)
+    private async Task<JsonObject> AnswerClaimedAsync(long id, string choice, string? note, Provenance.Actor who, CancellationToken ct, string scope)
     {
         var ask = Asks().FirstOrDefault(a => a.Id == id) ?? throw new ArgumentException($"folder request {id} is not waiting");
         if (!FolderAccess.ChoicesFor(ask.Access).Contains(choice))
             throw new ArgumentException($"folder request {id} asks for read-only access; it cannot be granted read-write");
         var cleanNote = string.IsNullOrWhiteSpace(note) ? null : Clip(note.Trim(), 500);
         var approve = choice != FolderAccess.Deny;
+        if (!approve) scope = FolderScope.Member;
         if (approve)
         {
             if (!MemberExists(ask.MemberId, ask.TeamId)) throw new ArgumentException($"{ask.Member} is no longer on the team");
-            await GrantAsync(ask, choice, ct);
+            if (scope == FolderScope.Everywhere) await GrantEverywhereAsync(ask, choice, ct);
+            else if (scope == FolderScope.Team) await GrantTeamAsync(ask, choice, who, ct);
+            else await GrantAsync(ask, choice, ct);
         }
+        var covers = scope switch
+        {
+            FolderScope.Everywhere => "every agent of every team",
+            FolderScope.Team => $"every member of team {ask.Team}",
+            _ => ask.Member,
+        };
 
         lock (_lock)
         {
@@ -442,24 +530,27 @@ public sealed class FolderAskService
                     ("$now", Stamp(_clock.GetUtcNow())), ("$note", cleanNote), ("$id", id)) == 0)
                 throw new ArgumentException($"folder request {id} is not waiting");
             Event(c, tx, id, approve ? "approved" : "denied", who.User, who.Via,
-                (approve ? $"{FolderAccess.Words(choice)} {ask.Path} for {ask.Member}" : $"{FolderAccess.Words(ask.Access)} {ask.Path} for {ask.Member}") +
+                (approve ? $"{FolderAccess.Words(choice)} {ask.Path} for {covers}" : $"{FolderAccess.Words(ask.Access)} {ask.Path} for {ask.Member}") +
                 (cleanNote is null ? "" : $": {cleanNote}"));
             tx.Commit();
         }
         Changed?.Invoke();
 
         string? told = null;
-        if (approve)
+        // An ask the Concierge raised for the person blocked no run: no agent is woken for its answer.
+        var wake = ask.AskedBy != ConciergeAsker;
+        if (wake && approve)
         {
             if (ManagerOf(ask.TeamId) is { } manager)
             {
                 var narrowed = choice != ask.Access ? " (asked for read-write; the person granted read-only)" : "";
-                var text = $"{ask.MemberName} can now {(choice == FolderAccess.ReadWrite ? "read and write" : "read")} {ask.Path}{narrowed} (folder request {id}); " +
+                var whoCan = scope == FolderScope.Everywhere ? "Every agent" : scope == FolderScope.Team ? "Every member of the team" : ask.MemberName;
+                var text = $"{whoCan} can now {(choice == FolderAccess.ReadWrite ? "read and write" : "read")} {ask.Path}{narrowed} (folder request {id}); " +
                            "retry what was blocked. It applies to runs that start from now on.";
                 if (await TellAsync(ask.Team, manager, text, ask.CausationSeq, ct)) told = $"{ask.Team}/{manager}";
             }
         }
-        else
+        else if (wake)
         {
             var text = $"The person denied {FolderAccess.Words(ask.Access)} access to {ask.Path} for {(ask.AskedBy == ask.Member ? "you" : ask.MemberName)} (folder request {id})" +
                        $"{(cleanNote is null ? "" : $": {cleanNote}")}. Do not reach it another way or ask the person to edit the policy: carry on without it, or hand back blocked on it.";
@@ -469,7 +560,133 @@ public sealed class FolderAskService
         {
             ["ok"] = true, ["id"] = id, ["choice"] = choice, ["path"] = ask.Path, ["member"] = ask.Member,
             ["grantedAccess"] = approve ? choice : null, ["told"] = told,
+            ["scope"] = approve ? scope : null,
         };
+    }
+
+    /// <summary>
+    /// Adds the path to the team's folder list, so every member of the team has it from its next run, members hired later
+    /// too. A folder the list holds read-write is left as it is by a read-only approval. Then the ask's member must really
+    /// have it.
+    /// </summary>
+    private async Task GrantTeamAsync(FolderAskRow ask, string access, Provenance.Actor who, CancellationToken ct)
+    {
+        var layout = await _layoutFor(ask.MemberId, ct).ConfigureAwait(false);
+        var paths = new PolicyPaths(layout.Os, layout.Home, _canonicalize);
+        var wider = access == FolderAccess.Read && _policies.TeamFolders(ask.TeamId).Any(f => f.Write && paths.Same(f.Path, ask.Path));
+        if (!wider) await WriteTeamFolderAsync(ask.TeamId, ask.Path, access, who, ct).ConfigureAwait(false);
+        var granted = Granted(paths, _policies.Effective(ask.MemberId, layout).Policy, layout, ask.Path);
+        if (granted is null || (access == FolderAccess.ReadWrite && granted != FolderAccess.ReadWrite))
+            throw new PolicyException([$"{ask.Path} is still not {FolderAccess.Words(access)} for {ask.Member} after the change to the team's folders; the request stays waiting"]);
+    }
+
+    // ------------------------------------------------------------------ the team's folder list
+
+    /// <summary>How many times a team folder's member list is built again after the team's members changed under it before it is refused.</summary>
+    public const int TeamMembersAttempts = 3;
+
+    /// <summary>
+    /// Writes the folder to the team's folder list through the policy store, checked for every current member's run. The
+    /// list of members (with each one's run layout) is built here; when a member is hired or removed before the write, the
+    /// store writes nothing and the list is built again. Returns the stored path, or null when nothing changed.
+    /// </summary>
+    private async Task<string?> WriteTeamFolderAsync(long teamId, string path, string access, Provenance.Actor who, CancellationToken ct)
+    {
+        var others = await _otherTeamFolders(teamId, ct).ConfigureAwait(false);
+        for (var attempt = 1; ; attempt++)
+        {
+            var members = new List<(long, RunLayout)>();
+            foreach (var id in _policies.TeamMemberIds(teamId)) members.Add((id, await _layoutFor(id, ct).ConfigureAwait(false)));
+            try
+            {
+                return _policies.AddTeamFolder(teamId, path, access, members, others, who.User ?? Provenance.Actor.LocalUser, who.Via);
+            }
+            catch (TeamMembersChangedException) when (attempt < TeamMembersAttempts)
+            {
+                // a hire or removal landed after the list was built: build it again and check every member
+            }
+            catch (TeamMembersChangedException e)
+            {
+                throw new PolicyException([$"the team's members kept changing while {path} was checked; nothing was written, try again", .. e.Errors]);
+            }
+        }
+    }
+
+    /// <summary>The person at the window or a Cloud Link viewer: never an agent, the Concierge, a trigger or a paired program.</summary>
+    private static Provenance.Actor PersonOnly(string what)
+    {
+        var who = Provenance.Actor.Current ?? Provenance.Actor.Window;
+        if (who.Via is not (Provenance.Actor.App or Provenance.Actor.Cloud))
+            throw new ArgumentException($"{what} is done by the person, in the team's Settings > Folders");
+        return who;
+    }
+
+    /// <summary>policy.teamFolders: { teamId, folders: [{ path, access, addedBy, addedVia, addedAt }] }, oldest first.</summary>
+    public JsonObject TeamFoldersJson(long teamId) => new()
+    {
+        ["teamId"] = teamId,
+        ["folders"] = new JsonArray(_policies.TeamFolders(teamId).Select(f => (JsonNode?)new JsonObject
+        {
+            ["path"] = f.Path, ["access"] = f.Access, ["addedBy"] = f.AddedBy, ["addedVia"] = f.AddedVia, ["addedAt"] = f.AddedAt,
+        }).ToArray()),
+    };
+
+    /// <summary>
+    /// policy.addTeamFolder: the person adds a folder (read or readwrite) to the team's folder list, or changes the access
+    /// of one on it. Every refusal throws <see cref="PolicyException"/> and writes nothing. Answers as policy.teamFolders.
+    /// </summary>
+    public async Task<JsonObject> AddTeamFolderAsync(long teamId, string path, string access, CancellationToken ct)
+    {
+        var who = PersonOnly("adding a folder to a team");
+        if ((access ?? "").Trim().ToLowerInvariant() is not (FolderAccess.Read or FolderAccess.ReadWrite) and var bad)
+            throw new ArgumentException($"access is read or readwrite, not '{bad}'");
+        if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("path is required: the folder's full path on this computer");
+        await WriteTeamFolderAsync(teamId, path, access!.Trim().ToLowerInvariant(), who, ct).ConfigureAwait(false);
+        return TeamFoldersJson(teamId);
+    }
+
+    /// <summary>policy.removeTeamFolder: the person takes a folder off the team's folder list. Null when it was not on it.</summary>
+    public JsonObject? RemoveTeamFolder(long teamId, string path)
+    {
+        PersonOnly("removing a team's folder");
+        return _policies.RemoveTeamFolder(teamId, path) ? TeamFoldersJson(teamId) : null;
+    }
+
+    /// <summary>A team's folder list as plain lines (the Concierge's and the companion's team_status).</summary>
+    public IReadOnlyList<string> TeamFolderLines(long teamId) => _policies.TeamFolders(teamId)
+        .Select(f => $"- {f.Path}: {FolderAccess.Words(f.Access)} (added by {f.AddedBy} on {(f.AddedAt.Length >= 10 ? f.AddedAt[..10] : f.AddedAt)})").ToList();
+
+    /// <summary>One team's waiting asks as plain lines.</summary>
+    public IReadOnlyList<string> PendingLines(long teamId) => Asks(openOnly: true, teamId).Select(Line).ToList();
+
+    /// <summary>
+    /// Adds the path to the global policy's read-only or read-write list, so every agent of every team has it from its next
+    /// run. The folder is checked by the same rules as a member's grant (for the ask's member), the global policy by its
+    /// own checks and the sandbox dry run; then the ask's member must really have it.
+    /// </summary>
+    private async Task GrantEverywhereAsync(FolderAskRow ask, string access, CancellationToken ct)
+    {
+        var layout = await _layoutFor(ask.MemberId, ct).ConfigureAwait(false);
+        var paths = new PolicyPaths(layout.Os, layout.Home, _canonicalize);
+        var others = await _otherTeamFolders(ask.TeamId, ct).ConfigureAwait(false);
+        var global = _policies.GetGlobal();
+        if (FolderAskRules.Problem(paths, ask.Path, access, layout, global, others) is { } problem) throw new PolicyException([problem]);
+        bool Is(string p) => paths.Resolve(p) is { } r && paths.Same(r, ask.Path);
+        var ro = global.Filesystem.Readonly.ToList();
+        var rw = global.Filesystem.Readwrite.ToList();
+        if (access == FolderAccess.ReadWrite)
+        {
+            ro.RemoveAll(Is);
+            if (!rw.Any(Is)) rw.Add(ask.Path);
+        }
+        else if (!ro.Any(Is) && !rw.Any(Is))
+        {
+            ro.Add(ask.Path);
+        }
+        _policies.SaveGlobal(global with { Filesystem = global.Filesystem with { Readonly = ro, Readwrite = rw } }, layout);
+        var granted = Granted(paths, _policies.Effective(ask.MemberId, layout).Policy, layout, ask.Path);
+        if (granted is null || (access == FolderAccess.ReadWrite && granted != FolderAccess.ReadWrite))
+            throw new PolicyException([$"{ask.Path} is still not {FolderAccess.Words(access)} for {ask.Member} after the change to the global policy; the request stays waiting"]);
     }
 
     /// <summary>
