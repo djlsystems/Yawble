@@ -128,6 +128,8 @@ public class AuditClassificationTests
         "ops.backupNow",
         "ops.restore",
         "ops.setKeepDaily",
+        "policy.addTeamFolder",
+        "policy.removeTeamFolder",
         "policy.removeTeamHost",
         "policy.saveGlobal",
         "policy.saveLoosen",

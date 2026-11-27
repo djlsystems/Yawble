@@ -29,6 +29,8 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "defaultModels", "sources", "query", "values", "retention", "prunePreview", "who", "catalog",
         // The team's network allow list as shown (its Remove, policy.removeTeamHost, is audited).
         "teamHosts",
+        // The team's folder list as shown (policy.addTeamFolder and policy.removeTeamFolder are audited).
+        "teamFolders",
         // The policy editors' host check (FloorRules.HostProblem for each entry typed).
         "checkHosts",
         // Settings > Teams and Settings > Concierge as saved (teams.defaults, concierge.defaults); setDefaults and generateNames are audited.

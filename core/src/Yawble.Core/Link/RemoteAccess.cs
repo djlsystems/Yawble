@@ -87,7 +87,7 @@ public static class RemoteAccess
             "deliverables.list", "deliverables.get",
             // The Goals page (saving, deleting and assigning goals are changes).
             "goals.list",
-            "policy.getGlobal", "policy.getMember", "policy.previewLoosen", "policy.teamHosts", "policy.checkHosts",
+            "policy.getGlobal", "policy.getMember", "policy.previewLoosen", "policy.teamHosts", "policy.checkHosts", "policy.teamFolders",
             "credentials.status",
             "terminal.banner",
             "skills.list",
@@ -144,7 +144,7 @@ public static class RemoteAccess
             "bus.tellManager", "bus.answer", "bus.closeDeliverable", "bus.stopDeliverable", "bus.nudgeDeliverable",
             "bus.deliverableExtend",
             "goals.save", "goals.delete", "goals.assign",
-            "policy.saveGlobal", "policy.saveOverride", "policy.saveLoosen", "policy.removeTeamHost",
+            "policy.saveGlobal", "policy.saveOverride", "policy.saveLoosen", "policy.removeTeamHost", "policy.addTeamFolder", "policy.removeTeamFolder",
             "credentials.setClaudeSetupToken", "credentials.setAnthropicApiKey", "credentials.setXaiApiKey", "credentials.remove", "credentials.setMode",
             "hostTerminal.start",
             "terminal.attach", "terminal.input", "terminal.resize", "terminal.openInteractive", "terminal.stop",

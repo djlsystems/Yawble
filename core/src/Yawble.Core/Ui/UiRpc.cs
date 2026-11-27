@@ -157,6 +157,11 @@ public sealed class UiRpc(
                 // The team's network allow list (0041): "Allow for this team" adds to it; the team's settings list it with Remove.
                 "policy.teamHosts" => await TeamHostsAsync(Long(p, "teamId"), ct),
                 "policy.removeTeamHost" => await RemoveTeamHostAsync(Long(p, "teamId"), Str(p, "host"), ct),
+                // The team's folder list (0064): Team settings > Folders lists it, adds to it and removes from it; a folder
+                // ask answered for the whole team adds to it too. Only the person adds or removes.
+                "policy.teamFolders" => await TeamFoldersAsync(Long(p, "teamId"), ct),
+                "policy.addTeamFolder" => await AddTeamFolderAsync(Long(p, "teamId"), Str(p, "path"), Str(p, "access"), ct),
+                "policy.removeTeamFolder" => await RemoveTeamFolderAsync(Long(p, "teamId"), Str(p, "path"), ct),
                 // The policy editors' check of each host typed: the floor's own rule, so the window never validates a second way.
                 "policy.checkHosts" => CheckHosts(p),
 
@@ -1526,6 +1531,11 @@ public sealed class UiRpc(
             ["loosenApprovedAt"] = stored.LoosenApprovedAt?.ToString("O"),
             // The member's team's network allow list (policy.teamHosts has who added each and when).
             ["teamHosts"] = S(policies.TeamHostsOfMember(memberId)),
+            // The member's team's folder list (policy.teamFolders has who added each and when).
+            ["teamFolders"] = new JsonArray(policies.TeamFoldersOfMember(memberId).Select(f => (JsonNode?)new JsonObject
+            {
+                ["path"] = f.Path, ["access"] = f.Write ? Integrations.FolderAccess.ReadWrite : Integrations.FolderAccess.Read,
+            }).ToArray()),
             ["effective"] = new JsonObject
             {
                 ["readonly"] = S(e.Readonly),
@@ -1605,6 +1615,49 @@ public sealed class UiRpc(
         if (!policies.RemoveTeamHost(teamId, host))
             throw new RpcException("not_found", $"'{host.Trim()}' is not on this team's network allow list");
         return await TeamHostsAsync(teamId, ct);
+    }
+
+    private Integrations.FolderAskService TeamFolderService =>
+        bus.FolderAsks ?? throw new RpcException("unavailable", "team folders are not available in this core");
+
+    /// <summary>policy.teamFolders {teamId}: { teamId, folders: [{ path, access: read | readwrite, addedBy, addedVia, addedAt }] }, oldest first.</summary>
+    private async Task<JsonNode?> TeamFoldersAsync(long teamId, CancellationToken ct)
+    {
+        await TeamNameOf(teamId, ct);
+        return TeamFolderService.TeamFoldersJson(teamId);
+    }
+
+    /// <summary>
+    /// policy.addTeamFolder {teamId, path, access: read | readwrite}: adds the folder to the team's list, or changes the
+    /// access of one on it, for the person only; every member of the team has it from its next run. A refusal (code
+    /// "policy_refused") lists every reason and writes nothing. Answers as policy.teamFolders.
+    /// </summary>
+    private async Task<JsonNode?> AddTeamFolderAsync(long teamId, string path, string access, CancellationToken ct)
+    {
+        await TeamNameOf(teamId, ct);
+        try
+        {
+            return await TeamFolderService.AddTeamFolderAsync(teamId, path, access, ct);
+        }
+        catch (ArgumentException e)
+        {
+            throw new RpcException("bad_params", e.Message);
+        }
+    }
+
+    /// <summary>policy.removeTeamFolder {teamId, path}: takes it off the team's list, for the person only (the dispatcher audits the call); answers as policy.teamFolders.</summary>
+    private async Task<JsonNode?> RemoveTeamFolderAsync(long teamId, string path, CancellationToken ct)
+    {
+        await TeamNameOf(teamId, ct);
+        try
+        {
+            return TeamFolderService.RemoveTeamFolder(teamId, path)
+                ?? throw new RpcException("not_found", $"'{path.Trim()}' is not on this team's folder list");
+        }
+        catch (ArgumentException e)
+        {
+            throw new RpcException("bad_params", e.Message);
+        }
     }
 
     private async Task<JsonNode?> SaveLoosenAsync(JsonObject? p, CancellationToken ct)

@@ -2,6 +2,7 @@
 using Yawble.Core.Bus;
 using Yawble.Core.Integrations;
 using Yawble.Core.Ipc;
+using Yawble.Core.Link;
 using Yawble.Core.Policy;
 using Yawble.Core.Provenance;
 using Yawble.Core.Tests.Bus;
@@ -20,7 +21,8 @@ namespace Yawble.Core.Tests.Integrations;
 /// app.overview counts the ask in needsYou; an approval is what Member settings > Policy (policy.getMember) shows and
 /// policy.saveLoosen removes, both audited; a read-write grant of a folder already read-only moves it; a second answer is
 /// refused; every refusal (Windows and Linux rules) raises no ask, no push and no count; the Concierge's lines and the
-/// org summary's title never carry the full path. Fakes only: a temporary database, fake runners, fictional paths.
+/// org summary's title never carry the full path; the team's folder list (policy.teamFolders, policy.addTeamFolder,
+/// policy.removeTeamFolder) is the person's alone to change. Fakes only: a temporary database, fake runners, fictional paths.
 /// </summary>
 public sealed class FolderAskRpcTests : IAsyncLifetime
 {
@@ -317,6 +319,123 @@ public sealed class FolderAskRpcTests : IAsyncLifetime
             (_, _) => Task.FromResult<IReadOnlyList<string>>([]), (_, _, _, _, _) => Task.CompletedTask, exists: _ => true);
         var (_, _, ada, _) = await Team();
         Assert.StartsWith("asked", await asks.RequestFromAgentAsync(ada, path, "read", "need it", null, 1, 1, Ct));
+    }
+
+    // ------------------------------------------------------------------ Team settings > Folders: the team's folder list
+
+    private async Task<List<(string Path, string Access)>> TeamFolders(long teamId) =>
+        (await Call("policy.teamFolders", new { teamId }))!["folders"]!.AsArray().Select(f => (f!["path"]!.GetValue<string>(), f["access"]!.GetValue<string>())).ToList();
+
+    [Fact]
+    public async Task ThePersonAddsATeamFolder_EveryMemberHasIt_AHireToo_AndRemoveTakesItAway_BothAudited()
+    {
+        var (teamId, manager, ada, ben) = await Team();
+        var (other, _, otherAda, _) = await Team("docs");
+        Assert.Empty(await TeamFolders(teamId));
+
+        var added = (await Call("policy.addTeamFolder", new { teamId, path = Sessions, access = "read" }))!;
+        var row = Assert.Single(added["folders"]!.AsArray())!;
+        Assert.Equal((Sessions, "read", Actor.LocalUser, Actor.App),
+            (row["path"]!.GetValue<string>(), row["access"]!.GetValue<string>(), row["addedBy"]!.GetValue<string>(), row["addedVia"]!.GetValue<string>()));
+        Assert.NotNull(row["addedAt"]);
+
+        // What Member settings > Policy and the member card show: the folder, and that it comes from the team.
+        foreach (var member in new[] { manager, ada, ben })
+        {
+            var policy = await MemberPolicy(member.Id);
+            Assert.Contains(Sessions, Strings(policy["effective"]!["readonly"]));
+            Assert.Contains($"filesystem.readonly + {Sessions} (team)", Strings(policy["effective"]!["loosened"]));
+            Assert.Equal(Sessions, Assert.Single(policy["teamFolders"]!.AsArray())!["path"]!.GetValue<string>());
+            Assert.Empty(policy["loosen"]!.AsObject()); // not the member's own grant
+        }
+        var cards = (await Call("teams.agents", new { teamId }))!.AsArray();
+        Assert.All(cards, c => Assert.Contains($"filesystem.readonly + {Sessions} (team)", Strings(c!["loosened"])));
+        var hired = (await Call("members.add", new { teamId, name = "Cy", cli = "claude" }))!["id"]!.GetValue<long>();
+        Assert.Contains(Sessions, Strings((await MemberPolicy(hired))["effective"]!["readonly"]));
+        // Never another team's.
+        Assert.DoesNotContain(Sessions, Strings((await MemberPolicy(otherAda.Id))["effective"]!["readonly"]));
+        Assert.Empty(await TeamFolders(other));
+
+        // Adding it again with the other access changes the one row.
+        await Call("policy.addTeamFolder", new { teamId, path = Sessions, access = "readwrite" });
+        Assert.Equal([(Sessions, "readwrite")], await TeamFolders(teamId));
+        Assert.Contains(Sessions, Strings((await MemberPolicy(ada.Id))["effective"]!["readwrite"]));
+
+        Assert.Empty((await Call("policy.removeTeamFolder", new { teamId, path = Sessions }))!["folders"]!.AsArray());
+        Assert.DoesNotContain(Sessions, Strings((await MemberPolicy(ada.Id))["effective"]!["readwrite"]));
+        Assert.Equal("not_found", (await Assert.ThrowsAsync<RpcException>(() => Call("policy.removeTeamFolder", new { teamId, path = Sessions }))).Code);
+
+        var audited = new AuditLog(_db.ConnectionString).Recent(100).Where(a => a.Method.StartsWith("policy.", StringComparison.Ordinal)).Select(a => (a.Method, a.Outcome)).ToList();
+        Assert.Equal(2, audited.Count(a => a == ("policy.addTeamFolder", "done")));
+        Assert.Contains(("policy.removeTeamFolder", "done"), audited);
+        Assert.DoesNotContain(audited, a => a.Method == "policy.teamFolders"); // the list is a read
+    }
+
+    [Fact]
+    public async Task ARefusedTeamFolder_SaysWhy_AndWritesNothing()
+    {
+        var (teamId, _, _, _) = await Team();
+        var secrets = Win ? Home + @"\.ssh" : Home + "/.ssh";
+        var refused = await Assert.ThrowsAsync<RpcException>(() => Call("policy.addTeamFolder", new { teamId, path = secrets, access = "read" }));
+        Assert.Equal("policy_refused", refused.Code);
+        Assert.Contains("secrets", refused.Message);
+        Assert.Equal("policy_refused", (await Assert.ThrowsAsync<RpcException>(() => Call("policy.addTeamFolder", new { teamId, path = DataDir, access = "read" }))).Code);
+        Assert.Equal("policy_refused", (await Assert.ThrowsAsync<RpcException>(() => Call("policy.addTeamFolder", new { teamId, path = "sessions", access = "read" }))).Code);
+        Assert.Equal("bad_params", (await Assert.ThrowsAsync<RpcException>(() => Call("policy.addTeamFolder", new { teamId, path = Sessions, access = "all" }))).Code);
+        await Assert.ThrowsAsync<RpcException>(() => Call("policy.addTeamFolder", new { teamId = 9999, path = Sessions, access = "read" }));
+        Assert.Empty(await TeamFolders(teamId));
+        Assert.Empty(_policies.TeamFolders(teamId));
+    }
+
+    [Fact]
+    public async Task OnlyThePersonChangesATeamsFolders_NeverAnAgentTheConciergeAPairedProgramOrAVisitor()
+    {
+        var (teamId, _, ada, _) = await Team();
+        var add = new JsonObject { ["teamId"] = teamId, ["path"] = Sessions, ["access"] = "readwrite" };
+        foreach (var actor in new[] { new Actor(Actor.Agent, "payments/Ada"), new Actor(Actor.Concierge, Actor.LocalUser), Actor.ExternalClient("a paired program"), new Actor(Actor.Trigger, null) })
+        {
+            var e = await Assert.ThrowsAsync<RpcException>(() => _rpc.DispatchAsAsync(actor, "policy.addTeamFolder", (JsonObject)add.DeepClone(), Ct));
+            Assert.Equal("bad_params", e.Code);
+            Assert.Contains("done by the person", e.Message);
+        }
+        Assert.Empty(_policies.TeamFolders(teamId));
+        await Call("policy.addTeamFolder", new { teamId, path = Sessions, access = "readwrite" });
+        var remove = new JsonObject { ["teamId"] = teamId, ["path"] = Sessions };
+        await Assert.ThrowsAsync<RpcException>(() => _rpc.DispatchAsAsync(new Actor(Actor.Agent, "payments/Ada"), "policy.removeTeamFolder", (JsonObject)remove.DeepClone(), Ct));
+        await Assert.ThrowsAsync<RpcException>(() => _rpc.DispatchAsAsync(Actor.ExternalClient("a paired program"), "policy.removeTeamFolder", (JsonObject)remove.DeepClone(), Ct));
+        Assert.Single(_policies.TeamFolders(teamId));
+
+        // Over the Cloud Link: a Visitor reads the list and changes nothing; a full viewer may do both.
+        Assert.Equal(RemoteAccess.Kind.Reads, RemoteAccess.Kinds["policy.teamFolders"]);
+        Assert.Null(RemoteAccess.Refusal("policy.teamFolders", null, allowHostTerminals: false, RemoteAccess.Read));
+        Assert.Equal(RemoteAccess.ReadOnlyRefusal, RemoteAccess.Refusal("policy.addTeamFolder", add, allowHostTerminals: false, RemoteAccess.Read));
+        Assert.Equal(RemoteAccess.ReadOnlyRefusal, RemoteAccess.Refusal("policy.removeTeamFolder", remove, allowHostTerminals: false, RemoteAccess.Read));
+        Assert.Null(RemoteAccess.Refusal("policy.addTeamFolder", add, allowHostTerminals: false, RemoteAccess.Full));
+        Assert.Null(RemoteAccess.Refusal("policy.removeTeamFolder", remove, allowHostTerminals: false, RemoteAccess.Full));
+        Assert.True(AuditLog.IsReadOnly("policy.teamFolders"));
+        Assert.False(AuditLog.IsReadOnly("policy.addTeamFolder"));
+        Assert.False(AuditLog.IsReadOnly("policy.removeTeamFolder"));
+        await _rpc.DispatchAsAsync(Actor.CloudViewer("member@example.com"), "policy.removeTeamFolder", (JsonObject)remove.DeepClone(), Ct);
+        Assert.Empty(_policies.TeamFolders(teamId));
+        _ = ada;
+    }
+
+    [Fact]
+    public async Task AnAskAnsweredForTheTeam_IsWhatTeamSettingsLists()
+    {
+        var (teamId, _, ada, ben) = await Team();
+        await Ask(ada, Sessions);
+        var item = Assert.Single((await Call("folder.asks"))!.AsArray())!;
+        Assert.Equal(["member", "team", "everywhere"], Strings(item["scopes"]));
+        var answer = (await Call("folder.answer", new { id = item["id"]!.GetValue<long>(), choice = "read", scope = "team" }))!;
+        Assert.Equal(("team", "read"), (answer["scope"]!.GetValue<string>(), answer["grantedAccess"]!.GetValue<string>()));
+        Assert.Equal([(Sessions, "read")], await TeamFolders(teamId));
+        Assert.Contains(Sessions, Strings((await MemberPolicy(ben.Id))["effective"]!["readonly"]));
+        Assert.Equal("bad_params", (await Assert.ThrowsAsync<RpcException>(async () =>
+        {
+            await Ask(ada, Win ? @"Z:\other" : "/srv/other");
+            await Call("folder.answer", new { id = _asks.Asks().Single().Id, choice = "read", scope = "galaxy" });
+        })).Code);
     }
 
     // ------------------------------------------------------------------ elsewhere: Concierge lines, org summary title
