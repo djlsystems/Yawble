@@ -235,6 +235,33 @@ public class WorkflowTellRunnerTests
         Assert.Contains($"attached {photo} as {copy}", Logged(outcome));
     }
 
+    [Fact]
+    public async Task ATellWithAttachmentsTheBusRefuses_DeletesTheCopies_AndTellsNothing()
+    {
+        using var temp = new TempFolder();
+        var granted = temp.Sub("photos");
+        var photo = Path.Combine(granted, "IMG 0001.jpg");
+        File.WriteAllBytes(photo, [0xFF, 0xD8, 0xFF, 1, 2]);
+        await using var r = await new Rig { Docs = temp.Sub("documents"), Granted = granted }.InitAsync();
+        var saved = r.Library.Save("""
+            { "format": "yawble-workflow/1", "id": "tell-attach-nobody", "name": "tell-attach-nobody", "trigger": { "accepts": ["once"] },
+              "settings": [ { "name": "photo", "type": "string", "default": "" } ],
+              "start": "a",
+              "steps": [ { "id": "a", "type": "tell", "member": "Nobody", "text": "Look at this photo.", "attachments": ["{settings.photo}", "{settings.photo}"], "next": null } ] }
+            """);
+        Assert.True(saved.Ok, saved.Check.ToJsonString());
+        var bot = await r.MemberAsync(saved.Id, new JsonObject { ["photo"] = photo });
+
+        var outcome = await r.RunAsync(bot);
+
+        Assert.Equal((RunStatus.Failed, "a"), (outcome.Run.Status, outcome.Run.FailedStepId));
+        Assert.Contains("has no agent member named 'Nobody'", outcome.Run.Reason);
+        Assert.Empty(Directory.GetFiles(Path.Combine(r.Docs!, Attachments.Folder)));
+        Assert.True(File.Exists(photo));
+        using var s = r.Db.OpenStore();
+        Assert.DoesNotContain(s.AllMessages(), m => m.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal));
+    }
+
     // ------------------------------------------------------------------ waiting
 
     private static async Task<(long Bot, WorkflowRunOutcome Parked, long Deliverable)> ParkedAsync(Rig r)

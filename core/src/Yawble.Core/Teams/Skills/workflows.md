@@ -225,7 +225,8 @@ A workflow never runs an agent. A `tell` step gives work to an agent member of a
   folder, `docs:/`), at most 20 files of 100 MB each; otherwise the step fails with the reason and tells nothing.
   The files are copied (the originals stay) into the told team's Documents, `attachments\<time>-<name>`, and the
   instruction ends with the copies' paths, so the agent can open them without access to the source folder. The log
-  says `attached <file> as <copy>`. HEIC/HEIF photos (`.heic`, `.heif`) are copied as they are, not converted to JPEG:
+  says `attached <file> as <copy>`. If one file cannot be copied, the copies already made are deleted and the step fails
+  with nothing sent; so are they when the tell itself is refused. HEIC/HEIF photos (`.heic`, `.heif`, `.hif`) are copied as they are, not converted to JPEG:
   the log and the instruction say so, and an agent's image tools may not open them. `workflow_check` reports an
   item that is not text, an empty path or a malformed `docs:` path; whether an absolute path is in a granted folder is
   known only when the step runs.

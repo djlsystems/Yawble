@@ -45,6 +45,29 @@ public class AttachmentsTests
     }
 
     [Fact]
+    public void WhenOneCopyFails_TheCopiesAlreadyMadeAreDeleted_AndTheErrorGoesOn()
+    {
+        var dir = Directory.CreateTempSubdirectory("yawble-att-").FullName;
+        try
+        {
+            var first = Path.Combine(dir, "a.jpg");
+            var second = Path.Combine(dir, "b.jpg");
+            File.WriteAllBytes(first, Png);
+            File.WriteAllBytes(second, Png);
+            var docs = Directory.CreateDirectory(Path.Combine(dir, "documents")).FullName;
+
+            IOException e;
+            using (File.Open(second, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) // the second cannot be read
+                e = Assert.ThrowsAny<IOException>(() => Attachments.Copy(docs, [first, second]));
+
+            Assert.Contains("b.jpg", e.Message);
+            Assert.Empty(Directory.GetFiles(Path.Combine(docs, Attachments.Folder)));
+            Assert.True(File.Exists(first) && File.Exists(second)); // the sources stay
+        }
+        finally { TestFiles.DeleteTree(dir); }
+    }
+
+    [Fact]
     public void AnAttachmentsFolderThatIsAJunction_IsRefused_AndNothingIsCopiedThroughIt()
     {
         var dir = Directory.CreateTempSubdirectory("yawble-att-").FullName;

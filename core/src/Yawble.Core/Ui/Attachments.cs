@@ -74,10 +74,22 @@ public static class Attachments
             var n0 = name(item);
             var path = Path.Combine(dir, $"{stamp}-{n0}");
             for (var n = 2; File.Exists(path); n++) path = Path.Combine(dir, $"{stamp}-{n}-{n0}");
-            write(item, path);
+            try { write(item, path); }
+            catch
+            {
+                // All or nothing: the files already written (and any part of this one) go, then the error goes on.
+                foreach (var done in paths.Append(path)) TryDelete(done);
+                throw;
+            }
             paths.Add(path);
         }
         return paths;
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>A safe name for any file: its stem as <see cref="Clean"/> makes it, and its own extension (letters and digits), if any.</summary>
