@@ -204,12 +204,43 @@ describe('the Flowchart tab', () => {
     const id = docOf(w).steps!.at(-1)!.id;
     expect(docOf(w).steps!.at(-1)!.type).toBe('file.readAllText');
     const op = w.get('[data-test=form-file-op]');
-    expect(op.findAll('option')).toHaveLength(6);
+    expect(op.findAll('option')).toHaveLength(9);
     await op.setValue('file.appendLine');
     await flushPromises();
     const step = docOf(w).steps!.find((s) => s.id === id)!;
     expect(step).toMatchObject({ type: 'file.appendLine', path: '', text: '' });
     expect(node(w, id).attributes('data-kind')).toBe('file');
+  });
+
+  it('Move a file: To and a Replace checkbox (off, then saved as overwrite: true); List files: a pattern hint and a recursive checkbox', async () => {
+    const w = await editor(fakeApi().api);
+    await w.get('[data-test=palette-file]').trigger('click');
+    await flushPromises();
+    const id = docOf(w).steps!.at(-1)!.id;
+    const stepOf = () => docOf(w).steps!.find((s) => s.id === id)!;
+    await w.get('[data-test=form-file-op]').setValue('file.move');
+    await flushPromises();
+    expect(stepOf()).toEqual({ id, type: 'file.move', path: '', to: '', next: null });
+    expect(w.find('[data-test=expr-field][data-name=to]').exists()).toBe(true);
+    expect(w.find('[data-test=expr-field][data-name=text]').exists()).toBe(false);
+    expect(w.find('[data-test=form-into]').exists()).toBe(true);
+    const overwrite = w.get('[data-test=form-file-overwrite]');
+    expect((overwrite.element as HTMLInputElement).checked).toBe(false);
+    await overwrite.setValue(true);
+    await flushPromises();
+    expect(stepOf().overwrite).toBe(true);
+    await w.get('[data-test=form-file-overwrite]').setValue(false);
+    await flushPromises();
+    expect('overwrite' in stepOf()).toBe(false);
+
+    await w.get('[data-test=form-file-op]').setValue('file.list');
+    await flushPromises();
+    expect(stepOf()).toEqual({ id, type: 'file.list', path: '', pattern: '*', next: null });
+    expect(w.get('[data-test=expr-field][data-name=pattern] input').attributes('placeholder')).toBe('*.jpg;*.jpeg;*.heic;*.png');
+    expect(w.find('[data-test=form-file-overwrite]').exists()).toBe(false);
+    await w.get('[data-test=form-file-recursive]').setValue(true);
+    await flushPromises();
+    expect(stepOf().recursive).toBe(true);
   });
 
   it('the Start node opens its triggers, with a way to the whole workflow', async () => {

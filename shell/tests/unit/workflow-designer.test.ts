@@ -283,6 +283,21 @@ describe('catalog helpers', () => {
     expect(ioOutText(stepIO(alias, INBOX_SMS_ALERT.steps![0]!))).toBe('EmailList → res');
   });
 
+  it('Move, Copy and List files: their in and out (core card 680)', () => {
+    const doc: WorkflowDocument = { steps: [
+      { id: 'mv', type: 'file.move', path: 'a', to: 'b', into: 'final', next: null },
+      { id: 'cp', type: 'file.copy', path: 'a', to: 'b', next: null },
+      { id: 'ls', type: 'file.list', path: 'in', pattern: '*.jpg', into: 'photos', next: null },
+    ] };
+    const io = (id: string) => stepIO({ doc }, doc.steps!.find((s) => s.id === id)!);
+    expect(ioInText(io('mv'))).toBe('path: string, to: string, overwrite: bool');
+    expect(ioOutText(io('mv'))).toBe('string → final');
+    expect(ioInText(io('cp'))).toBe('path: string, to: string, overwrite: bool');
+    expect(ioOutText(io('cp'))).toBe('string');
+    expect(ioInText(io('ls'))).toBe('path: string, pattern: string, recursive: bool');
+    expect(ioOutText(io('ls'))).toBe('list<object> → photos');
+  });
+
   it('lays the end node out at the bottom, even when no step goes to it', () => {
     const doc: WorkflowDocument = { start: 'a', steps: [{ id: 'a', type: 'log', text: 'x', next: 'b' }, { id: 'b', type: 'log', text: 'y', next: 'c' }, { id: 'c', type: 'end' }] };
     const { nodes, edges } = docToGraph(doc);

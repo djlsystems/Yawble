@@ -6,7 +6,7 @@ import {
   type DesignContext, type MemberIntegration,
 } from '../../workflows/catalog';
 import type { WorkflowStep, WorkflowVariable } from '../../workflows/types';
-import { FILE_OPERATIONS, withFileOperation } from '../../workflows/flowchart';
+import { FILE_OPERATIONS, fileOperation, withFileOperation, type FileField } from '../../workflows/flowchart';
 import ExpressionField from './ExpressionField.vue';
 
 // The Design form of one step, by its type. Every change emits the whole step; a new variable made for "save result
@@ -38,8 +38,13 @@ const variables = computed(() => (props.ctx.doc.variables ?? []).filter((v) => v
 const schemaNames = computed(() => Object.keys(props.ctx.schemas ?? {}));
 const types = computed(() => [...NATIVE_TYPES, ...schemaNames.value]);
 const isFile = computed(() => props.step.type.startsWith('file.'));
-const fileWrites = computed(() => props.step.type === 'file.writeAllText' || props.step.type === 'file.appendLine');
-const fileReads = computed(() => ['file.readAllText', 'file.readLines', 'file.exists'].includes(props.step.type));
+/** The step's file operation: which fields its form shows (text; to and overwrite; pattern and recursive) and whether it has a result. */
+const fileOp = computed(() => fileOperation(props.step.type));
+const fileHas = (f: FileField) => fileOp.value?.fields.includes(f) ?? false;
+const fileInto = computed(() => fileOp.value?.into ?? false);
+/** A checkbox field that is off when absent: unchecking removes it. */
+const setFlag = (key: 'overwrite' | 'recursive') => (e: Event) =>
+  change((s) => { if ((e.target as HTMLInputElement).checked) s[key] = true; else delete s[key]; });
 /** The File block's operation: the step becomes that file step type (see withFileOperation). */
 function pickFileOp(e: Event) {
   if (props.readonly) return;
@@ -514,11 +519,23 @@ function addOutput() {
           <option v-for="o in FILE_OPERATIONS" :key="o.type" :value="o.type">{{ o.label }}</option>
         </select>
       </label>
-      <ExpressionField name="path" label="Path" type="string" required :model-value="step.path" :suggestions="suggestions" :readonly="readonly"
+      <ExpressionField name="path" :label="step.type === 'file.list' ? 'Folder' : 'Path'" type="string" required :model-value="step.path" :suggestions="suggestions" :readonly="readonly"
         @update:model-value="(v) => change((s) => { s.path = v; })" />
-      <ExpressionField v-if="fileWrites" name="text" label="Text" type="string" required :model-value="step.text" :suggestions="suggestions" :readonly="readonly"
+      <ExpressionField v-if="fileHas('text')" name="text" label="Text" type="string" required :model-value="step.text" :suggestions="suggestions" :readonly="readonly"
         @update:model-value="(v) => change((s) => { s.text = v; })" />
-      <label v-if="fileReads" class="field">Save result into
+      <ExpressionField v-if="fileHas('to')" name="to" label="To" type="string" required :model-value="step.to" :suggestions="suggestions" :readonly="readonly"
+        @update:model-value="(v) => change((s) => { s.to = v; })" />
+      <label v-if="fileHas('overwrite')" class="check">
+        <input type="checkbox" :checked="step.overwrite === true" :disabled="readonly" data-test="form-file-overwrite" @change="setFlag('overwrite')($event)" />
+        Replace a file already there
+      </label>
+      <ExpressionField v-if="fileHas('pattern')" name="pattern" label="Pattern" type="string" placeholder="*.jpg;*.jpeg;*.heic;*.png" :model-value="step.pattern"
+        :suggestions="suggestions" :readonly="readonly" @update:model-value="(v) => change((s) => { s.pattern = v; })" />
+      <label v-if="fileHas('recursive')" class="check">
+        <input type="checkbox" :checked="step.recursive === true" :disabled="readonly" data-test="form-file-recursive" @change="setFlag('recursive')($event)" />
+        Include the folders inside it
+      </label>
+      <label v-if="fileInto" class="field">Save result into
         <select :value="str(step.into)" :disabled="readonly" data-test="form-into" @change="change((s) => { const v = ($event.target as HTMLSelectElement).value; if (v) s.into = v; else delete s.into; })">
           <option value="">(don't save it)</option>
           <option v-for="v in variables" :key="v.name" :value="v.name">{{ v.name }}: {{ v.type }}</option>
