@@ -6,6 +6,7 @@ import Icon from './Icon.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useImageAttachments, type AttachedImage } from '../imageAttachments';
 import { usePhone } from '../phone';
+import { draftOf, keepDraft } from '../conciergeDrafts';
 
 // The Concierge's message box: grows with the text, Enter sends (Shift+Enter: a new line). Below the text: the team in
 // focus and the agent that answers; while an answer is running, Send becomes Stop.
@@ -25,10 +26,12 @@ const props = defineProps<{
   autofocus?: boolean;
   /** A line about the chat (the page shows it under the box on the desktop); on a phone it folds out with the pickers. */
   note?: string;
+  /** The chat this box writes to: its unsent text is kept under this key and shown again when the box is rebuilt. */
+  draftKey?: string;
 }>();
 const emit = defineEmits<{ send: [text: string, images: { name: string; base64: string }[], previews: AttachedImage[]]; stop: []; 'update:cli': [cli: string]; 'update:teamId': [teamId: number | null]; pickers: [open: boolean] }>();
 
-const text = ref('');
+const text = ref(props.draftKey ? draftOf(props.draftKey) : '');
 const box = ref<HTMLTextAreaElement | null>(null);
 const picker = ref<HTMLInputElement | null>(null);
 const attach = useImageAttachments();
@@ -65,7 +68,24 @@ function send() {
   void nextTick(grow);
 }
 
+/** Empties the box (the attached images stay: each has its own Remove). */
+function clear() {
+  text.value = '';
+  void nextTick(() => { grow(); focus(); });
+}
+
+// Escape pressed twice within this time empties the box.
+const DOUBLE_ESCAPE_MS = 600;
+let lastEscape = 0;
+
 function key(e: KeyboardEvent) {
+  if (e.key === 'Escape' && !e.isComposing) {
+    const now = Date.now();
+    if (text.value && now - lastEscape <= DOUBLE_ESCAPE_MS) { lastEscape = 0; clear(); }
+    else lastEscape = now;
+    return;
+  }
+  lastEscape = 0;
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !phone.value) {
     e.preventDefault();
     send();
@@ -75,8 +95,10 @@ function key(e: KeyboardEvent) {
 function focus() { box.value?.focus(); }
 defineExpose({ focus, set: (t: string) => { text.value = t; void nextTick(() => { grow(); focus(); }); } });
 
-watch(text, () => void nextTick(grow));
-onMounted(() => { if (props.autofocus && !phone.value) focus(); });
+watch(text, (t) => { if (props.draftKey) keepDraft(props.draftKey, t); void nextTick(grow); });
+// Another chat in the same box: its own unsent text.
+watch(() => props.draftKey, (k) => { text.value = k ? draftOf(k) : ''; });
+onMounted(() => { grow(); if (props.autofocus && !phone.value) focus(); });
 </script>
 
 <template>
@@ -103,6 +125,7 @@ onMounted(() => { if (props.autofocus && !phone.value) focus(); });
             <option v-for="a in agents" :key="a.id" :value="a.id" :disabled="!a.ready">{{ a.label }}{{ a.ready ? '' : ' (not signed in)' }}</option>
           </select>
         </label>
+        <button v-if="text" class="clear-row" data-test="composer-clear" @click="clear">Clear the text</button>
         <p v-if="note" class="note" data-test="composer-note">{{ note }}</p>
       </div>
       <p v-if="attach.problem.value" class="problem" data-test="composer-image-problem">{{ attach.problem.value }}</p>
@@ -133,6 +156,7 @@ onMounted(() => { if (props.autofocus && !phone.value) focus(); });
       <button class="pick attach" title="Attach an image (or paste one)" data-test="composer-attach" @click="picker?.click()"><Icon name="image" :size="15" /></button>
       <input ref="picker" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden data-test="composer-attach-input"
         @change="attach.add(($event.target as HTMLInputElement).files ?? []); ($event.target as HTMLInputElement).value = ''" />
+      <button v-if="text" class="pick clear" title="Clear the text (Esc twice)" data-test="composer-clear" @click="clear">Clear</button>
       <span class="grow" />
       <label class="pick" title="The agent that answers">
         <select :value="cli" data-test="composer-agent" @change="emit('update:cli', ($event.target as HTMLSelectElement).value)">
@@ -164,6 +188,8 @@ textarea { width: 100%; border: 0; outline: 0; resize: none; background: transpa
 .stop { background: var(--ink); color: var(--surface); }
 .grow { flex: 1; }
 .attach { border: 0; background: transparent; cursor: pointer; }
+.clear { border: 0; background: transparent; cursor: pointer; }
+.clear-row { min-height: 44px; border: 1px solid var(--line); background: transparent; border-radius: 10px; font-size: 14px; color: var(--ink); }
 .thumbs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
 .thumb { position: relative; width: 64px; height: 64px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
 .thumb img { width: 100%; height: 100%; object-fit: cover; }
