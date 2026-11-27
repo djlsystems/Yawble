@@ -67,11 +67,23 @@ internal sealed class WorkflowFiles
         {
             throw new WorkflowStepException($"'{path}' is not a valid path: {e.Message}");
         }
-        if (Inside(full, _data, out var rel)) return (full, -1, rel);
-        if (_docs is not null && Inside(full, _docs, out rel)) return (full, DocsRoot, rel);
+        if (Inside(full, _data, out var rel)) return NoLinks(path, full, -1, rel);
+        if (_docs is not null && Inside(full, _docs, out rel)) return NoLinks(path, full, DocsRoot, rel);
         for (var i = 0; i < _grants.Count; i++)
-            if (Inside(full, _grants[i].Path, out rel)) return (full, i, rel);
+            if (Inside(full, _grants[i].Path, out rel)) return NoLinks(path, full, i, rel);
         throw new WorkflowStepException($"'{path}' is outside the member's data folder and the team's folder grants");
+    }
+
+    /// <summary>
+    /// The located path, once no part of it below its root is a link or junction: one in a folder (Documents above all, which
+    /// agents write) could lead anywhere, so it is refused, never followed.
+    /// </summary>
+    private (string Full, int Root, string Relative) NoLinks(string path, string full, int root, string rel)
+    {
+        var rootPath = root == -1 ? _data : root == DocsRoot ? _docs! : _grants[root].Path;
+        if (Ops.PathLinks.FirstLink(rootPath, rel) is not null)
+            throw new WorkflowStepException($"'{path}' goes through a link, which is not followed");
+        return (full, root, rel);
     }
 
     private (string Full, int Root, string Relative) LocateDocs(string path)
@@ -86,7 +98,7 @@ internal sealed class WorkflowFiles
             throw new WorkflowStepException($"'{path}' is not a valid path: {e.Message}");
         }
         if (!Inside(full, _docs, out var rel)) throw new WorkflowStepException($"'{path}' leaves the team's Documents folder");
-        return (full, DocsRoot, rel);
+        return NoLinks(path, full, DocsRoot, rel);
     }
 
     /// <summary>The file to read: in a dry run, the copy the dry run wrote when there is one.</summary>

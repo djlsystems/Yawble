@@ -43,4 +43,35 @@ public class AttachmentsTests
         Assert.Empty(Attachments.Read(new JsonObject()));
         Assert.Equal("Hi", Attachments.WithImages("Hi", []));
     }
+
+    [Fact]
+    public void AnAttachmentsFolderThatIsAJunction_IsRefused_AndNothingIsCopiedThroughIt()
+    {
+        var dir = Directory.CreateTempSubdirectory("yawble-att-").FullName;
+        var link = Path.Combine(dir, "documents", Attachments.Folder);
+        try
+        {
+            var behind = Directory.CreateDirectory(Path.Combine(dir, "host")).FullName;
+            var source = Path.Combine(dir, "a.jpg");
+            File.WriteAllBytes(source, Png);
+            Directory.CreateDirectory(Path.Combine(dir, "documents"));
+            // Where the file system refuses a junction (an agent's sandbox), a plain folder the link check is told to see as one.
+            if (!OperatingSystem.IsWindows() || !TestFiles.TryCreateJunction(link, behind))
+            {
+                behind = Directory.CreateDirectory(link).FullName;
+                Yawble.Core.Ops.PathLinks.SeenAsLink.Value = p => string.Equals(Path.GetFullPath(p), link, StringComparison.OrdinalIgnoreCase);
+            }
+
+            var e = Assert.Throws<IOException>(() => Attachments.Copy(Path.Combine(dir, "documents"), [source]));
+
+            Assert.Contains("is a link, which is not followed", e.Message);
+            Assert.Empty(Directory.GetFiles(behind));
+        }
+        finally
+        {
+            Yawble.Core.Ops.PathLinks.SeenAsLink.Value = null;
+            if (Directory.Exists(link)) Directory.Delete(link);
+            TestFiles.DeleteTree(dir);
+        }
+    }
 }

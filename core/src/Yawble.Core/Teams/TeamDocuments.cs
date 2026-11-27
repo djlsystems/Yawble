@@ -189,13 +189,9 @@ public sealed class TeamDocuments(TeamRepos repos)
         var parts = rel.Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Any(p => p is "." or ".."))
             throw new DocumentsException("bad_path", $"'{relative}' must be a path inside the team's documents");
-        var full = root;
-        foreach (var part in parts)
-        {
-            full = Path.Combine(full, part);
-            if ((File.Exists(full) || Directory.Exists(full)) && (File.GetAttributes(full) & FileAttributes.ReparsePoint) != 0)
-                throw new DocumentsException("bad_path", $"'{relative}' goes through a link, which is not followed");
-        }
+        if (Ops.PathLinks.FirstLink(root, rel) is not null)
+            throw new DocumentsException("bad_path", $"'{relative}' goes through a link, which is not followed");
+        var full = Path.Combine([root, .. parts]);
         var canonical = Path.GetFullPath(full);
         if (!canonical.StartsWith(Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
             && !PathsEqual(canonical, root))

@@ -138,7 +138,9 @@ top level). Every step must be reachable from `start`; a loop body must end with
 | `end` | `outputs` (optional) | ends the run, setting declared outputs |
 
 - File paths: relative ones are in the member's data folder; an absolute path must be in a folder the team granted
-  (writing needs a writable grant).
+  (writing needs a writable grant). Links and junctions are not followed: a path (in the data folder, a granted folder
+  or `docs:/`, at either end of a move or copy, a free name, a tell's attachment) that goes through one fails its step:
+  `'docs:/j/x.jpg' goes through a link, which is not followed`.
 - `docs:/` paths are in the team's Documents folder (the one the person reads in Documents, and agents see as
   `YAWBLE_TEAM_DOCS`): `docs:/smoke/smokesessions.json` is `smoke\smokesessions.json` there. The team's workflow
   members can read and write it with every `file.*` step, at either end of a move or copy, and `file.list` can list
