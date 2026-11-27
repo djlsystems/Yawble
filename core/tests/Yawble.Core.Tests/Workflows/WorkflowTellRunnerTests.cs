@@ -74,7 +74,7 @@ public class WorkflowTellRunnerTests
 
         public WorkflowRunner NewRunner() =>
             new(Store, Library, NoWorkflowActions.Instance, SeamWorkflowEngine.Instance, Path.Combine(Db.Dir, "workflows"), clock: Clock,
-                grantedFolders: Granted is null ? null : _ => [Granted])
+                grantedFolders: Granted is null ? null : _ => [new Yawble.Core.Workflows.Engine.WorkflowFolderGrant(Granted, CanWrite: true)])
             {
                 Tellers = Tells, WaitSources = [Tells],
             };

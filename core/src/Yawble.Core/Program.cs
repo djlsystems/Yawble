@@ -187,7 +187,10 @@ var workflowRuns = new Yawble.Core.Workflows.Running.WorkflowRunStore($"Data Sou
 Yawble.Core.Workflows.Running.WorkflowFolders.MoveOldFolder(options.DataDir!);
 workflowRunner = new Yawble.Core.Workflows.Running.WorkflowRunner(workflowRuns, workflowLibrary, workflowActions,
     Yawble.Core.Workflows.Running.SeamWorkflowEngine.Instance, Path.Combine(options.DataDir!, "workflows"),
-    grantedFolders: memberId => policies.GetMember(memberId).Loosen.Filesystem?.Readwrite ?? [],
+    // A workflow member's file steps reach its own granted folders and its team's folder list (read-only ones only to read).
+    grantedFolders: memberId => [.. policies.WorkflowFolders(memberId, new Yawble.Core.Policy.PolicyPaths(Yawble.Core.Policy.TargetOsExtensions.Host,
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), Yawble.Core.Policy.HostPathCanonicalizer.Canonicalize))
+        .Select(g => new Yawble.Core.Workflows.Engine.WorkflowFolderGrant(g.Path, g.CanWrite))],
     log: line => Console.Error.WriteLine($"workflows: {line}"),
     // docs:/ paths in a workflow's file steps are in its team's Documents folder (what agents see as YAWBLE_TEAM_DOCS).
     teamDocuments: team => bus.Repos is { } docsRepos ? new Yawble.Core.Teams.TeamDocuments(docsRepos).Root(team) : null)
@@ -325,8 +328,9 @@ var toolAsks = new Yawble.Core.Integrations.ToolAskService($"Data Source={dbPath
 toolAsks.Changed = () => events.Publish(Yawble.Core.Integrations.ToolAskService.ChangedEvent, null);
 toolAsks.Progress = e => events.Publish(Yawble.Core.Integrations.ToolAskService.ProgressEvent, e);
 bus.ToolAsks = toolAsks;
-// Folder asks: a folder an agent asked to read or write (request_folder) waits for the person in Needs you; an
-// approval writes the member's loosen block through the policy store, as policy.saveLoosen does.
+// Folder asks: a folder an agent asked to read or write (request_folder), or the Concierge asked for (folder_request),
+// waits for the person in Needs you; an approval writes the member's loosen block, the team's folder list or the global
+// policy through the policy store. The same service adds to and removes from the team's folder list (Team settings > Folders).
 var folderAsks = new Yawble.Core.Integrations.FolderAskService($"Data Source={dbPath}", policies,
     async (memberId, ct) =>
     {

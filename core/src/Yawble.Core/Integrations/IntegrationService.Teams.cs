@@ -36,6 +36,8 @@ public sealed partial class IntegrationService
             "DELETE FROM network_asks WHERE team_id = $t;",
             // The team's network allow list (0041): a later team with the same name starts with none.
             "DELETE FROM team_network_allows WHERE team_id = $t;",
+            // The team's folder list (0064): a later team with the same name starts with none.
+            "DELETE FROM team_folders WHERE team_id = $t;",
             // Tool asks (0040) and what happened to them.
             "DELETE FROM tool_ask_events WHERE ask_id IN (SELECT id FROM tool_asks WHERE team_id = $t);",
             "DELETE FROM tool_asks WHERE team_id = $t;",

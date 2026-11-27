@@ -127,6 +127,21 @@ public static class FolderAskRules
             if (paths.Normalize(f) is { } n && paths.Overlaps(path, n)) return n;
         return null;
     }
+
+    /// <summary>An absolute path in the target OS's form: a drive or UNC path on Windows, "/..." elsewhere; "~/..." is the person's home.</summary>
+    public static bool IsAbsolute(string p, TargetOs os) =>
+        p.StartsWith("~/", StringComparison.Ordinal) || p.StartsWith("~\\", StringComparison.Ordinal) || (os == TargetOs.Windows
+            ? (p.Length >= 3 && char.IsAsciiLetter(p[0]) && p[1] == ':' && p[2] is '\\' or '/') || p.StartsWith(@"\\", StringComparison.Ordinal)
+            : p.StartsWith('/'));
+
+    /// <summary>What a member's effective policy grants on the path: readwrite, read, or null.</summary>
+    public static string? Granted(PolicyPaths paths, EffectivePolicy e, RunLayout layout, string path)
+    {
+        if (e.Denied.Any(d => paths.IsWithin(path, d))) return null;
+        if (e.Readwrite.Concat(layout.ImplicitReadwrite).Any(g => paths.IsWithin(path, g))) return FolderAccess.ReadWrite;
+        if (e.Readonly.Concat(layout.ImplicitReadonly).Any(g => paths.IsWithin(path, g))) return FolderAccess.Read;
+        return null;
+    }
 }
 
 /// <summary>
@@ -261,20 +276,9 @@ public sealed class FolderAskService
 
     private static string Refused(string why) => $"refused: {why}. The person is not asked; do not try to reach it another way.";
 
-    /// <summary>An absolute path in the target OS's form: a drive or UNC path on Windows, "/..." elsewhere; "~/..." is the person's home.</summary>
-    private static bool IsAbsolute(string p, TargetOs os) =>
-        p.StartsWith("~/", StringComparison.Ordinal) || p.StartsWith("~\\", StringComparison.Ordinal) || (os == TargetOs.Windows
-            ? (p.Length >= 3 && char.IsAsciiLetter(p[0]) && p[1] == ':' && p[2] is '\\' or '/') || p.StartsWith(@"\\", StringComparison.Ordinal)
-            : p.StartsWith('/'));
+    private static bool IsAbsolute(string p, TargetOs os) => FolderAskRules.IsAbsolute(p, os);
 
-    /// <summary>What the member's effective policy grants on the path: readwrite, read, or null.</summary>
-    private static string? Granted(PolicyPaths paths, EffectivePolicy e, RunLayout layout, string path)
-    {
-        if (e.Denied.Any(d => paths.IsWithin(path, d))) return null;
-        if (e.Readwrite.Concat(layout.ImplicitReadwrite).Any(g => paths.IsWithin(path, g))) return FolderAccess.ReadWrite;
-        if (e.Readonly.Concat(layout.ImplicitReadonly).Any(g => paths.IsWithin(path, g))) return FolderAccess.Read;
-        return null;
-    }
+    private static string? Granted(PolicyPaths paths, EffectivePolicy e, RunLayout layout, string path) => FolderAskRules.Granted(paths, e, layout, path);
 
     /// <summary>The loosen block with the path added at that access (read-write also takes it off the read-only list, where it would win).</summary>
     private static PolicyPatch WithPath(PolicyPatch loosen, PolicyPaths paths, string path, string access)

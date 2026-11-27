@@ -6,6 +6,14 @@ namespace Yawble.Core.Policy;
 /// <summary>One host on a team's network allow list (team_network_allows, 0041).</summary>
 public sealed record TeamHost(string Host, string AddedBy, string? AddedVia, string AddedAt);
 
+/// <summary>One folder on a team's folder list (team_folders, 0064). <paramref name="Access"/>: read or readwrite.</summary>
+public sealed record TeamFolder(string Path, string Access, string AddedBy, string? AddedVia, string AddedAt)
+{
+    public bool Write => Access == Integrations.FolderAccess.ReadWrite;
+
+    public TeamFolderGrant Grant => new(Path, Write);
+}
+
 public sealed record MemberPolicy(PolicyPatch Override, PolicyPatch Loosen, IReadOnlyList<string> LoosenSummary, DateTimeOffset? LoosenApprovedAt);
 
 /// <summary>
@@ -151,17 +159,20 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
             ("$a", empty ? DBNull.Value : Now()));
     }
 
-    /// <summary>The effective policy for a member's next run (changes never reach a running sandbox): with its team's network allow list.</summary>
+    /// <summary>
+    /// The effective policy for a member's next run (changes never reach a running sandbox): with its team's network allow
+    /// list and its team's folder list.
+    /// </summary>
     public MergeResult Effective(long memberId, RunLayout layout, long? machineMemoryMb = null)
     {
         var m = GetMember(memberId);
-        return PolicyMerger.Merge(GetGlobal(), m.Override, m.Loosen, layout, canonicalize, machineMemoryMb, TeamHostsOfMember(memberId));
+        return PolicyMerger.Merge(GetGlobal(), m.Override, m.Loosen, layout, canonicalize, machineMemoryMb, TeamHostsOfMember(memberId), TeamFoldersOfMember(memberId));
     }
 
-    /// <summary>What every member of a team shares in its effective policy: the global policy and the team's network allow list.</summary>
-    public sealed record TeamShared(GlobalPolicy Global, IReadOnlyList<string> Hosts);
+    /// <summary>What every member of a team shares in its effective policy: the global policy, the team's network allow list and the team's folder list.</summary>
+    public sealed record TeamShared(GlobalPolicy Global, IReadOnlyList<string> Hosts, IReadOnlyList<TeamFolderGrant> Folders);
 
-    public TeamShared SharedOf(long teamId) => new(GetGlobal(), [.. TeamHosts(teamId).Select(h => h.Host)]);
+    public TeamShared SharedOf(long teamId) => new(GetGlobal(), [.. TeamHosts(teamId).Select(h => h.Host)], [.. TeamFolders(teamId).Select(f => f.Grant)]);
 
     /// <summary>
     /// <see cref="Effective(long, RunLayout, long?)"/> for a member of the team <paramref name="shared"/> was read for:
@@ -170,7 +181,7 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
     public MergeResult Effective(long memberId, RunLayout layout, long? machineMemoryMb, TeamShared shared)
     {
         var m = GetMember(memberId);
-        return PolicyMerger.Merge(shared.Global, m.Override, m.Loosen, layout, canonicalize, machineMemoryMb, shared.Hosts);
+        return PolicyMerger.Merge(shared.Global, m.Override, m.Loosen, layout, canonicalize, machineMemoryMb, shared.Hosts, shared.Folders);
     }
 
     // ---------------------------------------------------------------- the team's network allow list (0041)
@@ -298,8 +309,11 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
             throw new TeamMembersChangedException(teamId, given.Distinct().Order().ToList(), current);
     }
 
-    /// <summary>What AddTeamHost checks: the team's hosts, the global policy, the team's member ids and each given member's policy; <c>Stored</c> is the stored text of the policies.</summary>
-    private sealed record TeamHostState(List<string> Hosts, GlobalPolicy Global, List<long> TeamMemberIds, List<MemberPolicy> Members, string Stored);
+    /// <summary>
+    /// What AddTeamHost and AddTeamFolder check: the team's hosts and folders, the global policy, the team's member ids and
+    /// each given member's policy; <c>Stored</c> is the stored text of all of them.
+    /// </summary>
+    private sealed record TeamHostState(List<string> Hosts, GlobalPolicy Global, List<long> TeamMemberIds, List<MemberPolicy> Members, string Stored, List<TeamFolder> Folders);
 
     private static TeamHostState ReadTeamHostState(SqliteConnection c, SqliteTransaction? tx, long teamId, IReadOnlyList<long> memberIds)
     {
@@ -307,6 +321,8 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
         var hosts = ReadTeamHosts(c, tx, teamId).Select(t => t.Host).ToList();
         var teamMemberIds = ReadTeamMemberIds(c, tx, teamId);
         stored.Append(string.Join('\n', hosts)).Append('\0');
+        var folders = ReadTeamFolders(c, tx, teamId);
+        stored.Append(string.Join('\n', folders.Select(f => f.Access + ' ' + f.Path))).Append('\0');
         using (var cmd = c.CreateCommand())
         {
             cmd.Transaction = tx;
@@ -329,7 +345,7 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
             }
             list.Add(ReadMember(c, tx, id));
         }
-        return new TeamHostState(hosts, global, teamMemberIds, list, stored.ToString());
+        return new TeamHostState(hosts, global, teamMemberIds, list, stored.ToString(), folders);
     }
 
     /// <summary>Each member's merged policy with the host, then the sandbox dry run; throws with every refusal.</summary>
@@ -339,7 +355,7 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
         for (var i = 0; i < members.Count; i++)
         {
             var (m, layout) = (state.Members[i], members[i].Layout);
-            var merged = PolicyMerger.Merge(state.Global, m.Override, m.Loosen, layout, canonicalize, null, [.. state.Hosts, host]);
+            var merged = PolicyMerger.Merge(state.Global, m.Override, m.Loosen, layout, canonicalize, null, [.. state.Hosts, host], [.. state.Folders.Select(f => f.Grant)]);
             errors.AddRange(merged.Violations);
             if (merged.Violations.Count == 0 && dryRun is not null)
                 errors.AddRange(dryRun(state.Global, m.Override, m.Loosen with { Network = new NetworkPatch([.. m.Loosen.Network?.AllowHosts ?? [], .. state.Hosts, host]) }, layout));
@@ -356,6 +372,191 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
         cmd.Parameters.AddWithValue("$t", teamId);
         cmd.Parameters.AddWithValue("$h", host.Trim().ToLowerInvariant());
         return cmd.ExecuteNonQuery() > 0;
+    }
+
+    // ---------------------------------------------------------------- the team's folder list (0064)
+
+    /// <summary>The team's folder list, oldest first.</summary>
+    public IReadOnlyList<TeamFolder> TeamFolders(long teamId)
+    {
+        using var c = Open();
+        return ReadTeamFolders(c, null, teamId);
+    }
+
+    private static List<TeamFolder> ReadTeamFolders(SqliteConnection c, SqliteTransaction? tx, long teamId)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT path, access, added_by, added_via, added_at FROM team_folders WHERE team_id = $t ORDER BY added_at, path;";
+        cmd.Parameters.AddWithValue("$t", teamId);
+        using var r = cmd.ExecuteReader();
+        var list = new List<TeamFolder>();
+        while (r.Read()) list.Add(new TeamFolder(r.GetString(0), r.GetString(1), r.GetString(2), r.IsDBNull(3) ? null : r.GetString(3), r.GetString(4)));
+        return list;
+    }
+
+    /// <summary>The folders of the member's own team's list (never another team's); empty for a member that is gone.</summary>
+    public IReadOnlyList<TeamFolderGrant> TeamFoldersOfMember(long memberId)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT f.path, f.access FROM team_folders f JOIN members m ON m.team_id = f.team_id WHERE m.id = $m ORDER BY f.added_at, f.path;";
+        cmd.Parameters.AddWithValue("$m", memberId);
+        using var r = cmd.ExecuteReader();
+        var list = new List<TeamFolderGrant>();
+        while (r.Read()) list.Add(new TeamFolderGrant(r.GetString(0), r.GetString(1) == Integrations.FolderAccess.ReadWrite));
+        return list;
+    }
+
+    /// <summary>
+    /// Adds a folder to the team's folder list with read or readwrite access, or changes the access of one that is on it,
+    /// in one write. Checked first, for every current member (<paramref name="members"/>: each one's run layout, every
+    /// member of the team exactly once): the path is absolute; <see cref="Integrations.FolderAskRules.Problem"/> allows it
+    /// (never another team's folders, <paramref name="otherTeamFolders"/>; never secrets, the app's own data, a system
+    /// folder, the profile root); the member's merged policy with the folder has no violation and really grants it with
+    /// that access (a deny wins); the sandbox dry run accepts it. Any refusal throws and nothing is written. Returns the
+    /// folder as it is stored, or null when it was on the list with that access already.
+    /// The write follows <see cref="AddTeamHost"/>: one transaction that writes only when the team's lists, the global
+    /// policy, the team's member ids and each member's policy are exactly what was checked; a member hired or removed
+    /// meanwhile throws <see cref="TeamMembersChangedException"/> and the caller builds the list again.
+    /// </summary>
+    public string? AddTeamFolder(long teamId, string path, string access, IReadOnlyList<(long MemberId, RunLayout Layout)> members,
+        IReadOnlyList<string> otherTeamFolders, string addedBy, string? addedVia)
+    {
+        if (access is not (Integrations.FolderAccess.Read or Integrations.FolderAccess.ReadWrite))
+            throw new PolicyException([$"access is read or readwrite, not '{access}'"]);
+        var memberIds = members.Select(m => m.MemberId).ToList();
+        for (var attempt = 1; ; attempt++)
+        {
+            TeamHostState checkedState;
+            using (var r = Open()) checkedState = ReadTeamHostState(r, null, teamId, memberIds);
+            EnsureSameMembers(teamId, memberIds, checkedState.TeamMemberIds);
+            if (members.Count == 0) throw new PolicyException(["the team has no members to check the folder for; nothing was written"]);
+            var first = new PolicyPaths(members[0].Layout.Os, members[0].Layout.Home, canonicalize);
+            var raw = (path ?? "").Trim();
+            if (!Integrations.FolderAskRules.IsAbsolute(raw, first.Os) || first.Resolve(raw) is not { } resolved)
+                throw new PolicyException([$"'{raw}' is not an absolute path on this computer; give the folder's full path"]);
+            var existing = checkedState.Folders.FirstOrDefault(f => first.Same(f.Path, resolved));
+            if (existing is not null && existing.Access == access) return null;
+            var stored = existing?.Path ?? resolved;
+            CheckTeamFolder(checkedState, stored, access, members, otherTeamFolders, Names(memberIds));
+
+            using var c = Open();
+            using var tx = c.BeginTransaction(deferred: false);
+            var now = ReadTeamHostState(c, tx, teamId, memberIds);
+            EnsureSameMembers(teamId, memberIds, now.TeamMemberIds); // a throw disposes tx: rolled back, nothing written
+            if (now.Stored != checkedState.Stored)
+            {
+                if (attempt >= AddTeamHostAttempts)
+                    throw new PolicyException(["the team's policy kept changing while the folder was checked; nothing was written, try again"]);
+                continue; // checked against an older state: check again on the new one
+            }
+            using var cmd = c.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                INSERT INTO team_folders (team_id, path, access, added_by, added_via, added_at) VALUES ($t, $p, $a, $by, $via, $at)
+                ON CONFLICT (team_id, path) DO UPDATE SET access = excluded.access, added_by = excluded.added_by, added_via = excluded.added_via, added_at = excluded.added_at;
+                """;
+            cmd.Parameters.AddWithValue("$t", teamId);
+            cmd.Parameters.AddWithValue("$p", stored);
+            cmd.Parameters.AddWithValue("$a", access);
+            cmd.Parameters.AddWithValue("$by", addedBy);
+            cmd.Parameters.AddWithValue("$via", (object?)addedVia ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$at", Now());
+            cmd.ExecuteNonQuery();
+            tx.Commit();
+            return stored;
+        }
+    }
+
+    private Dictionary<long, string> Names(IReadOnlyList<long> memberIds)
+    {
+        var names = new Dictionary<long, string>();
+        using var c = Open();
+        foreach (var id in memberIds)
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT name FROM members WHERE id = $m;";
+            cmd.Parameters.AddWithValue("$m", id);
+            names[id] = cmd.ExecuteScalar() as string ?? $"member {id}";
+        }
+        return names;
+    }
+
+    /// <summary>The folder for each member: the ask rules, the merged policy with it, that the merge really grants it, then the sandbox dry run; throws with every refusal.</summary>
+    private void CheckTeamFolder(TeamHostState state, string folder, string access, IReadOnlyList<(long MemberId, RunLayout Layout)> members,
+        IReadOnlyList<string> otherTeamFolders, Dictionary<long, string> names)
+    {
+        var write = access == Integrations.FolderAccess.ReadWrite;
+        var errors = new List<string>();
+        for (var i = 0; i < members.Count; i++)
+        {
+            var (m, layout, name) = (state.Members[i], members[i].Layout, names[members[i].MemberId]);
+            var paths = new PolicyPaths(layout.Os, layout.Home, canonicalize);
+            if (Integrations.FolderAskRules.Problem(paths, folder, access, layout, state.Global, otherTeamFolders) is { } problem)
+            {
+                errors.Add(problem);
+                continue;
+            }
+            List<TeamFolderGrant> folders = [.. state.Folders.Where(f => !paths.Same(f.Path, folder)).Select(f => f.Grant), new(folder, write)];
+            var merged = PolicyMerger.Merge(state.Global, m.Override, m.Loosen, layout, canonicalize, null, state.Hosts, folders);
+            errors.AddRange(merged.Violations);
+            if (merged.Violations.Count > 0) continue;
+            var granted = Integrations.FolderAskRules.Granted(paths, merged.Policy, layout, folder);
+            if (granted is null || (write && granted != Integrations.FolderAccess.ReadWrite))
+            {
+                errors.Add($"{folder} would {(granted is null ? "not be readable" : "stay read-only")} for {name}: the policy denies it or grants it read-only there (see {name}'s Policy tab and the global policy)");
+                continue;
+            }
+            if (dryRun is null) continue;
+            // The dry run compiles a loosen block: the team's folders the merge kept go in as its entries.
+            bool Kept(TeamFolderGrant f) => paths.Resolve(f.Path) is { } p && merged.Policy.Readonly.Concat(merged.Policy.Readwrite).Any(g => paths.Same(g, p));
+            var kept = folders.Where(Kept).ToList();
+            var fs = m.Loosen.Filesystem ?? new FilesystemPatch();
+            var loosen = m.Loosen with
+            {
+                Network = new NetworkPatch([.. m.Loosen.Network?.AllowHosts ?? [], .. state.Hosts]),
+                Filesystem = fs with
+                {
+                    Readonly = [.. fs.Readonly ?? [], .. kept.Where(f => !f.Write).Select(f => f.Path)],
+                    Readwrite = [.. fs.Readwrite ?? [], .. kept.Where(f => f.Write).Select(f => f.Path)],
+                },
+            };
+            errors.AddRange(dryRun(state.Global, m.Override, loosen, layout));
+        }
+        if (errors.Count > 0) throw new PolicyException(errors.Distinct().ToList());
+    }
+
+    /// <summary>Takes a folder off the team's list: the team's next runs no longer have it (a member's own loosen block may still). False when it was not there.</summary>
+    public bool RemoveTeamFolder(long teamId, string path)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "DELETE FROM team_folders WHERE team_id = $t AND path = $p;";
+        cmd.Parameters.AddWithValue("$t", teamId);
+        cmd.Parameters.AddWithValue("$p", path.Trim());
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>
+    /// The folders outside its data folder a workflow member's file steps may use: its own loosen block's and its team's
+    /// folder list's, read-write ones writable and read-only ones readable. A folder under a path the global policy denies
+    /// is left out. The most specific folder comes first, and of one folder granted both ways the writable one.
+    /// </summary>
+    public IReadOnlyList<(string Path, bool CanWrite)> WorkflowFolders(long memberId, PolicyPaths paths)
+    {
+        var loosen = GetMember(memberId).Loosen.Filesystem;
+        var denied = GetGlobal().Filesystem.Denied.Select(paths.Resolve).OfType<string>().ToList();
+        var all = (loosen?.Readwrite ?? []).Select(p => (Path: p, CanWrite: true))
+            .Concat((loosen?.Readonly ?? []).Select(p => (Path: p, CanWrite: false)))
+            .Concat(TeamFoldersOfMember(memberId).Select(f => (f.Path, CanWrite: f.Write)));
+        var list = new List<(string Path, bool CanWrite)>();
+        foreach (var (raw, canWrite) in all)
+        {
+            if (paths.Resolve(raw) is not { } p || denied.Any(d => paths.IsWithin(p, d))) continue;
+            if (!list.Any(g => g.CanWrite == canWrite && paths.Same(g.Path, p))) list.Add((p, canWrite));
+        }
+        return [.. list.OrderByDescending(g => g.Path.Length).ThenByDescending(g => g.CanWrite)];
     }
 
     private void Upsert(long memberId, string set, params (string Name, object Value)[] values)

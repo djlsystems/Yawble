@@ -24,8 +24,12 @@ public sealed record EffectivePolicy(
 /// </summary>
 public sealed record MergeResult(EffectivePolicy Policy, IReadOnlyList<string> Violations, IReadOnlyList<string> Widening);
 
+/// <summary>One folder of a team's folder list as the merger applies it: read-only, or read and write.</summary>
+public sealed record TeamFolderGrant(string Path, bool Write);
+
 /// <summary>
-/// The merge/tighten rule, the loosen block and the team's network allow list. A pure function of its inputs.
+/// The merge/tighten rule, the loosen block, the team's network allow list and the team's folder list. A pure function
+/// of its inputs.
 /// </summary>
 public static class PolicyMerger
 {
@@ -33,7 +37,8 @@ public static class PolicyMerger
 
     public static MergeResult Merge(
         GlobalPolicy global, PolicyPatch? overridePatch, PolicyPatch? loosen, RunLayout layout,
-        Func<string, string>? canonicalize = null, long? machineMemoryMb = null, IReadOnlyList<string>? teamHosts = null)
+        Func<string, string>? canonicalize = null, long? machineMemoryMb = null, IReadOnlyList<string>? teamHosts = null,
+        IReadOnlyList<TeamFolderGrant>? teamFolders = null)
     {
         overridePatch ??= PolicyPatch.Empty;
         loosen ??= PolicyPatch.Empty;
@@ -133,17 +138,49 @@ public static class PolicyMerger
                 widening.Add($"override filesystem.readonly: '{p}' is outside the grantable roots (only the loosen block can grant it)");
             }
         }
+        var loosenReadonly = new List<string>();
         foreach (var p in Resolve(paths, loosen.Filesystem?.Readonly ?? [], "loosen filesystem.readonly", violations))
         {
             if (ro.Concat(rw).Concat(implicitGrants).Any(g => paths.IsWithin(p, g))) continue;
             ro.Add(p);
+            loosenReadonly.Add(p);
             loosened.Add($"filesystem.readonly + {p}");
         }
+        var implicitReadwrite = layout.ImplicitReadwrite.Select(i => Must(paths, i)).ToList();
         foreach (var p in Resolve(paths, loosen.Filesystem?.Readwrite ?? [], "loosen filesystem.readwrite", violations))
         {
-            if (rw.Concat(layout.ImplicitReadwrite.Select(i => Must(paths, i))).Any(g => paths.IsWithin(p, g))) continue;
+            if (rw.Concat(implicitReadwrite).Any(g => paths.IsWithin(p, g))) continue;
             rw.Add(p);
             loosened.Add($"filesystem.readwrite + {p}");
+        }
+        // The team's folder list (team_folders, 0064): added as the loosen block adds, so a folder may lie outside the
+        // grantable roots. A folder the floor or a deny refuses is dropped with a note, never a violation: the list is
+        // checked when it is written, and a later change (a deny added, a team created beside it) must not stop the whole
+        // team from launching. A read-write team folder replaces the same folder granted read-only by the member's own
+        // loosen block (the wider of two grants); a read-only entry of the global policy or an override still narrows it.
+        foreach (var f in teamFolders ?? [])
+        {
+            if (paths.Resolve(f.Path) is not { } p) { notes.Add($"filesystem: the team's folder '{f.Path}' is dropped: it is not an absolute {paths.Os} path"); continue; }
+            if (implicitDenied.FirstOrDefault(d => paths.Overlaps(p, d)) is { } never) { notes.Add($"filesystem: the team's folder '{p}' is dropped: it overlaps the implicitly denied '{never}'"); continue; }
+            if (paths.Overlaps(p, appRoot)) { notes.Add($"filesystem: the team's folder '{p}' is dropped: it overlaps the app data root '{appRoot}'"); continue; }
+            if (denied.FirstOrDefault(d => paths.IsWithin(p, d)) is { } no) { notes.Add($"filesystem: the team's folder '{p}' is dropped: '{no}' is denied"); continue; }
+            if (f.Write)
+            {
+                if (rw.Concat(implicitReadwrite).Any(g => paths.IsWithin(p, g))) continue;
+                if (loosenReadonly.RemoveAll(r => paths.Same(r, p)) > 0)
+                {
+                    ro.RemoveAll(r => paths.Same(r, p));
+                    loosened.Remove($"filesystem.readonly + {p}");
+                }
+                rw.Add(p);
+                loosened.Add($"filesystem.readwrite + {p} (team)");
+            }
+            else
+            {
+                if (ro.Concat(rw).Concat(implicitGrants).Any(g => paths.IsWithin(p, g))) continue;
+                ro.Add(p);
+                loosened.Add($"filesystem.readonly + {p} (team)");
+            }
         }
 
         // Floor: no grant may touch an implicit denial or contain the app data root.
