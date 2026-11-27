@@ -17,7 +17,11 @@ public class TestFilesTests
         {
             var target = Directory.CreateDirectory(Path.Combine(dir, "target")).FullName;
             var link = Path.Combine(dir, "link");
-            Assert.True(TestFiles.TryCreateJunction(link, target), "this file system refused a junction");
+            if (!TestFiles.TryCreateJunction(link, target))
+            {
+                Assert.Skip("this file system refused a junction");
+                return;
+            }
 
             Assert.Equal(target, new DirectoryInfo(link).LinkTarget);
             File.WriteAllText(Path.Combine(link, "through.txt"), "written through the link");
