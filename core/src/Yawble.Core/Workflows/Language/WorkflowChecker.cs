@@ -57,6 +57,9 @@ public static class WorkflowStepTypes
     public const string FileReadLines = "file.readLines";
     public const string FileExists = "file.exists";
     public const string FileDelete = "file.delete";
+    public const string FileMove = "file.move";
+    public const string FileCopy = "file.copy";
+    public const string FileList = "file.list";
 }
 
 /// <summary>The codes a <see cref="WorkflowCheckIssue"/> carries.</summary>
@@ -92,9 +95,20 @@ public static class WorkflowChecker
     [
         "set", "if", "switch", "forEach", WorkflowLoop.StepType, "integration", "log", "end", WorkflowTell.StepType, WorkflowCode.StepType,
         WorkflowStepTypes.FileWriteAllText, WorkflowStepTypes.FileAppendLine, WorkflowStepTypes.FileReadAllText, WorkflowStepTypes.FileReadLines, WorkflowStepTypes.FileExists, WorkflowStepTypes.FileDelete,
+        WorkflowStepTypes.FileMove, WorkflowStepTypes.FileCopy, WorkflowStepTypes.FileList,
     ];
 
     private static readonly string[] RootNames = ["input", "settings", "vars", "steps"];
+
+    /// <summary>What file.list gives: a list of { path, name, size, modifiedAt }, one per file, sorted by path.</summary>
+    public static WorkflowType FileListType { get; } = WorkflowType.ListOf(WorkflowType.ObjectOf(null, JsonNode.Parse("""
+        { "type": "object", "properties": {
+            "path": { "type": "string", "description": "The file's full path." },
+            "name": { "type": "string", "description": "The file's name, e.g. IMG_0001.jpg." },
+            "size": { "type": "integer", "description": "Its size in bytes." },
+            "modifiedAt": { "type": "string", "format": "date-time", "description": "When it was last written (UTC)." } },
+          "required": ["path", "name", "size", "modifiedAt"] }
+        """)!.AsObject()));
 
     /// <summary>Parses and checks a document; a document that does not parse gives one <c>invalid-document</c> issue.</summary>
     public static WorkflowCheckResult Check(string json, IWorkflowSchemaLookup schemas, IWorkflowActionCatalog catalog)
@@ -390,6 +404,18 @@ public static class WorkflowChecker
                 case WorkflowStepTypes.FileDelete:
                     Text(step, "path", ctx);
                     break;
+                case WorkflowStepTypes.FileMove or WorkflowStepTypes.FileCopy:
+                    Text(step, "path", ctx);
+                    Text(step, "to", ctx);
+                    Flag(step, "overwrite", ctx);
+                    Into(step, WorkflowType.String);
+                    break;
+                case WorkflowStepTypes.FileList:
+                    Text(step, "path", ctx);
+                    if (step.Has("pattern")) Text(step, "pattern", ctx);
+                    Flag(step, "recursive", ctx);
+                    Into(step, FileListType);
+                    break;
                 case "log":
                     Text(step, "text", ctx);
                     break;
@@ -533,6 +559,15 @@ public static class WorkflowChecker
             var type = ValueType(step[property], ctx);
             if (type.Kind is WorkflowTypeKind.List or WorkflowTypeKind.Object)
                 Issue(step.Id, WorkflowCheckCodes.TypeMismatch, $"'{property}' is {type}, not text");
+        }
+
+        /// <summary>An optional true/false option (file.move's overwrite, file.list's recursive): a bool, or an expression that can be one.</summary>
+        private void Flag(WorkflowStep step, string property, ImmutableList<string> ctx)
+        {
+            if (!step.Has(property)) return;
+            var type = ValueType(step[property], ctx);
+            if (type.Kind is not (WorkflowTypeKind.Bool or WorkflowTypeKind.Any or WorkflowTypeKind.Null))
+                Issue(step.Id, WorkflowCheckCodes.TypeMismatch, $"'{property}' is {type}, not true or false");
         }
 
         /// <summary>The integration step's action signature, when its requirement's kind is described by the catalog.</summary>
@@ -830,6 +865,8 @@ public static class WorkflowChecker
             WorkflowStepTypes.FileReadAllText => WorkflowType.String,
             WorkflowStepTypes.FileReadLines => WorkflowType.ListOf(WorkflowType.String),
             WorkflowStepTypes.FileExists => WorkflowType.Bool,
+            WorkflowStepTypes.FileMove or WorkflowStepTypes.FileCopy => WorkflowType.String,
+            WorkflowStepTypes.FileList => FileListType,
             WorkflowTell.StepType => TellResultOf(step),
             WorkflowCode.StepType => ReturnsOf(step),
             _ => null,

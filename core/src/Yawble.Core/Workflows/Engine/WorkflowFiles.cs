@@ -43,6 +43,11 @@ internal sealed class WorkflowFiles
     public string ForRead(string path)
     {
         var (full, root, rel) = Locate(path);
+        return ReadAt(full, root, rel);
+    }
+
+    private string ReadAt(string full, int root, string rel)
+    {
         if (_dry is not null)
         {
             var copy = DryPath(root, rel);
@@ -50,6 +55,112 @@ internal sealed class WorkflowFiles
         }
         return full;
     }
+
+    /// <summary>
+    /// The file a move or copy takes: it must exist (in a dry run, as the dry run sees it) and be in a writable folder.
+    /// <c>Read</c> is the file to read its bytes from (a dry-run copy when there is one), <c>Real</c> the real path.
+    /// </summary>
+    public (string Read, string Real) ForSource(string path)
+    {
+        var (full, root, rel) = Locate(path);
+        RequireWritable(path, root);
+        if (rel.Length == 0 || FolderAt(full, root, rel)) throw new WorkflowStepException($"'{path}' is a folder, not a file");
+        var read = ReadAt(full, root, rel);
+        if (!File.Exists(read)) throw new WorkflowStepException($"'{path}' does not exist");
+        return (read, full);
+    }
+
+    /// <summary>
+    /// The real path a move or copy of <paramref name="sourceReal"/> goes to. A <paramref name="to"/> that ends in a separator or
+    /// names an existing folder means the source's name inside it. A file already there, without <paramref name="overwrite"/>,
+    /// gives the first free "name (1).ext", "name (2).ext"... A move onto itself stays where it is; a copy onto itself takes a new name.
+    /// </summary>
+    public string ForTarget(string to, string sourceReal, bool overwrite, bool move)
+    {
+        var (full, root, rel) = Locate(to);
+        RequireWritable(to, root);
+        if (to.EndsWith('/') || to.EndsWith('\\') || rel.Length == 0 || FolderAt(full, root, rel))
+            (full, root, rel) = Locate(Path.Combine(full, Path.GetFileName(sourceReal)));
+        if (string.Equals(full, sourceReal, PathComparison))
+        {
+            if (move) return full;
+        }
+        else if (overwrite || !TakenAt(full, root, rel)) return full;
+
+        var folder = Path.GetDirectoryName(full)!;
+        var stem = Path.GetFileNameWithoutExtension(full);
+        var ext = Path.GetExtension(full);
+        for (var i = 1; ; i++)
+        {
+            var candidate = Path.Combine(folder, $"{stem} ({i}){ext}");
+            var (_, r, rl) = Locate(candidate);
+            if (!TakenAt(candidate, r, rl)) return candidate;
+        }
+    }
+
+    /// <summary>A dry-run move or copy: the bytes go to the target's dry-run copy, which later steps in this dry run see.</summary>
+    public string DryPut(string sourceRead, string targetReal)
+    {
+        var (_, root, rel) = Locate(targetReal);
+        var copy = DryPath(root, rel);
+        Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+        if (Tombstone(copy)) File.Delete(copy + TombstoneSuffix);
+        if (!string.Equals(Path.GetFullPath(sourceRead), copy, PathComparison)) File.Copy(sourceRead, copy, overwrite: true);
+        return copy;
+    }
+
+    /// <summary>
+    /// The files in a folder whose names match one of the patterns (* and ?, any case), in its subfolders too when recursive,
+    /// sorted by path. In a dry run the list is what the dry run sees: its copies added, the files it deleted or moved away gone.
+    /// </summary>
+    public IReadOnlyList<(string Path, FileInfo Info)> List(string path, IReadOnlyList<string> patterns, bool recursive)
+    {
+        var (full, root, rel) = Locate(path);
+        var dryFolder = _dry is null ? null : DryPath(root, rel);
+        var realDir = Directory.Exists(full);
+        var dryDir = dryFolder is not null && Directory.Exists(dryFolder);
+        if (!realDir && !dryDir)
+            throw new WorkflowStepException(File.Exists(full) ? $"'{path}' is a file, not a folder" : $"the folder '{path}' does not exist");
+
+        var options = new EnumerationOptions { RecurseSubdirectories = recursive, IgnoreInaccessible = true };
+        bool Matches(string name) => patterns.Any(p => System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(p, name, ignoreCase: true));
+        var found = new Dictionary<string, FileInfo>(PathComparison == StringComparison.Ordinal ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase);
+        if (realDir)
+            foreach (var f in new DirectoryInfo(full).EnumerateFiles("*", options))
+                if (Matches(f.Name) && (_dry is null || !Inside(f.FullName, _dry, out _))) found[f.FullName] = f;
+        if (dryDir)
+            foreach (var f in new DirectoryInfo(dryFolder!).EnumerateFiles("*", options))
+            {
+                var inner = Path.GetRelativePath(dryFolder!, f.FullName);
+                // The dry run keeps granted folders' copies under granted-N in its root: they are not the data folder's files.
+                if (root < 0 && rel.Length == 0 && inner.StartsWith("granted-", StringComparison.Ordinal) && inner.Contains(Path.DirectorySeparatorChar)) continue;
+                if (f.Name.EndsWith(TombstoneSuffix, StringComparison.Ordinal)) found.Remove(Path.Combine(full, inner[..^TombstoneSuffix.Length]));
+                else if (Matches(f.Name)) found[Path.Combine(full, inner)] = f;
+            }
+        return found.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => (p.Key, p.Value)).ToList();
+    }
+
+    private void RequireWritable(string path, int root)
+    {
+        if (root >= 0 && !_grants[root].CanWrite) throw new WorkflowStepException($"'{path}' is in a folder the team granted read-only");
+    }
+
+    /// <summary>Whether a file or folder is at the path, as this run sees it.</summary>
+    private bool TakenAt(string full, int root, string rel) => FileAt(full, root, rel) || FolderAt(full, root, rel);
+
+    private bool FileAt(string full, int root, string rel)
+    {
+        if (_dry is not null)
+        {
+            var copy = DryPath(root, rel);
+            if (File.Exists(copy)) return true;
+            if (Tombstone(copy)) return false;
+        }
+        return File.Exists(full);
+    }
+
+    private bool FolderAt(string full, int root, string rel) =>
+        Directory.Exists(full) || (_dry is not null && rel.Length > 0 && Directory.Exists(DryPath(root, rel)));
 
     /// <summary>The file to write: the real one (needs a writable folder), or its dry-run copy.</summary>
     public (string Target, string Real) ForWrite(string path)

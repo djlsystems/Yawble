@@ -127,12 +127,23 @@ top level). Every step must be reachable from `start`; a loop body must end with
 | `file.writeAllText`, `file.appendLine` | `path`, `text`, `next` | writes a text file |
 | `file.readAllText`, `file.readLines`, `file.exists` | `path`, `into`, `next` | reads (string, `list<string>`, bool) |
 | `file.delete` | `path`, `next` | deletes a file |
+| `file.move`, `file.copy` | `path`, `to`, `overwrite`, `into`, `next` | moves or copies a file, any kind (bytes as they are); `into` gets the final path (string) |
+| `file.list` | `path`, `pattern`, `recursive`, `into`, `next` | the files in a folder: `list<{ path, name, size, modifiedAt }>` sorted by path |
 | `log` | `text`, `next` | a line in the run's log |
 | `tell` | `member`, `team`, `text`, `wait`, `timeout`, `reply`, `into`, `next` | gives work to an agent member of a team (section Tell) |
 | `end` | `outputs` (optional) | ends the run, setting declared outputs |
 
 - File paths: relative ones are in the member's data folder; an absolute path must be in a folder the team granted
   (writing needs a writable grant).
+- `file.move` and `file.copy` need a writable folder at both ends. A `to` that ends in `/` or names a folder that exists
+  means the same name inside it (the folder is made when missing). When the target is there and `overwrite` is not
+  `true`, the file takes the first free name: `IMG_0001 (1).jpg`, `IMG_0001 (2).jpg`... A move to another drive copies,
+  then deletes the source.
+- `file.list`: `pattern` is one or more names with `*` and `?`, split by `;` (`*.jpg;*.jpeg;*.heic;*.png`, any case;
+  default `*`); `recursive: true` takes the subfolders too. `size` is in bytes, `modifiedAt` a UTC datetime. A folder
+  that does not exist fails the step. Declare its variable as `list<any>` (or a schema with those fields).
+- A dry run changes no real file: writes, moves and copies go to the dry run's own copies, which later steps see, and
+  the log says `would move <from> -> <to>` / `would copy <from> -> <to>` with the real paths.
 - `email` results: `list` gives `EmailList { messages: list<EmailMessage>, cursorReset }`; `get`, `markRead`, `move`
   give `EmailMessage`; `search`, `thread` give `list<EmailMessage>`. `EmailMessage` has `id threadId messageId folder
   from to cc subject receivedAt snippet body hasAttachments unread`; `from` is `EmailAddress { name, address }`.
@@ -309,6 +320,39 @@ the app.
 
 Write the names `integrations_status` gives in place of `Support inbox` and `Twilio`. Its member uses those
 integrations (turned on for its team) and sets `recipients` and `fromNumber`; a 5-minute `every` trigger runs it.
+
+## Example: moves new photos into a subfolder
+
+```json
+{
+  "format": "yawble-workflow/1",
+  "id": "sort-photos",
+  "name": "Sort photos",
+  "description": "Moves the photos in a folder into its SmokeSessions subfolder.",
+  "trigger": { "accepts": ["every", "once"] },
+  "settings": [
+    { "name": "folder", "type": "string", "label": "Photo folder (a writable folder grant)" }
+  ],
+  "variables": [
+    { "name": "photos", "type": "list<any>", "scope": "run" },
+    { "name": "moved", "type": "int", "scope": "run", "initial": 0 }
+  ],
+  "start": "list",
+  "steps": [
+    { "id": "list", "type": "file.list", "path": "{settings.folder}", "pattern": "*.jpg;*.jpeg;*.heic;*.png",
+      "into": "photos", "next": "each" },
+    { "id": "each", "type": "forEach", "items": "{vars.photos}", "as": "p", "body": "move", "then": "log" },
+    { "id": "move", "type": "file.move", "path": "{p.path}", "to": "{settings.folder}/SmokeSessions/", "next": "count" },
+    { "id": "count", "type": "set", "var": "moved", "value": "{vars.moved + 1}", "next": null },
+    { "id": "log", "type": "log", "text": "{vars.moved} photos moved into SmokeSessions", "next": "done" },
+    { "id": "done", "type": "end" }
+  ]
+}
+```
+
+The list is not recursive, so the photos already in `SmokeSessions` are not listed again. A photo whose name is already
+there keeps both: the new one becomes `name (1).jpg`. The team grants the folder writable; a dry run lists the folder,
+logs each `would move` and moves nothing.
 
 ## What to tell the person
 

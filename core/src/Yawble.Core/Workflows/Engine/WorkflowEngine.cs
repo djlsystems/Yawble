@@ -360,6 +360,8 @@ public static class WorkflowEngine
                 "integration" => new JsonObject { ["use"] = step.Text("use"), ["action"] = step.Text("action"), ["args"] = ev.EvaluateValue(step["args"]) ?? new JsonObject() },
                 WorkflowStepTypes.FileWriteAllText or WorkflowStepTypes.FileAppendLine => Pick("path", "text"),
                 WorkflowStepTypes.FileReadAllText or WorkflowStepTypes.FileReadLines or WorkflowStepTypes.FileExists or WorkflowStepTypes.FileDelete => Pick("path"),
+                WorkflowStepTypes.FileMove or WorkflowStepTypes.FileCopy => Pick("path", "to", "overwrite"),
+                WorkflowStepTypes.FileList => Pick("path", "pattern", "recursive"),
                 "log" => Pick("text"),
                 WorkflowTell.StepType => Pick("member", "team", "text", "wait", "timeout", "reply"),
                 WorkflowCode.StepType => new JsonObject { ["inputs"] = ev.EvaluateValue(step["inputs"]) ?? new JsonObject() },
@@ -452,6 +454,22 @@ public static class WorkflowEngine
                     if (existed) File.Delete(full);
                     return (new JsonObject { ["deleted"] = existed, ["path"] = full }, next);
                 }
+                case WorkflowStepTypes.FileMove or WorkflowStepTypes.FileCopy:
+                    return (Result(step, JsonValue.Create(await MoveOrCopyAsync(step.Type == WorkflowStepTypes.FileMove, input))), next);
+                case WorkflowStepTypes.FileList:
+                {
+                    var pattern = input?["pattern"] is null ? "*" : Text(input, "pattern");
+                    var patterns = pattern.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                    var files = _files.List(Text(input, "path"), patterns.Length == 0 ? ["*"] : patterns, Bool(input, "recursive"));
+                    var list = new JsonArray(files.Select(f => (JsonNode?)new JsonObject
+                    {
+                        ["path"] = f.Path,
+                        ["name"] = Path.GetFileName(f.Path),
+                        ["size"] = f.Info.Length,
+                        ["modifiedAt"] = WorkflowValues.FormatInstant(f.Info.LastWriteTimeUtc),
+                    }).ToArray());
+                    return (Result(step, list), next);
+                }
                 case "log":
                     await LogAsync(Text(input, "text"));
                     return (null, next);
@@ -483,6 +501,49 @@ public static class WorkflowEngine
             if (value is JsonArray or JsonObject) throw new WorkflowStepException($"'{name}' is {WorkflowValues.Describe(value)}, not text");
             return WorkflowValues.Format(value);
         }
+
+        /// <summary>
+        /// A file.move or file.copy: the bytes as they are (a file copy, never text), the target from <see cref="WorkflowFiles.ForTarget"/>.
+        /// A move across volumes is a copy, then the source deleted. A dry run puts the bytes in the target's dry-run copy (a move also
+        /// marks its source deleted for the rest of the dry run) and changes no real file. Gives the final real path.
+        /// </summary>
+        private async Task<string> MoveOrCopyAsync(bool move, JsonNode? input)
+        {
+            var verb = move ? "move" : "copy";
+            var (read, source) = _files.ForSource(Text(input, "path"));
+            var overwrite = Bool(input, "overwrite");
+            var target = _files.ForTarget(Text(input, "to"), source, overwrite, move);
+            var same = string.Equals(source, target, OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+            if (_files.DryRun)
+            {
+                if (!same)
+                {
+                    _files.DryPut(read, target);
+                    if (move) _files.DryDelete(source);
+                }
+                await LogAsync($"would {verb} {source} -> {target}");
+                return target;
+            }
+            if (same) return target;
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            if (!move) File.Copy(source, target, overwrite);
+            else if (!string.Equals(Path.GetPathRoot(source), Path.GetPathRoot(target), StringComparison.OrdinalIgnoreCase))
+            {
+                File.Copy(source, target, overwrite);
+                File.Delete(source);
+            }
+            else File.Move(source, target, overwrite);
+            return target;
+        }
+
+        /// <summary>An optional true/false input (absent: false); text "true"/"false" from a template counts.</summary>
+        private static bool Bool(JsonNode? input, string name) => WorkflowValues.FromNode(input?[name]) switch
+        {
+            null => false,
+            bool b => b,
+            string s when bool.TryParse(s.Trim(), out var b) => b,
+            var other => throw new WorkflowStepException($"'{name}' is {WorkflowValues.Describe(other)}, not true or false"),
+        };
 
         private JsonNode? SetVar(string name, JsonNode? value)
         {
