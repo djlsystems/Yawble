@@ -2,6 +2,8 @@
 // A goal's name and description: New goal (no goal given) or Edit. Save sends goals.save and gives back the saved goal;
 // Delete (Edit only) asks first in the window's own confirm dialog, then goals.delete (its deliverables become
 // Unassigned). Escape, Cancel or a click on the backdrop closes without a change. A Visitor's buttons are disabled.
+// An empty name is reported when Save is pressed, not when the box loses focus; pressing Cancel keeps the focus in the
+// box, so no message appears under it and moves the buttons between the press and the release.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { GoalDescriptionMax, GoalNameMax, type Goal, type YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
@@ -61,7 +63,7 @@ async function remove() {
     <form class="goal-dialog" role="dialog" aria-modal="true" :aria-label="editing ? 'Edit goal' : 'New goal'" data-test="goal-dialog" @submit.prevent="save">
       <h3>{{ editing ? 'Edit goal' : 'New goal' }}</h3>
       <label class="field">Name
-        <input ref="box" v-model="name" :maxlength="GoalNameMax" data-test="goal-dialog-name" @blur="touched = true" />
+        <input ref="box" v-model="name" :maxlength="GoalNameMax" data-test="goal-dialog-name" @blur="touched = touched || !!name.trim()" />
       </label>
       <p v-if="touched && problem" class="error small" data-test="goal-dialog-problem">{{ problem }}</p>
       <label class="field">Description <span class="muted small">(optional)</span>
@@ -73,7 +75,7 @@ async function remove() {
           <BusyLabel :busy="busy === 'delete'" text="Deleting…">Delete</BusyLabel>
         </button>
         <span class="grow" />
-        <button type="button" data-test="goal-dialog-cancel" @click="emit('close')">Cancel</button>
+        <button type="button" data-test="goal-dialog-cancel" @mousedown.prevent @click="emit('close')">Cancel</button>
         <button v-change type="submit" class="primary" data-test="goal-dialog-save" :disabled="!!busy || (touched && !!problem)">
           <BusyLabel :busy="busy === 'save'" text="Saving…">Save</BusyLabel>
         </button>

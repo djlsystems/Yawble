@@ -158,6 +158,30 @@ describe('the Goals page', () => {
     expect(w.find('[data-test=goal-show-all]').exists()).toBe(true);
   });
 
+  it('Cancel closes New goal at once: leaving an empty name shows no message, and pressing Cancel keeps the focus in the box', async () => {
+    const core = goalsCore([goal(1, 'Payments v2')]);
+    const w = await page(core);
+    await w.get('[data-test=goals-new]').trigger('click');
+    await w.get('[data-test=goal-dialog-name]').trigger('blur');
+    expect(w.find('[data-test=goal-dialog-problem]').exists()).toBe(false);
+    const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    w.get('[data-test=goal-dialog-cancel]').element.dispatchEvent(press);
+    expect(press.defaultPrevented).toBe(true);
+    await w.get('[data-test=goal-dialog-cancel]').trigger('click');
+    expect(w.find('[data-test=goal-dialog]').exists()).toBe(false);
+    expect(core.changes()).toEqual([]);
+  });
+
+  it('Save with an empty name says what is missing and sends nothing', async () => {
+    const core = goalsCore([]);
+    const w = await page(core);
+    await w.get('[data-test=goals-new]').trigger('click');
+    await w.get('[data-test=goal-dialog]').trigger('submit');
+    await flushPromises();
+    expect(w.get('[data-test=goal-dialog-problem]').text()).toBe('Give the goal a name.');
+    expect(core.changes()).toEqual([]);
+  });
+
   it('New goal saves a name and description; Edit renames it', async () => {
     const core = goalsCore([goal(1, 'Payments v2')]);
     const w = await page(core);
