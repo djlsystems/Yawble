@@ -175,6 +175,63 @@ public class WorkflowFolderQueueTests
         Assert.Null(w.Store.FolderQueue(bot)); // the queue is empty once its run started
     }
 
+    private static TriggerFire FireFolder(World w, long bot, long trigger, string[] added) =>
+        w.Runner.FireWorkflow(w.Member(bot), $"trigger:{trigger}", WorkflowPayloads.FolderChange("C:/in", added, [], []), queueWhileBusy: true);
+
+    [Fact]
+    public async Task QueuedFiresWhoseRunCannotStart_StayQueued_AndRunOnceWhenItCan()
+    {
+        await using var w = await WorldAsync();
+        var bot = await w.WorkflowMemberAsync("Filer");
+        var other = Path.Combine(w.Db.Dir, "other");
+        Directory.CreateDirectory(other);
+        var t1 = await w.Bus.SaveTriggerAsync(FolderTrigger(bot, w.Inbox()), Ct);
+        var t2 = await w.Bus.SaveTriggerAsync(FolderTrigger(bot, other), Ct);
+        await w.HoldARunAsync(bot);
+        Assert.Equal("queued", FireFolder(w, bot, t1.Id, ["a.pdf"]).Outcome);
+        Assert.Equal("queued", FireFolder(w, bot, t2.Id, ["x.pdf"]).Outcome);
+        Assert.Equal("queued", FireFolder(w, bot, t1.Id, ["b.pdf"]).Outcome);
+
+        // The member now runs a workflow with only drafts: when the run ends, the queued fire cannot start its run.
+        var draft = w.Library.Save(Docs.Draft("drafty"));
+        Assert.False(draft.Ok);
+        w.Store.SetWorkflowMember(bot, draft.Id, null, [], [], null);
+        w.Engine.Gate.SetResult();
+        await w.Runner.WhenIdleAsync();
+
+        var queue = WorkflowFolderQueue.FromJson(w.Store.FolderQueue(bot));
+        Assert.Equal([$"trigger:{t1.Id}", $"trigger:{t2.Id}"], queue.Select(e => e.Source)); // every fire kept, in its place
+        Assert.Equal([("a.pdf", "added"), ("b.pdf", "added")], queue[0].Files);
+        Assert.Equal([("x.pdf", "added")], queue[1].Files);
+        Assert.Single(w.Store.RecentRuns(null, bot, 10), r => r.Status == RunStatus.Failed); // tried once, not once per queued fire
+
+        // Startable again: the member's next run end starts each queued fire once.
+        w.Store.SetWorkflowMember(bot, w.WorkflowId, null, [], [], null);
+        Assert.True(w.Runner.Start(bot, "run now", null).Started);
+        await w.Runner.WhenIdleAsync();
+
+        var runs = w.Store.RecentRuns(null, bot, 10).Where(r => r.Status != RunStatus.Failed).ToList();
+        Assert.All(runs, r => Assert.Equal(RunStatus.Succeeded, r.Status));
+        var first = Assert.Single(runs, r => r.Trigger == $"trigger:{t1.Id}");
+        Assert.Equal(["a.pdf", "b.pdf"], Strings(first.Input!["added"]));
+        var second = Assert.Single(runs, r => r.Trigger == $"trigger:{t2.Id}");
+        Assert.Equal(["x.pdf"], Strings(second.Input!["added"]));
+        Assert.Null(w.Store.FolderQueue(bot));
+    }
+
+    [Fact]
+    public void Requeue_PutsTheEntryBackAtTheHead_MergedWithWhatCameForItsTriggerSince()
+    {
+        var taken = WorkflowFolderQueue.Merge([], "trigger:1", WorkflowPayloads.FolderChange("C:/in", ["a.pdf"], [], []))[0];
+        var q = WorkflowFolderQueue.Merge([], "trigger:2", WorkflowPayloads.FolderChange("C:/other", ["x.pdf"], [], []));
+        q = WorkflowFolderQueue.Merge(q, "trigger:1", WorkflowPayloads.FolderChange("C:/in", ["b.pdf"], [], []));
+
+        q = WorkflowFolderQueue.Requeue(q, taken);
+
+        Assert.Equal(["trigger:1", "trigger:2"], q.Select(e => e.Source));
+        Assert.Equal([("a.pdf", "added"), ("b.pdf", "added")], q[0].Files);
+    }
+
     [Fact]
     public async Task AnEveryFireWhileARunIsGoing_IsStillSkippedAndNoted_AndQueuesNothing()
     {

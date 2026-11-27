@@ -54,6 +54,24 @@ public static class WorkflowFolderQueue
         return list;
     }
 
+    /// <summary>
+    /// An entry taken off the queue whose run could not start, put back at the head: what came for its trigger since is merged onto it
+    /// (as a later fire), so nothing is lost and the order is kept.
+    /// </summary>
+    public static List<Entry> Requeue(IReadOnlyList<Entry> queue, Entry entry)
+    {
+        var list = queue.ToList();
+        var at = list.FindIndex(e => e.Source == entry.Source);
+        if (at >= 0)
+        {
+            var later = list[at];
+            list.RemoveAt(at);
+            entry = Merge([entry], entry.Source, later.Payload())[0];
+        }
+        list.Insert(0, entry);
+        return list;
+    }
+
     public static string ToJson(IReadOnlyList<Entry> queue) => new JsonArray(queue.Select(e => (JsonNode?)new JsonObject
     {
         ["source"] = e.Source,
