@@ -188,8 +188,9 @@ Yawble.Core.Workflows.Running.WorkflowFolders.MoveOldFolder(options.DataDir!);
 workflowRunner = new Yawble.Core.Workflows.Running.WorkflowRunner(workflowRuns, workflowLibrary, workflowActions,
     Yawble.Core.Workflows.Running.SeamWorkflowEngine.Instance, Path.Combine(options.DataDir!, "workflows"),
     // A workflow member's file steps reach its own granted folders and its team's folder list (read-only ones only to read).
+    // Each folder keeps the spelling it is stored with ("~" expanded): a file step names its path the same way.
     grantedFolders: memberId => [.. policies.WorkflowFolders(memberId, new Yawble.Core.Policy.PolicyPaths(Yawble.Core.Policy.TargetOsExtensions.Host,
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), Yawble.Core.Policy.HostPathCanonicalizer.Canonicalize))
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)))
         .Select(g => new Yawble.Core.Workflows.Engine.WorkflowFolderGrant(g.Path, g.CanWrite))],
     log: line => Console.Error.WriteLine($"workflows: {line}"),
     // docs:/ paths in a workflow's file steps are in its team's Documents folder (what agents see as YAWBLE_TEAM_DOCS).
