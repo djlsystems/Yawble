@@ -29,22 +29,92 @@ public class WorkflowFolderQueueTests
     // ------------------------------------------------------------------ the merge
 
     [Fact]
-    public void Merge_ListsAFileOnce_WithItsLatestKind_InFirstSeenOrder_PerTrigger()
+    public void Merge_ListsAFileOnce_InFirstSeenOrder_PerTrigger()
     {
         var q = WorkflowFolderQueue.Merge([], "trigger:1", WorkflowPayloads.FolderChange("C:/in", ["a.pdf", "b.pdf"], [], []));
         q = WorkflowFolderQueue.Merge(q, "trigger:2", WorkflowPayloads.FolderChange("C:/other", ["x.pdf"], [], []));
-        q = WorkflowFolderQueue.Merge(q, "trigger:1", WorkflowPayloads.FolderChange("C:/in", ["c.pdf"], ["b.pdf"], ["a.pdf"]));
+        q = WorkflowFolderQueue.Merge(q, "trigger:1", WorkflowPayloads.FolderChange("C:/in", ["c.pdf"], ["r.pdf"], ["m.pdf"]));
+        q = WorkflowFolderQueue.Merge(q, "trigger:1", WorkflowPayloads.FolderChange("C:/in", ["b.pdf"], [], ["r.pdf"]));
 
         q = WorkflowFolderQueue.FromJson(WorkflowFolderQueue.ToJson(q)); // as stored
         Assert.Equal(["trigger:1", "trigger:2"], q.Select(e => e.Source));
-        Assert.Equal([("a.pdf", "changed"), ("b.pdf", "removed"), ("c.pdf", "added")], q[0].Files);
+        Assert.Equal([("a.pdf", "added"), ("b.pdf", "added"), ("c.pdf", "added"), ("r.pdf", "changed"), ("m.pdf", "changed")], q[0].Files);
         var p = q[0].Payload();
         Assert.Equal("C:/in", p["root"]!.GetValue<string>());
-        Assert.Equal(["c.pdf"], Strings(p["added"]));
-        Assert.Equal(["b.pdf"], Strings(p["removed"]));
-        Assert.Equal(["a.pdf"], Strings(p["changed"]));
+        Assert.Equal(["a.pdf", "b.pdf", "c.pdf"], Strings(p["added"]));
+        Assert.Empty(Strings(p["removed"]));
+        Assert.Equal(["r.pdf", "m.pdf"], Strings(p["changed"]));
         Assert.Equal(1L, q[0].TriggerId);
         Assert.Empty(WorkflowFolderQueue.FromJson("not json"));
+    }
+
+    [Fact]
+    public void Merge_KeepsANewFileAdded_DropsOneAddedThenRemoved_AndOtherwiseTakesTheLaterKind()
+    {
+        var q = WorkflowFolderQueue.Merge([], "trigger:1",
+            WorkflowPayloads.FolderChange("C:/in", ["new.jpg", "gone.jpg"], ["back.jpg", "twice.jpg"], ["edit.jpg", "del.jpg", "again.jpg"]));
+        q = WorkflowFolderQueue.Merge(q, "trigger:1",
+            WorkflowPayloads.FolderChange("C:/in", ["back.jpg", "again.jpg"], ["gone.jpg", "del.jpg", "twice.jpg"], ["new.jpg", "edit.jpg"]));
+
+        Assert.Equal(
+        [
+            ("new.jpg", "added"),     // added, then changed (it finished writing): still added
+            ("back.jpg", "changed"),  // removed, then added: a run knew it, so changed
+            ("twice.jpg", "removed"),
+            ("edit.jpg", "changed"),
+            ("del.jpg", "removed"),   // changed, then removed: removed
+            ("again.jpg", "changed"), // changed, then added: a run knew it, so changed
+        ], q[0].Files); // gone.jpg: added, then removed, so no run ever sees it
+        q = WorkflowFolderQueue.Merge(q, "trigger:1", WorkflowPayloads.FolderChange("C:/in", ["gone.jpg"], [], []));
+        Assert.Equal(("gone.jpg", "added"), q[0].Files[^1]); // added once more: a new file at the end
+    }
+
+    private static string[] Paths(string prefix, int from, int count) => Enumerable.Range(from, count).Select(i => $"{prefix}{i}.jpg").ToArray();
+
+    [Fact]
+    public void Merge_PastTheCap_KeepsTheCap_CountsTheRest_AndWarnsOnce()
+    {
+        var warnings = new List<string>();
+        var cap = WorkflowFolderQueue.MaxFilesPerTrigger;
+        var q = WorkflowFolderQueue.Merge([], "trigger:1", WorkflowPayloads.FolderChange("C:/in", Paths("p", 0, cap + 5), [], []), warnings.Add);
+        Assert.Equal(cap, q[0].Files.Count);
+        Assert.Equal(5, q[0].Dropped);
+        var warning = Assert.Single(warnings);
+        Assert.Contains("trigger:1", warning);
+        Assert.Contains($"{cap} files: 5 more file(s) dropped", warning);
+
+        // Full: a change to a kept file still lands, a removal makes room for one more, further new files are only counted.
+        q = WorkflowFolderQueue.Merge(q, "trigger:1", WorkflowPayloads.FolderChange("C:/in", [], ["p1.jpg"], ["p2.jpg"]), warnings.Add);
+        Assert.Equal(cap - 1, q[0].Files.Count); // p1.jpg added, then removed: it left the fire
+        Assert.Equal(("p2.jpg", "added"), q[0].Files[1]);
+        q = WorkflowFolderQueue.Merge(q, "trigger:1", WorkflowPayloads.FolderChange("C:/in", Paths("late", 0, 3), [], []), warnings.Add);
+        Assert.Single(warnings);
+        Assert.Equal(cap, q[0].Files.Count); // late0.jpg took the free place
+        Assert.Equal(7, q[0].Dropped);
+        Assert.DoesNotContain(q[0].Files, f => f.Path == "p1.jpg");
+        Assert.Equal(("late0.jpg", "added"), q[0].Files[^1]);
+
+        q = WorkflowFolderQueue.FromJson(WorkflowFolderQueue.ToJson(q)); // as stored: the count is kept
+        Assert.Equal(7, q[0].Dropped);
+    }
+
+    [Fact]
+    public void Merge_OfManyPaths_StaysCorrect()
+    {
+        var q = WorkflowFolderQueue.Merge([], "trigger:1", WorkflowPayloads.FolderChange("C:/in", Paths("f", 0, 6000), [], Paths("old", 0, 2000)));
+        q = WorkflowFolderQueue.Merge(q, "trigger:2", WorkflowPayloads.FolderChange("C:/other", Paths("f", 0, 10), [], []));
+        // Later: every other new file finished writing (changed), the first thousand were removed again, the old ones were removed.
+        q = WorkflowFolderQueue.Merge(q, "trigger:1", WorkflowPayloads.FolderChange("C:/in", Paths("f", 6000, 1000),
+            [.. Paths("f", 0, 1000), .. Paths("old", 0, 2000)], Enumerable.Range(0, 2500).Select(i => $"f{1000 + i * 2}.jpg").ToArray()));
+
+        var files = q[0].Files;
+        Assert.Equal(5000 + 2000 + 1000, files.Count);
+        Assert.Equal(files.Count, files.Select(f => f.Path).Distinct().Count());
+        Assert.Equal(Paths("f", 1000, 5000).Concat(Paths("old", 0, 2000)).Concat(Paths("f", 6000, 1000)), files.Select(f => f.Path)); // first-seen order
+        Assert.All(files.Where(f => f.Path.StartsWith('f')), f => Assert.Equal("added", f.Kind));
+        Assert.All(files.Where(f => f.Path.StartsWith("old", StringComparison.Ordinal)), f => Assert.Equal("removed", f.Kind));
+        Assert.Equal(10, q[1].Files.Count);
+        Assert.Equal(0, q[0].Dropped);
     }
 
     // ------------------------------------------------------------------ a run going (the fake engine)
@@ -168,11 +238,68 @@ public class WorkflowFolderQueueTests
         var follow = runs.First();
         Assert.Equal($"trigger:{t.Id}", follow.Trigger);
         Assert.Equal(inbox, follow.Input!["root"]!.GetValue<string>());
-        Assert.Equal(["b.pdf"], Strings(follow.Input["added"]));
-        Assert.Equal(["a.pdf"], Strings(follow.Input["changed"])); // added, then changed: listed once, as changed
+        Assert.Equal(["a.pdf", "b.pdf"], Strings(follow.Input["added"])); // a.pdf added, then changed: listed once, as added
+        Assert.Empty(Strings(follow.Input["changed"]));
         Assert.Empty(Strings(follow.Input["removed"]));
         Assert.Equal(2, w.Engine.Requests.Count);
         Assert.Null(w.Store.FolderQueue(bot)); // the queue is empty once its run started
+    }
+
+    private static TriggerFire FireFolder(World w, long bot, long trigger, string[] added) =>
+        w.Runner.FireWorkflow(w.Member(bot), $"trigger:{trigger}", WorkflowPayloads.FolderChange("C:/in", added, [], []), queueWhileBusy: true);
+
+    [Fact]
+    public async Task QueuedFiresWhoseRunCannotStart_StayQueued_AndRunOnceWhenItCan()
+    {
+        await using var w = await WorldAsync();
+        var bot = await w.WorkflowMemberAsync("Filer");
+        var other = Path.Combine(w.Db.Dir, "other");
+        Directory.CreateDirectory(other);
+        var t1 = await w.Bus.SaveTriggerAsync(FolderTrigger(bot, w.Inbox()), Ct);
+        var t2 = await w.Bus.SaveTriggerAsync(FolderTrigger(bot, other), Ct);
+        await w.HoldARunAsync(bot);
+        Assert.Equal("queued", FireFolder(w, bot, t1.Id, ["a.pdf"]).Outcome);
+        Assert.Equal("queued", FireFolder(w, bot, t2.Id, ["x.pdf"]).Outcome);
+        Assert.Equal("queued", FireFolder(w, bot, t1.Id, ["b.pdf"]).Outcome);
+
+        // The member now runs a workflow with only drafts: when the run ends, the queued fire cannot start its run.
+        var draft = w.Library.Save(Docs.Draft("drafty"));
+        Assert.False(draft.Ok);
+        w.Store.SetWorkflowMember(bot, draft.Id, null, [], [], null);
+        w.Engine.Gate.SetResult();
+        await w.Runner.WhenIdleAsync();
+
+        var queue = WorkflowFolderQueue.FromJson(w.Store.FolderQueue(bot));
+        Assert.Equal([$"trigger:{t1.Id}", $"trigger:{t2.Id}"], queue.Select(e => e.Source)); // every fire kept, in its place
+        Assert.Equal([("a.pdf", "added"), ("b.pdf", "added")], queue[0].Files);
+        Assert.Equal([("x.pdf", "added")], queue[1].Files);
+        Assert.Single(w.Store.RecentRuns(null, bot, 10), r => r.Status == RunStatus.Failed); // tried once, not once per queued fire
+
+        // Startable again: the member's next run end starts each queued fire once.
+        w.Store.SetWorkflowMember(bot, w.WorkflowId, null, [], [], null);
+        Assert.True(w.Runner.Start(bot, "run now", null).Started);
+        await w.Runner.WhenIdleAsync();
+
+        var runs = w.Store.RecentRuns(null, bot, 10).Where(r => r.Status != RunStatus.Failed).ToList();
+        Assert.All(runs, r => Assert.Equal(RunStatus.Succeeded, r.Status));
+        var first = Assert.Single(runs, r => r.Trigger == $"trigger:{t1.Id}");
+        Assert.Equal(["a.pdf", "b.pdf"], Strings(first.Input!["added"]));
+        var second = Assert.Single(runs, r => r.Trigger == $"trigger:{t2.Id}");
+        Assert.Equal(["x.pdf"], Strings(second.Input!["added"]));
+        Assert.Null(w.Store.FolderQueue(bot));
+    }
+
+    [Fact]
+    public void Requeue_PutsTheEntryBackAtTheHead_MergedWithWhatCameForItsTriggerSince()
+    {
+        var taken = WorkflowFolderQueue.Merge([], "trigger:1", WorkflowPayloads.FolderChange("C:/in", ["a.pdf"], [], []))[0];
+        var q = WorkflowFolderQueue.Merge([], "trigger:2", WorkflowPayloads.FolderChange("C:/other", ["x.pdf"], [], []));
+        q = WorkflowFolderQueue.Merge(q, "trigger:1", WorkflowPayloads.FolderChange("C:/in", ["b.pdf"], [], []));
+
+        q = WorkflowFolderQueue.Requeue(q, taken);
+
+        Assert.Equal(["trigger:1", "trigger:2"], q.Select(e => e.Source));
+        Assert.Equal([("a.pdf", "added"), ("b.pdf", "added")], q[0].Files);
     }
 
     [Fact]
@@ -315,8 +442,8 @@ public class WorkflowFolderQueueTests
         Assert.Equal(RunStatus.Succeeded, runs[1].Status);
         var follow = runs[0];
         Assert.Equal($"trigger:{trigger}", follow.Trigger);
-        Assert.Equal(["a.pdf", "c.pdf"], Strings(follow.Input!["added"]));
-        Assert.Equal(["b.pdf"], Strings(follow.Input["changed"]));
+        Assert.Equal(["a.pdf", "b.pdf", "c.pdf"], Strings(follow.Input!["added"])); // b.pdf added, then changed: still added
+        Assert.Empty(Strings(follow.Input["changed"]));
         Assert.Null(r.Store.FolderQueue(r.Bot));
     }
 

@@ -56,9 +56,14 @@ and say in plain words when it would fire ("every 5 minutes, starting now", "wee
   timezone), `once` (a time), `event` (an integration watch) or `folder` (a folder and file pattern). Pick a kind the
   workflow's `trigger.accepts` lists.
 - A member runs one run at a time. An `every`, `cron` or `once` fire while its run is going, or waiting on a tell, is
-  skipped (a skipped run in its list). A `folder` fire then is queued instead: the trigger's changes are merged (each
-  file once, with its latest kind) and ONE run starts with them when the member's run ends, however it ends. The queue
-  is kept over an app restart; a queued fire is dropped if its trigger is deleted or turned off.
+  skipped (a skipped run in its list). A `folder` fire then is queued instead: the trigger's changes are merged, each
+  file once, and ONE run starts with them when the member's run ends, however it ends. A file first queued as added
+  stays in `trigger.added` even if it changes again (a photo that is still being written); added then removed leaves
+  the fire (no run saw it); removed or changed, then added again, is changed; otherwise the latest kind wins. One
+  trigger's queued fire holds at most 10,000 files: new files past that are dropped, with one warning in the log. The queue
+  is kept over an app restart; a queued fire is dropped if its trigger is deleted or turned off. If the queued run
+  cannot start (only drafts, for example) the fire stays queued and is tried again when the member's next run ends,
+  the app starts again or a trigger fires.
 - Turning a trigger on, or changing the schedule of one that is on, needs the person's yes in the window. Turning one
   off (`enabled: false`) needs none.
 
