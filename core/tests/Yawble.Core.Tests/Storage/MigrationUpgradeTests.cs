@@ -203,6 +203,45 @@ public sealed class MigrationUpgradeTests : IDisposable
     }
 
     [Fact]
+    public void Migration0055_GivesEveryFolderTriggerThatWasThereFireOnAny_AndLeavesTheOtherKindsWithoutOne()
+    {
+        const string migration = "0055_trigger_fire_on";
+        Before(migration);
+        Seed(SeedTimeTriggers + """
+            INSERT INTO triggers (id, team_id, member_id, name, kind, interval_sec, instruction, created_at, updated_at, watch_root, watch_path, watch_glob, quiet_sec, watch_state)
+                VALUES (12, 1, 10, 'inbox', 'folder', 30, 'Read the new files.', 'c4', 'u4', 'documents', 'inbox', '*.pdf', 10, '{"baseline":["a.pdf"]}');
+            INSERT INTO triggers (id, team_id, member_id, name, kind, interval_sec, instruction, enabled, created_at, updated_at, watch_root, watch_path, quiet_sec)
+                VALUES (13, 1, 10, 'drop', 'folder', 60, 'File the drop.', 0, 'c5', 'u5', 'host', 'C:/drop', 0);
+            INSERT INTO triggers (id, team_id, member_id, name, kind, event_name, instruction, created_at, updated_at)
+                VALUES (14, 1, 10, 'prs', 'event', 'web.pr*', 'Review it.', 'c6', 'u6');
+            """);
+
+        Migrate(migration);
+
+        // every trigger is there as it was
+        Assert.Equal(6L, Scalar("SELECT count(*) FROM triggers;"));
+        AssertTimeTriggersKept();
+        Assert.Equal("inbox|folder|30|Read the new files.|1|documents|inbox|*.pdf|10|{\"baseline\":[\"a.pdf\"]}|null",
+            Row("SELECT name, kind, interval_sec, instruction, enabled, watch_root, watch_path, watch_glob, quiet_sec, watch_state, event_name FROM triggers WHERE id = 12;"));
+        Assert.Equal("drop|folder|60|File the drop.|0|host|C:/drop|null|0|null|null",
+            Row("SELECT name, kind, interval_sec, instruction, enabled, watch_root, watch_path, watch_glob, quiet_sec, watch_state, event_name FROM triggers WHERE id = 13;"));
+        Assert.Equal("prs|event|null|Review it.|1|null|web.pr*", Row("SELECT name, kind, interval_sec, instruction, enabled, watch_root, event_name FROM triggers WHERE id = 14;"));
+        // a folder trigger of the time fires on any change, enabled or not; a time or event trigger has no choice
+        Assert.Equal("any", Scalar("SELECT fire_on FROM triggers WHERE id = 12;"));
+        Assert.Equal("any", Scalar("SELECT fire_on FROM triggers WHERE id = 13;"));
+        Assert.Equal(0L, Scalar("SELECT count(*) FROM triggers WHERE id NOT IN (12, 13) AND fire_on IS NOT NULL;"));
+        // a trigger saved afterwards keeps the choice it is given, only a known choice is stored, and one saved without a choice has none
+        Seed("INSERT INTO triggers (team_id, member_id, name, kind, interval_sec, instruction, created_at, updated_at, watch_root, watch_path, quiet_sec, fire_on) VALUES (1, 10, 'scans', 'folder', 30, 'x', 'now', 'now', 'documents', 'scans', 0, 'added');");
+        Assert.Equal("15|added", Row("SELECT id, fire_on FROM triggers WHERE name = 'scans';"));
+        Assert.Throws<SqliteException>(() => Seed("UPDATE triggers SET fire_on = 'sometimes' WHERE id = 12;"));
+        Seed("INSERT INTO triggers (team_id, member_id, name, kind, interval_sec, instruction, created_at, updated_at) VALUES (1, 10, 'new', 'every', 60, 'x', 'now', 'now');");
+        Assert.IsType<DBNull>(Scalar("SELECT fire_on FROM triggers WHERE name = 'new';"));
+        // the triggers still go with their member
+        Seed("DELETE FROM members WHERE id = 10;");
+        Assert.Equal(0L, Scalar("SELECT count(*) FROM triggers;"));
+    }
+
+    [Fact]
     public void Migration0057_KeepsEveryConnection_ItsId_AndTheApisAndMcpServersThatUseIt()
     {
         const string migration = "0057_email_connections";
