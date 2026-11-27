@@ -87,7 +87,7 @@ public class AttachmentsTests
 
             var e = Assert.Throws<IOException>(() => Attachments.Copy(Path.Combine(dir, "documents"), [source]));
 
-            Assert.Contains("is a link, which is not followed", e.Message);
+            Assert.Contains("goes through a link, which is not followed", e.Message);
             Assert.Empty(Directory.GetFiles(behind));
         }
         finally

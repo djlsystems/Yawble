@@ -65,7 +65,7 @@ public static class Attachments
     {
         var dir = Path.Combine(folder, Folder);
         // Agents write the team's documents: an attachments folder that is a link could put the files anywhere.
-        if (Ops.PathLinks.FirstLink(folder, Folder) is not null) throw new IOException($"'{dir}' is a link, which is not followed");
+        if (Ops.PathLinks.FirstLink(folder, Folder) is not null) throw new IOException($"'{dir}' goes through a link, which is not followed");
         Directory.CreateDirectory(dir);
         var stamp = (clock ?? TimeProvider.System).GetLocalNow().ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
         var paths = new List<string>();
