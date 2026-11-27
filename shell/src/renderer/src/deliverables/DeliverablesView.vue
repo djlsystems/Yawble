@@ -20,6 +20,7 @@ import TimeBar from './TimeBar.vue';
 import DeliverablePane from './DeliverablePane.vue';
 import DeliverableStatusIcon from './DeliverableStatusIcon.vue';
 import GoalPicker from '../goals/GoalPicker.vue';
+import AssignGoalDialog from '../goals/AssignGoalDialog.vue';
 import {
   Chips, DefaultFilters, formatHash, highlight, inChip, isDeliverablesHash, loadFilters, matchesText, nextSort, parseHash, saveFilters, sortRows, statusLook, statusTip,
   summaryLine, todayByHour, type Chip, type Filters, type GoalFilter, type SortKey, type DeliverablesRequest,
@@ -29,6 +30,7 @@ import {
  * The Deliverables page: every team's deliverables in one table. Read with deliverables.list; the core filters by
  * team, text and state and counts the chips, and the page applies the same filters to what it has while an answer is
  * on its way. The filters are remembered and kept in the hash (#deliverables?t=3&q=..&s=open&sel=12).
+ * Each row has a checkbox; with any ticked, a bar over the table offers what can be done to all of them at once.
  */
 const props = defineProps<{ teams: TeamSummary[]; api?: YawbleApi; pollMs?: number; request?: DeliverablesRequest | null }>();
 const emit = defineEmits<{ openTeam: [teamId: number]; board: [teamId: number | null]; backlog: [] }>();
@@ -231,6 +233,37 @@ let releaseEsc: (() => void) | null = null;
 watch(() => selected.value !== null, (on) => { releaseEsc?.(); releaseEsc = on ? pushEscape(closePane) : null; }, { immediate: true });
 onBeforeUnmount(() => releaseEsc?.());
 
+// ---- ticked rows: the deliverables an action applies to at once ----
+// A tick is kept only while its row is shown: a filter that hides a row unticks it, so the count is what the person sees.
+const picked = ref(new Set<number>());
+const pickedRows = computed(() => shown.value.filter((w) => picked.value.has(w.id)));
+const allPicked = computed(() => shown.value.length > 0 && pickedRows.value.length === shown.value.length);
+watch(shown, (rows) => {
+  if (!picked.value.size) return;
+  const ids = new Set(rows.map((w) => w.id));
+  const kept = [...picked.value].filter((id) => ids.has(id));
+  if (kept.length !== picked.value.size) picked.value = new Set(kept);
+});
+/** The row ticked or unticked last: Shift with the next click does the same to every row between the two. */
+let pickedLast: number | null = null;
+function pick(w: DeliverableRow, e: MouseEvent) {
+  const next = new Set(picked.value);
+  const on = !next.has(w.id);
+  const rows = shown.value;
+  const from = e.shiftKey && pickedLast !== null ? rows.findIndex((r) => r.id === pickedLast) : -1;
+  const to = rows.findIndex((r) => r.id === w.id);
+  const range = from >= 0 && to >= 0 ? rows.slice(Math.min(from, to), Math.max(from, to) + 1) : [w];
+  for (const r of range) { if (on) next.add(r.id); else next.delete(r.id); }
+  picked.value = next;
+  pickedLast = w.id;
+}
+function pickAll() { picked.value = allPicked.value ? new Set() : new Set(shown.value.map((w) => w.id)); pickedLast = null; }
+function clearPicked() { picked.value = new Set(); pickedLast = null; }
+const assigning = ref(false);
+function assigned() { assigning.value = false; clearPicked(); }
+/** The table's columns: the checkbox column is not shown to a Visitor, who can change nothing. */
+const columns = computed(() => (readOnly.value ? 8 : 9));
+
 // ---- the card panel (the board's), opened from the pane's cards ----
 const openCard = ref<number | null>(null);
 const Lanes = [{ id: 'todo' as const, label: 'To Do' }, { id: 'in-progress' as const, label: 'In Progress' }, { id: 'blocked' as const, label: 'Needs You' }, { id: 'done' as const, label: 'Done' }];
@@ -282,24 +315,35 @@ const timeline = (w: DeliverableRow) => openTimeline({ kind: 'deliverable', id: 
           <button class="link" data-test="deliverables-not-found-dismiss" @click="notFound = null">Dismiss</button></p>
         <p v-if="answer?.truncated" class="muted small" data-test="deliverables-truncated">Showing every open deliverable and the newest {{ Limit }} others; filter to find an older one.</p>
 
+        <div v-if="pickedRows.length && !(phone && open)" class="actions" role="toolbar" aria-label="Selected deliverables" data-test="deliverables-actions">
+          <strong data-test="deliverables-picked-count">{{ pickedRows.length }} selected</strong>
+          <button type="button" data-test="deliverables-assign-goal" @click="assigning = true"><Icon name="goals" :size="13" />Assign goal…</button>
+          <span class="grow" />
+          <button type="button" class="link" data-test="deliverables-picked-clear" @click="clearPicked">Clear selection</button>
+        </div>
+
         <div class="split" :class="{ withItem: !!open }">
           <div v-show="!(phone && open)" ref="listEl" class="listwrap" data-test="deliverables-listwrap">
             <table class="list" :class="{ narrow: !!open }" data-test="deliverables-table">
               <thead>
                 <tr>
+                  <th v-if="!readOnly" class="pk"><input type="checkbox" :checked="allPicked" :indeterminate="pickedRows.length > 0 && !allPicked" :disabled="!shown.length"
+                    aria-label="Select every deliverable shown" title="Select every deliverable shown" data-test="deliverables-pick-all" @change="pickAll" /></th>
                   <th class="sortable" :aria-sort="ariaSort('status')" data-test="deliverables-sort-status" @click="sortBy('status')">Status{{ arrow('status') }}</th>
                   <th class="sortable" :aria-sort="ariaSort('title')" data-test="deliverables-sort-title" @click="sortBy('title')">Deliverable{{ arrow('title') }}</th>
                   <th class="sortable" :aria-sort="ariaSort('item')" data-test="deliverables-sort-item" @click="sortBy('item')">Item{{ arrow('item') }}</th>
-                  <th class="sortable" :aria-sort="ariaSort('team')" data-test="deliverables-sort-team" @click="sortBy('team')">Team{{ arrow('team') }}</th>
-                  <th>Who</th>
+                  <th class="sortable tm" :aria-sort="ariaSort('team')" data-test="deliverables-sort-team" @click="sortBy('team')">Team{{ arrow('team') }}</th>
+                  <th class="who">Who</th>
                   <th class="sortable" :aria-sort="ariaSort('elapsed')" data-test="deliverables-sort-elapsed" @click="sortBy('elapsed')">Elapsed{{ arrow('elapsed') }}</th>
-                  <th class="sortable" :aria-sort="ariaSort('last')" data-test="deliverables-sort-last" @click="sortBy('last')">Last activity{{ arrow('last') }}</th>
-                  <th>Goal</th>
+                  <th class="sortable when" :aria-sort="ariaSort('last')" data-test="deliverables-sort-last" @click="sortBy('last')">Last activity{{ arrow('last') }}</th>
+                  <th class="gl">Goal</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="w in shown" :key="w.id" :class="[statusLook(w).status, { sel: selected === w.id, cur: cursor === w.id, fresh: fresh.has(w.id), working: w.working }]"
+                <tr v-for="w in shown" :key="w.id" :class="[statusLook(w).status, { sel: selected === w.id, cur: cursor === w.id, fresh: fresh.has(w.id), working: w.working, picked: picked.has(w.id) }]"
                   :aria-selected="selected === w.id" :data-wf="w.id" :data-status="w.status" data-test="deliverables-row" @click="select(w)">
+                  <td v-if="!readOnly" class="pk" @click.stop><input type="checkbox" :checked="picked.has(w.id)" :aria-label="`Select deliverable #${w.id}`"
+                    data-test="deliverables-pick" @click="pick(w, $event)" /></td>
                   <td class="st" :title="statusTip(w)">
                     <span class="st-in"><DeliverableStatusIcon :deliverable="w" /><span class="st-word" data-test="deliverables-status">{{ statusLook(w).label }}</span></span>
                   </td>
@@ -330,9 +374,9 @@ const timeline = (w: DeliverableRow) => openTimeline({ kind: 'deliverable', id: 
                   <td class="when muted small" :title="w.lastAt">{{ ago(w.lastAt) }}</td>
                   <td class="gl" data-test="deliverables-goal"><GoalPicker :api="api" :deliverable="w.id" :goal="w.goal ?? null" :goals="goals ?? []" compact @changed="load" @goals-changed="loadGoals" /></td>
                 </tr>
-                <tr v-if="!answer && !error"><td colspan="8"><LoadingNote text="Loading the deliverables…" /></td></tr>
+                <tr v-if="!answer && !error"><td :colspan="columns"><LoadingNote text="Loading the deliverables…" /></td></tr>
                 <tr v-else-if="answer && !shown.length">
-                  <td colspan="8" class="empty" data-test="deliverables-empty">
+                  <td :colspan="columns" class="empty" data-test="deliverables-empty">
                     <template v-if="filtered && ((counts?.all ?? 0) > 0 || !!goalFilter)">
                       <p>Nothing matches these filters.</p>
                       <button data-test="deliverables-empty-clear" @click="clearFilters">Show all deliverables</button>
@@ -354,6 +398,7 @@ const timeline = (w: DeliverableRow) => openTimeline({ kind: 'deliverable', id: 
         </div>
       </div>
     </section>
+    <AssignGoalDialog v-if="assigning" :api="api" :deliverables="pickedRows" :goals="goals ?? []" @changed="goalChanged" @done="assigned" @close="assigning = false" />
     <CardPanel v-if="openCard !== null" :id="openCard" :lanes="Lanes" :api="api" @close="openCard = null" @changed="load" @open-team="emit('openTeam', $event)" />
   </div>
 </template>
@@ -418,9 +463,16 @@ mark { background: color-mix(in srgb, var(--pill-yellow-bg) 85%, transparent); c
 .itm, .tm { white-space: nowrap; }
 .tm { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 /* The pane open beside the table: Team, Who and Last activity give way (the pane names them), so Elapsed stays in sight. */
-.list.narrow th:nth-child(4), .list.narrow td.tm, .list.narrow th:nth-child(5), .list.narrow td.who, .list.narrow th:nth-child(7), .list.narrow td.when,
-.list.narrow th:nth-child(8), .list.narrow td.gl { display: none; }
+.list.narrow th.tm, .list.narrow td.tm, .list.narrow th.who, .list.narrow td.who, .list.narrow th.when, .list.narrow td.when,
+.list.narrow th.gl, .list.narrow td.gl { display: none; }
 .gl { white-space: nowrap; }
+/* The checkbox column, and the bar of what can be done to the ticked rows. */
+.pk { width: 22px; padding-right: 0; cursor: default; }
+.pk input { margin: 0; cursor: pointer; vertical-align: middle; }
+.list tr.picked:not(.sel) td { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.actions { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; padding: 6px 10px; border: 1px solid var(--accent); border-radius: 8px; font-size: 13px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.actions button:not(.link) { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; }
 .goal-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--accent); border-radius: 14px; padding: 2px 4px 2px 9px; font-size: 12.5px;
   color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); max-width: 100%; min-width: 0; }
 .chip-x { border: 0; background: transparent; color: inherit; padding: 0 5px; font-size: 15px; line-height: 1; cursor: pointer; border-radius: 10px; }
@@ -465,6 +517,10 @@ mark { background: color-mix(in srgb, var(--pill-yellow-bg) 85%, transparent); c
   .list tr[data-test=deliverables-row] { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 9px 6px; border-bottom: 1px solid var(--line-soft); }
   .list tr[data-test=deliverables-row] td { display: block; padding: 0; border: 0; background: transparent !important; box-shadow: none !important; }
   .list tr.sel { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); box-shadow: inset 4px 0 0 var(--accent); }
+  .list td.pk { width: 44px; height: 44px; display: grid !important; place-items: center; order: 0; }
+  .list td.pk input { width: 20px; height: 20px; }
+  .actions { flex-wrap: wrap; }
+  .actions button { min-height: 44px; box-sizing: border-box; }
   .list td.st { flex: 1; }
   .list td.ttl { order: 5; flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; }
   .list td.itm, .list td.tm, .list td.when { order: 6; }

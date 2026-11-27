@@ -416,6 +416,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   them), how many are open, and its time, then the Unassigned deliverables. **New goal** and **Edit** open a dialog for
   the name (unique, ignoring case) and description; deleting a goal keeps its deliverables and makes them Unassigned.
 - Each deliverable has a goal picker on the Deliverables page; change it any time and the Goals page follows.
+- To give several deliverables one goal, tick their checkboxes on the Deliverables page (Shift with a click ticks the
+  rows between two; the header's box ticks all shown) and press **Assign goal…**: the dialog says how many are
+  selected and offers every goal and Unassigned. A filter that hides a ticked row unticks it.
 - A goal's time is the calendar time its deliverables cover together, each from its first message to its end (or now
   while it is open): two deliverables worked side by side for an hour count one hour.
 - The Concierge can list goals, create and rename them, and assign deliverables to them when you ask (it may propose
