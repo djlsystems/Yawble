@@ -65,7 +65,11 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     team's documents, as you choose.
   - **Repositories** shows each repository's detected provider, with a provider override and an optional link pattern
     (see [Repositories and git](#repositories-and-git)).
-  - **Environment** holds team environment variables; the next runs get them.
+  - **Environment** holds team environment variables; the next runs get them. Every agent on the team can read
+    them, so use test accounts and local addresses, never a production key. The values are stored encrypted; the key
+    is in this computer's credential store, not in the database. If the app's data is moved or restored to another
+    computer, the names are still listed and each value reads **enter this value again**: type the values again and
+    save. Until then the team's runs do not get those variables.
   - On a phone it is laid out like the app's Settings on a phone: a list of its sections (one full-width row each, with a
     chevron); a tap opens that section alone under a Back and its title, and Back returns to the list.
 - **Deliverables** lists each piece of work with **Nudge** (tell the Manager to pick it up) and **Stop runs**. Every open
@@ -384,6 +388,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 
 - The Concierge is a chat with an agent that knows every team on this computer and acts for you.
 - Conversations are kept. Each reply is one sandboxed run of the conversation's agent CLI.
+- Text typed but not sent stays in the message box while you look at another page, one draft per conversation,
+  until the app closes. **Clear**, or Esc pressed twice, empties the box.
 - A new conversation starts on the default agent from Settings > Concierge while that agent still exists; otherwise
   on the first CLI that is installed and signed in. Existing conversations keep their own agent.
 - It can read teams, status, activity, deliverables, documents, the backlog, the board, git state, integrations,
@@ -989,6 +995,8 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
   - A new backup is checked before it is kept. One that fails the check is deleted, and the backup counts as failed.
 - Passwords and sign-ins are not copied. A backup records which Connections and secret fields existed, never their
   values.
+- A team's environment values are in a backup only in encrypted form. They are readable again after a restore on the
+  same computer. On another computer they have to be entered again (Team settings > Environment).
 - **Restore…** returns teams, cards and messages to that moment. It is applied at the next start.
 - Old log entries are deleted daily, by each log's retention (see [Logs](#logs)).
   The disk space they took is given back at a later start of the app, when more than a fifth of a database file over

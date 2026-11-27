@@ -63,6 +63,8 @@ public sealed partial class BusEngine
                 throw new BusRefusal("busy", $"{target.Name} is running; open the terminal to watch the run");
             if (HasSession(target.Id))
                 throw new BusRefusal("busy", $"{target.Name} already has an interactive session");
+            if (_membersResetting.Contains(target.Id))
+                throw new BusRefusal("busy", $"{target.Name} is being reset. Try again in a moment.");
             var row = _store.EnqueueSession(target.Id)
                 ?? throw new BusRefusal("busy", $"{target.Name} is queued for a run");
             var ticket = new SessionTicket(this, target);

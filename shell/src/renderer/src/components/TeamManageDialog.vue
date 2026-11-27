@@ -18,7 +18,7 @@ import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
 import { usePhone } from '../phone';
 import { vChange } from '../remoteAccess';
-import { ENV_HIDDEN_HINT, envEntries, envRows, type EnvRow } from '../teamEnv';
+import { envEntries, envHint, envRows, type EnvRow } from '../teamEnv';
 
 /**
  * A team's housekeeping: pause or resume it, who its Manager may hire, its repositories, its environment variables, archive it, delete it. Archive and delete need
@@ -407,14 +407,18 @@ onMounted(() => { void models.loadProfiles(); void loadHiring(); void loadLesson
 
     <section v-else-if="tab === 'env'" class="pane">
       <p class="note">
-        Coordination, not confinement: these are kept in plain text and every agent on the team can read them. Use test
-        accounts and local addresses, never a production key.
+        Coordination, not confinement: every agent on the team can read these. Use test accounts and local addresses,
+        never a production key. The values are stored encrypted on the computer.
+      </p>
+      <p v-if="ready.env && rows.some((r) => r.unreadable && r.value === '')" class="warn" data-test="env-unreadable">
+        Some values cannot be read on the computer. They were saved on another computer, or the key that protects them is
+        gone from its credential store. Enter them again and save. Until then the team's runs do not get them.
       </p>
       <LoadingNote v-if="!ready.env" text="Loading the environment…" />
       <table v-else class="env" data-test="env-rows">
         <tr v-for="(r, i) in rows" :key="i">
           <td><input v-model="r.name" placeholder="NAME" class="mono" :data-test="`env-name-${i}`" @input="envSaved = false" /></td>
-          <td class="grow"><input v-model="r.value" :placeholder="r.hidden ? ENV_HIDDEN_HINT : 'value'" :title="r.hidden ? 'The value stays on the computer. Type a new one to replace it.' : undefined" class="mono" :data-test="`env-value-${i}`" @input="envSaved = false" /></td>
+          <td class="grow"><input v-model="r.value" :placeholder="envHint(r)" :title="r.hidden ? 'The value stays on the computer. Type a new one to replace it.' : r.unreadable ? 'The computer cannot read the saved value. Type it again.' : undefined" class="mono" :data-test="`env-value-${i}`" @input="envSaved = false" /></td>
           <td><button class="icon" title="Remove" @click="rows.splice(i, 1); envSaved = false">✕</button></td>
         </tr>
       </table>

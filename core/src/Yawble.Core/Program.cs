@@ -131,8 +131,16 @@ Yawble.Core.Teams.GitProgram.EnsureOnPath();
 await using var launch = Yawble.Core.Launch.LaunchWiring.Create(
     options.DataDir!, $"Data Source={dbPath}", clis, options.InstallDir, runs, Environment.GetEnvironmentVariable,
     line => Console.Error.WriteLine($"launch: {line}"));
+// The credential service (OS store, or the 0600 file in data/credentials/): the launcher's own when it is on.
+var credentialService = launch.Credentials ?? Yawble.Core.Credentials.CredentialService.ForThisMachine(
+    Path.Combine(options.DataDir!, "credentials"), $"Data Source={dbPath}", line => Console.Error.WriteLine(line));
+// The teams' environment values are encrypted in the database under a key in the credential store. A value stored
+// unencrypted (a database from a version that kept them so, or a restored backup of one) is encrypted here, before
+// the bus or a run reads any.
+var teamEnvVault = new Yawble.Core.Teams.TeamEnvVault(credentialService.Store, line => Console.Error.WriteLine(line));
+teamEnvVault.SealStored($"Data Source={dbPath}");
 // Every sandbox the launcher registers streams into its member's terminal channel (live output and replay).
-var memberDirectory = new Yawble.Core.Launch.SqliteMemberDirectory($"Data Source={dbPath}");
+var memberDirectory = new Yawble.Core.Launch.SqliteMemberDirectory($"Data Source={dbPath}", envVault: teamEnvVault);
 using var runTerminals = new Yawble.Core.Ui.RunTerminalBridge(runs, terminals, (team, member) => memberDirectory.Find(team, member)?.Id,
     Yawble.Core.Agents.AgentTestSessions.ChannelFor);
 // The skills agents load over the bus (built-in, plus the person's own in the database).
@@ -156,7 +164,8 @@ await using var bus = await Yawble.Core.Bus.BusHost.StartAsync(
     skills: skillCatalog,
     availableAgents: ct => Yawble.Core.Agents.AgentReadiness.ChoicesAsync(clis, ct),
     // Workflow members' runs go to the workflow engine, agents' to the launcher.
-    wrapRunner: r => new Yawble.Core.Launch.WorkflowDispatchRunner(r, () => workflowRunner));
+    wrapRunner: r => new Yawble.Core.Launch.WorkflowDispatchRunner(r, () => workflowRunner),
+    envVault: teamEnvVault);
 busForRunner = bus;
 // The global workflow and schema libraries and the workflow runner (members' data folders under <data>/workflows). Runs the
 // old core left going resume from their last completed step. SC-2: a workflow's integration steps are the team's web API operations
@@ -199,12 +208,9 @@ bus.AgentResolver = agentResolver;
 var layouts = new Yawble.Core.Ui.MemberLayouts(options.DataDir!,
     Yawble.Core.Launch.LaunchWiring.ResolveInstallDir(options.InstallDir, Environment.GetEnvironmentVariable) ?? AppContext.BaseDirectory,
     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), agents: agentResolver);
-// The credential service (OS store, or the 0600 file in data/credentials/), the app-private host Grok
-// home and its keeper: the launcher's own when it is on, so there is one keeper per Grok home. The host panes and the
-// keeper run the person's own CLI by the absolute path detection found, never through PATH.
+// The app-private host Grok home and its keeper: the launcher's own when it is on, so there is one keeper per Grok
+// home. The host panes and the keeper run the person's own CLI by the absolute path detection found, never through PATH.
 string? HostCliPath(string name) => Yawble.Core.Agents.HostCli.Path(clis, name);
-var credentialService = launch.Credentials ?? Yawble.Core.Credentials.CredentialService.ForThisMachine(
-    Path.Combine(options.DataDir!, "credentials"), $"Data Source={dbPath}", line => Console.Error.WriteLine(line));
 var grokHome = launch.GrokHome ?? Yawble.Core.Credentials.GrokHome.InDataDir(layouts.AppDataRoot).EnsureCreated();
 await using var ownKeeper = launch.Keeper is null
     ? new Yawble.Core.Credentials.GrokKeeper(grokHome, new Yawble.Core.Credentials.GrokKeeperOptions

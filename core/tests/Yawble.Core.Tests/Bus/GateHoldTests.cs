@@ -7,9 +7,10 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// The bus gate is not held over slow file-system work: a folder trigger's folder is listed, and a deleted team's
-/// folder is removed, while other callers take the gate. A hold that reaches the limit is written as one warning with
-/// the holder's name. The listing and the removal are fakes that wait for the test.
+/// The bus gate is not held over slow file-system work: a folder trigger's folder is listed, a deleted team's
+/// folder is removed, and a reset member's working copy is removed, while other callers take the gate. A hold that
+/// reaches the limit is written as one warning with the holder's name. The listing and the removals are fakes that
+/// wait for the test.
 /// </summary>
 public class GateHoldTests
 {
@@ -19,6 +20,7 @@ public class GateHoldTests
     private sealed class Rig : IAsyncDisposable
     {
         public readonly TempDb Db = new();
+        public readonly ScriptedRunner Runner = new();
         public BusEngine Engine = null!;
         public TeamRepos Repos = null!;
         public TriggerRow Trigger = null!;
@@ -28,7 +30,7 @@ public class GateHoldTests
         {
             var rig = new Rig();
             rig.Repos = new TeamRepos(rig.Db.Dir, rig.Db.ConnectionString);
-            rig.Engine = new BusEngine(rig.Db.OpenStore(), new ScriptedRunner(), new BusOptions
+            rig.Engine = new BusEngine(rig.Db.OpenStore(), rig.Runner, new BusOptions
             {
                 Repos = rig.Repos, IdleOffer = false, SafetyPoll = TimeSpan.FromMilliseconds(50),
                 SlowGateHold = options?.SlowGateHold ?? TimeSpan.FromHours(1),
@@ -181,6 +183,65 @@ public class GateHoldTests
 
         Assert.Contains("in use", Assert.Single(left));
         await rig.Engine.CreateTeamAsync("Alpha", ct: Ct);
+    }
+
+    [Fact]
+    public async Task ResettingAMember_RemovesItsWorkingCopyAfterTheGate_AndHoldsTheMemberUntilItIsGone()
+    {
+        await using var rig = await Rig.CreateAsync();
+        var clone = Path.Combine(rig.Repos.MemberRoot("Alpha", "Ada"), "repo");
+        Directory.CreateDirectory(Path.Combine(clone, ".git"));
+        File.WriteAllText(Path.Combine(clone, ".git", "obj"), "x");
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        rig.Engine.RemoveFolder = path =>
+        {
+            Assert.Equal(clone, path);
+            started.TrySetResult();
+            Assert.True(release.Wait(TimeSpan.FromSeconds(60)), "the test lets the removal go");
+            Directory.Delete(path, recursive: true);
+        };
+        await rig.Engine.StartAsync(Ct);
+
+        var reset = rig.Engine.ResetTeamAsync("Alpha", ["Ada"], new TeamResetOptions(true, false, true, false), Ct);
+        await started.Task.WaitAsync(Soon, Ct);
+
+        // The working copy is still there and the gate is free: reads answer and an instruction is taken.
+        Assert.Single(await rig.Engine.TeamsAsync(Ct).WaitAsync(Soon, Ct));
+        Assert.True(Directory.Exists(clone));
+        Assert.False(reset.IsCompleted);
+        await rig.Engine.PersonTellAsync("Alpha", "Ada", "after the reset", ct: Ct).WaitAsync(Soon, Ct);
+
+        // Ada takes no run and no session while her working copy goes, and neither a second reset nor a delete starts.
+        var session = await Assert.ThrowsAsync<BusRefusal>(() => rig.Engine.RequestSessionAsync("Alpha", "Ada", _ => Task.CompletedTask, Ct));
+        Assert.Contains("is being reset", session.Message);
+        var second = await Assert.ThrowsAsync<BusRefusal>(() => rig.Engine.ResetTeamAsync("Alpha", ["Ada"], new TeamResetOptions(true, false, true, false), Ct));
+        Assert.Contains("still being reset", second.Message);
+        var delete = await Assert.ThrowsAsync<BusRefusal>(() => rig.Engine.DeleteTeamAsync("Alpha", Ct));
+        Assert.Contains("is being reset", delete.Message);
+        await Task.Delay(300, Ct);
+        Assert.Empty(rig.Runner.Admitted);
+
+        release.Set();
+        var result = await reset.WaitAsync(Soon, Ct);
+        Assert.Empty(result.Left);
+        Assert.False(Directory.Exists(clone));
+        await Wait.UntilAsync(() => rig.Runner.Admitted.Count >= 1, "Ada runs once her working copy is gone");
+    }
+
+    [Fact]
+    public async Task AWorkingCopyThatCannotBeRemoved_IsReported_AndTheMemberRunsAgain()
+    {
+        await using var rig = await Rig.CreateAsync();
+        Directory.CreateDirectory(Path.Combine(rig.Repos.MemberRoot("Alpha", "Ada"), "repo"));
+        rig.Engine.RemoveFolder = _ => throw new IOException("in use");
+        await rig.Engine.StartAsync(Ct);
+
+        var result = await rig.Engine.ResetTeamAsync("Alpha", ["Ada"], new TeamResetOptions(true, false, true, false), Ct);
+
+        Assert.Contains("in use", Assert.Single(result.Left));
+        await rig.Engine.PersonTellAsync("Alpha", "Ada", "go on", ct: Ct);
+        await Wait.UntilAsync(() => rig.Runner.Admitted.Count >= 1, "Ada runs after the reset");
     }
 
     [Fact]
