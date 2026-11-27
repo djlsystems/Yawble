@@ -40,7 +40,7 @@ public sealed class WorkflowFileMoveListTests : IDisposable
 
     private string DataFile(string relative, byte[]? bytes = null)
     {
-        var path = Path.Combine(Data, relative);
+        var path = Path.GetFullPath(Path.Combine(Data, relative));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllBytes(path, bytes ?? Bytes);
         return path;
