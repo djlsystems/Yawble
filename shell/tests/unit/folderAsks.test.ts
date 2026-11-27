@@ -7,13 +7,17 @@ import FolderAskCard from '../../src/renderer/src/components/FolderAskCard.vue';
 import FolderAsks from '../../src/renderer/src/components/FolderAsks.vue';
 import MemberPane from '../../src/renderer/src/components/MemberPane.vue';
 import BoardView from '../../src/renderer/src/board/BoardView.vue';
-import { folderAnswerText, folderAskAskedBy, folderAskChoices, folderAskHeadText, type FolderAsk } from '../../src/renderer/src/folderAsks';
+import {
+  folderAnswerText, folderAskAskedBy, folderAskChoices, folderAskFromConcierge, folderAskHeadText, folderAskScopes, folderGrantText, folderScopeLabel,
+  type FolderAsk,
+} from '../../src/renderer/src/folderAsks';
 import { MonitorModel, needYouSummary } from '../../src/renderer/src/monitor/model';
 import type { AgentCard, YawbleApi } from '../../src/shared/api';
 
 /**
  * Folder asks - an agent asks for a folder outside its clone - shown wherever network and tool
- * asks show: Needs you (the window's banner, the Board's lane), the member's pane, and the Monitor's You node. Fakes
+ * asks show: Needs you (the window's banner, the Board's lane), the member's pane, and the Monitor's You node. The card
+ * says whom an approval covers (the member, the whole team, all teams) and who asked (the member, its Manager, the Concierge). Fakes
  * only: no core. The FolderAsk shape is shared/api.ts's, re-exported by folderAsks.ts.
  */
 
@@ -191,6 +195,136 @@ describe('FolderAskCard: the answers', () => {
     const w = keep(mount(FolderAskCard, { props: { ask: ask({ state: 'approved', grantedAccess: 'read' }), api } }));
     expect(w.get('[data-test=folder-ask-done]').text()).toBe('Approved read-only: applies from its next run.');
     expect(w.find('.buttons').exists()).toBe(false);
+  });
+});
+
+describe('FolderAskCard: whom an approval covers', () => {
+  const scoped = (o: Parameters<typeof ask>[0] = {}) => ask({ scopes: ['member', 'team', 'everywhere'], ...o });
+  const picked = (w: VueWrapper) => w.get('[data-test=folder-ask-scope]').attributes('data-scope');
+
+  it('offers this member (picked), the whole team and all teams, in plain words, and says what an approval grants', () => {
+    const { api } = fakeApi(() => []);
+    const w = keep(mount(FolderAskCard, { props: { ask: scoped(), api } }));
+    expect(w.findAll('[data-test=folder-ask-scope] label').map((l) => l.text())).toEqual(['Only OperatorClifford', 'Everyone on Smoke-sessions', 'All teams']);
+    expect(picked(w)).toBe('member');
+    expect((w.get('[data-test=folder-ask-scope-member]').element as HTMLInputElement).checked).toBe(true);
+    expect(w.get('[data-test=folder-ask-grants]').text())
+      .toBe('Gives OperatorClifford read-write access to Z:\\smokesessions, from its next run. It is listed on the member\'s Policy tab.');
+    expect(buttons(w)).toEqual(['Approve', 'Approve read-only', 'Deny']);
+    expect(w.get('[data-test=folder-ask-read]').attributes('title')).toContain('Gives OperatorClifford read-only access to Z:\\smokesessions');
+  });
+
+  it('picking the whole team changes the line, the buttons and their titles; Approve sends scope team', async () => {
+    const { api, calls } = fakeApi(() => []);
+    const w = keep(mount(FolderAskCard, { props: { ask: scoped(), api } }));
+    await w.get('[data-test=folder-ask-scope-team]').setValue(true);
+    expect(picked(w)).toBe('team');
+    expect(w.get('[data-test=folder-ask-grants]').text()).toBe(
+      'Gives every member of Smoke-sessions read-write access to Z:\\smokesessions, from their next runs. Members hired later get it too. It is listed in the team\'s Settings > Folders.');
+    expect(buttons(w)).toEqual(['Approve for the team', 'Approve read-only for the team', 'Deny']);
+    expect(w.get('[data-test=folder-ask-read]').attributes('title')).toContain('Gives every member of Smoke-sessions read-only access');
+
+    await w.get('[data-test=folder-ask-readwrite]').trigger('click');
+    await flushPromises();
+    expect(calls.filter((c) => c.method === 'folder.answer').map((c) => c.params)).toEqual([{ id: 9, choice: 'readwrite', scope: 'team' }]);
+    expect(w.emitted('answered')![0].slice(1)).toEqual(['readwrite', 'team']);
+    expect(w.get('[data-test=folder-ask-done]').text()).toBe('Approved read-write for every member of Smoke-sessions on Z:\\smokesessions: applies from their next runs.');
+  });
+
+  it('all teams: says it is the global policy; Approve read-only sends read and scope everywhere', async () => {
+    const { api, calls } = fakeApi(() => []);
+    const w = keep(mount(FolderAskCard, { props: { ask: scoped(), api } }));
+    await w.get('[data-test=folder-ask-scope-everywhere]').setValue(true);
+    expect(w.get('[data-test=folder-ask-grants]').text()).toBe(
+      'Gives every agent of every team read-write access to Z:\\smokesessions, from their next runs. It goes into the global policy (Settings > Guardrails), for teams made later too.');
+    expect(buttons(w)).toEqual(['Approve for all teams', 'Approve read-only for all teams', 'Deny']);
+    await w.get('[data-test=folder-ask-read]').trigger('click');
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'folder.answer')!.params).toEqual({ id: 9, choice: 'read', scope: 'everywhere' });
+    expect(w.get('[data-test=folder-ask-done]').text()).toBe('Approved read-only for every agent of every team on Z:\\smokesessions: applies from their next runs.');
+  });
+
+  it('a read-only ask is never wider at any scope, and a Deny carries no scope', async () => {
+    const { api, calls } = fakeApi(() => []);
+    const w = keep(mount(FolderAskCard, { props: { ask: scoped({ access: 'read' }), api } }));
+    await w.get('[data-test=folder-ask-scope-team]').setValue(true);
+    expect(buttons(w)).toEqual(['Approve for the team', 'Deny']);
+    expect(w.find('[data-test=folder-ask-readwrite]').exists()).toBe(false);
+    expect(w.get('[data-test=folder-ask-grants]').text()).toContain('read-only access');
+    await w.get('[data-test=folder-ask-deny]').trigger('click');
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'folder.answer')!.params).toEqual({ id: 9, choice: 'deny' });
+    expect(w.get('[data-test=folder-ask-done]').text()).toBe('Denied OperatorClifford read-only on Z:\\smokesessions; the agent is told.');
+  });
+
+  it('a core that offers no scopes has no picker and grants the member only; it offers only what the core lists', () => {
+    const { api } = fakeApi(() => []);
+    const w = keep(mount(FolderAskCard, { props: { ask: ask(), api } }));
+    expect(w.find('[data-test=folder-ask-scope]').exists()).toBe(false);
+    expect(w.get('[data-test=folder-ask-grants]').text()).toContain('Gives OperatorClifford read-write access');
+    expect(folderAskScopes({})).toEqual(['member']);
+    expect(folderAskScopes({ scopes: [] })).toEqual(['member']);
+    expect(folderAskScopes({ scopes: ['everywhere', 'member'] })).toEqual(['member', 'everywhere']);
+    expect(folderAskScopes({ scopes: ['team'] })).toEqual(['member']); // never a wider default than the member
+    const two = keep(mount(FolderAskCard, { props: { ask: ask({ scopes: ['member', 'team'] }), api } }));
+    expect(two.findAll('[data-test=folder-ask-scope] label').map((l) => l.text())).toEqual(['Only OperatorClifford', 'Everyone on Smoke-sessions']);
+  });
+
+  it('an answered ask shows no picker', () => {
+    const { api } = fakeApi(() => []);
+    const w = keep(mount(FolderAskCard, { props: { ask: scoped({ state: 'approved', grantedAccess: 'read', scopes: [] }), api } }));
+    expect(w.find('[data-test=folder-ask-scope]').exists()).toBe(false);
+    expect(w.find('[data-test=folder-ask-grants]').exists()).toBe(false);
+  });
+
+  it('the words for each scope', () => {
+    expect(folderScopeLabel(ask(), 'member')).toBe('Only OperatorClifford');
+    expect(folderGrantText(ask(), 'read', 'team')).toContain('Gives every member of Smoke-sessions read-only access to Z:\\smokesessions');
+    expect(folderAnswerText(ask(), 'readwrite', 'member')).toBe('Approved read-write for OperatorClifford on Z:\\smokesessions: applies from its next run.');
+    expect(folderAnswerText(ask(), 'deny', 'everywhere')).toBe('Denied OperatorClifford read-write on Z:\\smokesessions; the agent is told.');
+  });
+});
+
+describe('FolderAskCard: when the Concierge asked for the person', () => {
+  const conciergeAsk = (o: Parameters<typeof ask>[0] = {}) => ask({ askedBy: 'Concierge', scopes: ['member', 'team', 'everywhere'], ...o });
+
+  it('says the Concierge asks, for the member, never "Concierge (Manager)"', () => {
+    const { api } = fakeApi(() => []);
+    const w = keep(mount(FolderAskCard, { props: { ask: conciergeAsk(), api } }));
+    const head = w.get('[data-test=folder-ask-head]').text().replace(/\s+/g, ' ');
+    expect(head).toBe('Smoke-sessions / The Concierge asks, for OperatorClifford, read-write on Z:\\smokesessions - write the smoke results next to the recordings');
+    expect(head).not.toContain('(Manager)');
+    expect(w.get('[data-test=folder-ask-asked-by]').attributes('data-asked-by')).toBe('Concierge');
+    expect(folderAskHeadText(conciergeAsk())).toBe(head);
+    expect(folderAskFromConcierge(conciergeAsk())).toBe(true);
+    // A member that happens to be named Concierge is a member ("Team/Name"), and a Manager when it asks for another.
+    expect(folderAskFromConcierge(ask({ askedBy: 'Smoke-sessions/Concierge' }))).toBe(false);
+    expect(folderAskHeadText(ask({ askedBy: 'Smoke-sessions/Concierge' }))).toContain('Concierge (Manager) asks, for OperatorClifford,');
+  });
+
+  it('a Deny says no agent is told; an approval for the team reads as any other', async () => {
+    expect(folderAnswerText(conciergeAsk(), 'deny')).toBe('Denied OperatorClifford read-write on Z:\\smokesessions.');
+    const { api, calls } = fakeApi(() => []);
+    const w = keep(mount(FolderAskCard, { props: { ask: conciergeAsk(), api } }));
+    expect(w.get('[data-test=folder-ask-deny]').attributes('title')).toBe('Closes it; nothing is granted');
+    await w.get('[data-test=folder-ask-scope-team]').setValue(true);
+    await w.get('[data-test=folder-ask-read]').trigger('click');
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'folder.answer')!.params).toEqual({ id: 9, choice: 'read', scope: 'team' });
+    expect(w.get('[data-test=folder-ask-done]').text()).toBe('Approved read-only for every member of Smoke-sessions on Z:\\smokesessions: applies from their next runs.');
+  });
+
+  it('Needs you titles the strip "folder request" when the Concierge raised one, and its line after the answer names the scope', async () => {
+    let list = [conciergeAsk()];
+    const { api } = fakeApi(() => list);
+    const w = keep(mount(FolderAsks, { props: { api, pollMs: 60_000, banner: true } }));
+    await flushPromises();
+    expect(w.get('.title').text()).toBe('Needs you: a folder request waits for your answer');
+    list = [];
+    await w.get('[data-test=folder-ask-scope-everywhere]').setValue(true);
+    await w.get('[data-test=folder-ask-readwrite]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test=folder-ask-answered]').text()).toContain('Approved read-write for every agent of every team on Z:\\smokesessions: applies from their next runs.');
   });
 });
 

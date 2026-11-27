@@ -4,14 +4,14 @@ import { usePoll } from '../usePoll';
 import type { YawbleApi } from '../../../shared/api';
 import FolderAskCard from './FolderAskCard.vue';
 import { usePhone } from '../phone';
-import { FOLDER_ASKS_CHANGED, folderAnswerText, folderAskMember, pendingFolderAsks, type FolderAsk, type FolderAskChoice } from '../folderAsks';
+import { FOLDER_ASKS_CHANGED, folderAnswerText, folderAskFromConcierge, folderAskMember, pendingFolderAsks, type FolderAsk, type FolderAskChoice, type FolderAskScope } from '../folderAsks';
 
 /**
  * The waiting folder asks in Needs you (folder.asks, pending only): one card per ask. Refreshed on
  * folder.asksChanged (an ask raised or answered, here or in another view) and on a slow poll. `banner`: the window-wide
  * strip above every view (App.vue); otherwise a plain list (the Board's Needs You lane, a member's pane), filtered by
  * team and member names. After an answer the item goes and a short line says what it did ("applies from its next run")
- * until closed. An older core without folder.asks shows nothing.
+ * (or "from their next runs" for the whole team or all teams) until closed. An older core without folder.asks shows nothing.
  */
 const props = defineProps<{ api: YawbleApi; pollMs?: number; banner?: boolean; team?: string; member?: string }>();
 const emit = defineEmits<{ count: [n: number] }>();
@@ -21,6 +21,12 @@ const asks = ref<FolderAsk[]>([]);
 const shown = computed(() => pendingFolderAsks(asks.value)
   .filter((a) => (!props.team || a.team === props.team) && (!props.member || folderAskMember(a) === props.member)));
 watch(() => shown.value.length, (n) => emit('count', n), { immediate: true });
+/** The strip's title: agents' asks in their own words; with one the Concierge raised among them, "folder requests". */
+const title = computed(() => {
+  const n = shown.value.length;
+  if (shown.value.some(folderAskFromConcierge)) return n === 1 ? 'a folder request waits for your answer' : `${n} folder requests wait for your answer`;
+  return `${n === 1 ? 'an agent asks' : `${n} agents ask`} for a folder outside its clone`;
+});
 /** The last answer given here, shown until closed. */
 const done = ref<string | null>(null);
 
@@ -43,8 +49,8 @@ async function load() {
   return ok; // false slows the poll down
 }
 
-function answered(a: FolderAsk, choice: FolderAskChoice) {
-  done.value = folderAnswerText(a, choice);
+function answered(a: FolderAsk, choice: FolderAskChoice, scope: FolderAskScope) {
+  done.value = folderAnswerText(a, choice, scope);
   void load();
 }
 
@@ -62,7 +68,7 @@ defineExpose({ load });
 
 <template>
   <section v-if="shown.length || done" class="folder-asks" :class="{ banner, phone }" data-test="folder-asks">
-    <p v-if="banner && shown.length" class="title"><b>Needs you</b>: {{ shown.length === 1 ? 'an agent asks' : `${shown.length} agents ask` }} for a folder outside its clone</p>
+    <p v-if="banner && shown.length" class="title"><b>Needs you</b>: {{ title }}</p>
     <FolderAskCard v-for="a in shown" :key="a.id" :ask="a" :api="api" @answered="answered" />
     <p v-if="done" class="done small" data-test="folder-ask-answered" role="status">
       {{ done }} <button class="link small" data-test="folder-ask-answered-close" @click="done = null">Close</button>
