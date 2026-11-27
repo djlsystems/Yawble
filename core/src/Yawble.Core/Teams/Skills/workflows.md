@@ -151,7 +151,7 @@ top level). Every step must be reachable from `start`; a loop body must end with
 - `file.move` and `file.copy` need a writable folder at both ends. A `to` that ends in `/` or names a folder that exists
   means the same name inside it (the folder is made when missing). When the target is there and `overwrite` is not
   `true`, the file takes the first free name: `IMG_0001 (1).jpg`, `IMG_0001 (2).jpg`... A move to another drive copies,
-  then deletes the source.
+  then deletes the source. A move that changes only the letter case (`a.JPG` to `a.jpg`) renames the file.
 - `file.list`: `pattern` is one or more names with `*` and `?`, split by `;` (`*.jpg;*.jpeg;*.heic;*.png`, any case;
   default `*`); `recursive: true` takes the subfolders too. Links, junctions, hidden and system files are not listed,
   and a recursive list does not go into a linked folder. `size` is in bytes, `modifiedAt` a UTC datetime. A folder

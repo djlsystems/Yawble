@@ -514,14 +514,19 @@ public static class WorkflowEngine
             var overwrite = Bool(input, "overwrite");
             var target = _files.ForTarget(Text(input, "to"), source, overwrite, move);
             var same = string.Equals(source, target, OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+            // a.JPG -> a.jpg where names ignore case: the same file, renamed (only a move gets here; a copy took a free name).
+            // The name on disk counts, not how the step spelled the source.
+            var caseOnly = same && !string.Equals(_files.DryRun ? source : OnDisk(source), target, StringComparison.Ordinal);
             if (_files.DryRun)
             {
-                if (!same)
-                {
-                    _files.DryPut(read, target);
-                    if (move) _files.DryDelete(source);
-                }
+                if (!same || caseOnly) _files.DryPut(read, target);
+                if (move && !same) _files.DryDelete(source);
                 await LogAsync($"would {verb} {source} -> {target}");
+                return target;
+            }
+            if (caseOnly)
+            {
+                RenameCase(source, target);
                 return target;
             }
             if (same) return target;
@@ -534,6 +539,33 @@ public static class WorkflowEngine
             }
             else File.Move(source, target, overwrite);
             return target;
+        }
+
+        /// <summary>
+        /// Renames a file to the same name in another letter case, through a free temporary name in its folder (a file system
+        /// that ignores case may take a direct rename for "no change"). When the second step fails the file gets its old name back.
+        /// </summary>
+        private static string OnDisk(string path)
+        {
+            var folder = Path.GetDirectoryName(path)!;
+            return Directory.EnumerateFiles(folder).FirstOrDefault(f => string.Equals(f, path, StringComparison.Ordinal))
+                ?? Directory.EnumerateFiles(folder).FirstOrDefault(f => string.Equals(f, path, StringComparison.OrdinalIgnoreCase))
+                ?? path;
+        }
+
+        private static void RenameCase(string source, string target)
+        {
+            var folder = Path.GetDirectoryName(source)!;
+            string temp;
+            do temp = Path.Combine(folder, $".{Path.GetFileName(source)}.{Guid.NewGuid():N}.renaming");
+            while (File.Exists(temp) || Directory.Exists(temp));
+            File.Move(source, temp);
+            try { File.Move(temp, target); }
+            catch
+            {
+                File.Move(temp, source);
+                throw;
+            }
         }
 
         /// <summary>An optional true/false input (absent: false); text "true"/"false" from a template counts.</summary>

@@ -64,6 +64,21 @@ public sealed class WorkflowFileMoveListTests : IDisposable
         Assert.Equal(Bytes, File.ReadAllBytes(target));
     }
 
+    [Theory]
+    [InlineData("in/a.JPG")]
+    [InlineData("in/a.jpg")] // the step spells the source as the target: the name on disk still changes
+    public async Task AMoveThatChangesOnlyTheLetterCase_RenamesTheFile(string path)
+    {
+        if (path != "in/a.JPG" && OperatingSystem.IsLinux()) { Assert.Skip("this file system keeps a.jpg and a.JPG apart"); return; }
+        DataFile("in/a.JPG");
+        var r = await Run(Request(OneStep($$"""{ "id": "a", "type": "file.move", "path": "{{path}}", "to": "in/a.jpg", "into": "to", "next": "z" }""")));
+
+        Succeeded(r);
+        Assert.Equal(Path.Combine(Data, "in", "a.jpg"), r.Log[^1]);
+        Assert.Equal(["a.jpg"], new DirectoryInfo(Path.Combine(Data, "in")).GetFiles().Select(f => f.Name));
+        Assert.Equal(Bytes, File.ReadAllBytes(Path.Combine(Data, "in", "a.jpg")));
+    }
+
     [Fact]
     public async Task ACopyKeepsEveryByte_AndLeavesTheSource()
     {
