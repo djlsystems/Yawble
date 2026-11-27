@@ -86,6 +86,10 @@ sandbox.lock.json           the pinned sandbox release, request contract and tel
   filters, sorts and prunes them all; a member's activity is one query across them. Retention is per log, in
   `app_meta` (`logs.retention.<log>`), applied by a daily sweep, which also forgets transcripts whose file is gone.
 - Secrets never go into the database or a log (see [Connections and integrations](connections-and-integrations.md)).
+- A team's environment values are in the database encrypted (`teams.env`: the names readable, each value sealed with
+  AES-256-GCM by `Teams/TeamEnvVault.cs`). The key is one entry in the credential store (`team-env.key`). Values found
+  unencrypted are encrypted at each start. Without the key a value reads as unset: no run gets it, and Team settings >
+  Environment asks for it again.
 - Host tasks (`core/src/Yawble.Core/Tasks/`): definitions, approvals and `host_task_runs`. How to set up a project's
   release and deploy jobs as host tasks: [Release and deploy host tasks](host-tasks-release.md).
 - Backups: a daily automatic copy and on-demand backups in `<data>/backups/`; restore is staged and applied at the

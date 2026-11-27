@@ -6,7 +6,8 @@ namespace Yawble.Core.Teams;
 /// <summary>
 /// A team's environment variables: names and values given to every run of the team's members. The app's
 /// own variables always win, and the names the app sets for a run (HOME, PATH, the sandbox's folders, the gateway and
-/// sign-in variables) cannot be given at all. Plain text, so for coordination, not confinement: never a production key.
+/// sign-in variables) cannot be given at all. Every agent on the team can read them, so they are for coordination,
+/// not confinement: never a production key. In the database the values are encrypted (<see cref="TeamEnvVault"/>).
 /// </summary>
 public static partial class TeamEnv
 {
@@ -50,9 +51,20 @@ public static partial class TeamEnv
     /// </summary>
     public const string HiddenValue = "(set on the computer)";
 
-    /// <summary>The variables as a Cloud Link viewer sees them: every name, each value replaced by <see cref="HiddenValue"/>.</summary>
+    /// <summary>
+    /// What anyone gets in place of a value this computer cannot read (its key is not in this computer's credential
+    /// store: the data came from another computer). Sent back unchanged on a save, it means "leave this variable as it
+    /// is"; a new value replaces it.
+    /// </summary>
+    public const string UnreadableValue = "(enter this value again)";
+
+    /// <summary>
+    /// The variables as a Cloud Link viewer sees them: every name, each value replaced by <see cref="HiddenValue"/>.
+    /// A value the computer cannot read stays marked <see cref="UnreadableValue"/>: it tells no secret, and the viewer
+    /// sees that it has to be entered again.
+    /// </summary>
     public static IReadOnlyDictionary<string, string> Hidden(IReadOnlyDictionary<string, string> env) =>
-        env.ToDictionary(e => e.Key, _ => HiddenValue, StringComparer.Ordinal);
+        env.ToDictionary(e => e.Key, e => e.Value == UnreadableValue ? UnreadableValue : HiddenValue, StringComparer.Ordinal);
 
     /// <summary>
     /// A Cloud Link viewer's save, with the values it never saw put back: an entry whose value is <see cref="HiddenValue"/>

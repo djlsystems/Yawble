@@ -45,7 +45,7 @@ public static class BusHost
         string connectionString, Func<string, string?> env, Action<string>? log, IAgentRunner? launcher, IAgentRunner? runner, Func<int>? maxConcurrentAgents,
         string? appDataRoot = null, Skills.SkillCatalog? skills = null,
         Func<CancellationToken, Task<IReadOnlyList<AgentChoice>>>? availableAgents = null,
-        Func<IAgentRunner, IAgentRunner>? wrapRunner = null)
+        Func<IAgentRunner, IAgentRunner>? wrapRunner = null, Teams.TeamEnvVault? envVault = null)
     {
         var chosen = runner ?? env(RunnerVariable) switch
         {
@@ -73,6 +73,7 @@ public static class BusHost
             Skills = skills,
             AvailableAgents = availableAgents,
             Repos = repos,
+            EnvVault = envVault,
         });
         await engine.StartAsync();
         return engine;

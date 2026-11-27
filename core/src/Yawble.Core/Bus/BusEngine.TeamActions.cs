@@ -148,27 +148,36 @@ public sealed partial class BusEngine
         Directory.Delete(folder, recursive: true);
     }
 
+    /// <summary>
+    /// The team's environment variables: every name with its value. A value this computer cannot read (its key is not
+    /// in this computer's credential store) comes as <see cref="TeamEnv.UnreadableValue"/>.
+    /// </summary>
     public Task<IReadOnlyDictionary<string, string>> TeamEnvAsync(string team, CancellationToken ct = default) =>
-        WithGate(() => TeamEnv.Parse(_store.TeamEnvJson(TeamId(team))), ct);
+        WithGate(() => TeamEnvVault.Read(_options.EnvVault, _store.TeamEnvJson(TeamId(team))).Shown, ct);
 
     /// <summary>Replaces the team's environment variables (whole). Refused, with every problem named, when any is invalid.</summary>
     /// <param name="hiddenValues">The caller saw the values hidden (a Cloud Link viewer): an entry that still holds
     /// <see cref="TeamEnv.HiddenValue"/> keeps its stored value (<see cref="TeamEnv.KeepHidden"/>).</param>
+    /// <remarks>The values are stored sealed (<see cref="TeamEnvVault"/>). An entry that holds
+    /// <see cref="TeamEnv.UnreadableValue"/> leaves the stored, unreadable value of that name as it is.</remarks>
     public Task<IReadOnlyDictionary<string, string>> SetTeamEnvAsync(string team, IReadOnlyList<KeyValuePair<string, string>> entries, CancellationToken ct = default,
         bool hiddenValues = false) =>
         WithGate(() =>
         {
             var id = TeamId(team);
+            var stored = _store.TeamEnvJson(id);
             if (hiddenValues)
             {
-                var (kept, missing) = TeamEnv.KeepHidden(entries, TeamEnv.Parse(_store.TeamEnvJson(id)));
+                var (kept, missing) = TeamEnv.KeepHidden(entries, TeamEnvVault.Read(_options.EnvVault, stored).Shown);
                 if (missing.Count != 0) throw new BusRefusal("bad_env", "nothing was saved: " + string.Join("; ", missing));
                 entries = kept;
             }
             var problems = TeamEnv.Problems(entries);
             if (problems.Count != 0) throw new BusRefusal("bad_env", "nothing was saved: " + string.Join("; ", problems));
-            _store.SetTeamEnv(id, TeamEnv.Serialize(entries));
-            return TeamEnv.Parse(_store.TeamEnvJson(id));
+            var (json, unsealed) = TeamEnvVault.Write(_options.EnvVault, entries, stored);
+            if (json is null) throw new BusRefusal("bad_env", "nothing was saved: " + string.Join("; ", unsealed));
+            _store.SetTeamEnv(id, json);
+            return TeamEnvVault.Read(_options.EnvVault, _store.TeamEnvJson(id)).Shown;
         }, ct);
 
     /// <summary>

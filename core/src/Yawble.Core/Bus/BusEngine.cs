@@ -39,6 +39,12 @@ public sealed class BusOptions
 
     public Action<string>? Log { get; init; }
 
+    /// <summary>
+    /// Seals the teams' environment values in the database, with its key in the computer's credential store. The core
+    /// always gives one. Without one (a bus in a test of something else) the values are stored as given.
+    /// </summary>
+    public Teams.TeamEnvVault? EnvVault { get; init; }
+
     /// <summary>A hold of the bus gate at least this long is reported in the Diagnostics log, with who held it.</summary>
     public TimeSpan SlowGateHold { get; init; } = TimeSpan.FromMilliseconds(250);
 
