@@ -20,6 +20,32 @@ public static partial class WorkflowTell
     public const int DefaultMaxTells = 5;
     public const int MaxTellsLimit = 50;
 
+    /// <summary>The most files one tell attaches, and the largest one.</summary>
+    public const int MaxAttachments = 20;
+    public const long MaxAttachmentBytes = 100L * 1024 * 1024;
+
+    /// <summary>
+    /// Whether a file is a HEIC/HEIF image (by its extension). These are attached as they are: .NET has no HEIF decoder, and
+    /// Windows decodes HEIF only with the optional HEIF and HEVC extensions from the Store, so converting to JPEG would need a new
+    /// dependency. The step log and the instruction say so.
+    /// </summary>
+    public static bool IsHeif(string path) =>
+        Path.GetExtension(path).ToLowerInvariant() is ".heic" or ".heif" or ".hif";
+
+    /// <summary>What the step log and the instruction add after a HEIC/HEIF attachment.</summary>
+    public const string HeifNote = "a HEIC/HEIF image, copied as it is (not converted to JPEG); an agent's image tools may not open it";
+
+    /// <summary>The instruction's closing lines naming the attached copies (in the team's documents) for the agent to open.</summary>
+    public static string AttachmentsText(IReadOnlyList<string> copies)
+    {
+        if (copies.Count == 0) return "";
+        var sb = new System.Text.StringBuilder(copies.Count == 1
+            ? "The workflow attached a file, copied into the team's documents. Open it with your file-reading tool:"
+            : $"The workflow attached {copies.Count} files, copied into the team's documents. Open each with your file-reading tool:");
+        foreach (var c in copies) sb.Append("\n- ").Append(c).Append(IsHeif(c) ? $" ({HeifNote})" : "");
+        return sb.ToString();
+    }
+
     public static class Outcomes
     {
         public const string Sent = "sent", Done = "done", Failed = "failed", Blocked = "blocked", TimedOut = "timedOut", DryRun = "dryRun";

@@ -48,18 +48,42 @@ public static class Attachments
     public static IReadOnlyList<string> Save(string folder, IReadOnlyList<(string Name, byte[] Bytes)> images, TimeProvider? clock = null)
     {
         if (images.Count == 0) return [];
+        return Store(folder, images, i => i.Name, (i, path) => File.WriteAllBytes(path, i.Bytes), clock);
+    }
+
+    /// <summary>
+    /// Copies files (any kind, bytes as they are) into <paramref name="folder"/>/attachments, each under a new name made the same
+    /// way as <see cref="Save"/>'s (a time stamp, then the file's own name made safe, its extension kept). Returns their full paths.
+    /// </summary>
+    public static IReadOnlyList<string> Copy(string folder, IReadOnlyList<string> files, TimeProvider? clock = null)
+    {
+        if (files.Count == 0) return [];
+        return Store(folder, files, f => CleanFile(Path.GetFileName(f)), (f, path) => File.Copy(f, path), clock);
+    }
+
+    private static List<string> Store<T>(string folder, IReadOnlyList<T> items, Func<T, string> name, Action<T, string> write, TimeProvider? clock)
+    {
         var dir = Path.Combine(folder, Folder);
         Directory.CreateDirectory(dir);
         var stamp = (clock ?? TimeProvider.System).GetLocalNow().ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
         var paths = new List<string>();
-        foreach (var (name, bytes) in images)
+        foreach (var item in items)
         {
-            var path = Path.Combine(dir, $"{stamp}-{name}");
-            for (var n = 2; File.Exists(path); n++) path = Path.Combine(dir, $"{stamp}-{n}-{name}");
-            File.WriteAllBytes(path, bytes);
+            var n0 = name(item);
+            var path = Path.Combine(dir, $"{stamp}-{n0}");
+            for (var n = 2; File.Exists(path); n++) path = Path.Combine(dir, $"{stamp}-{n}-{n0}");
+            write(item, path);
             paths.Add(path);
         }
         return paths;
+    }
+
+    /// <summary>A safe name for any file: its stem as <see cref="Clean"/> makes it, and its own extension (letters and digits), if any.</summary>
+    internal static string CleanFile(string name)
+    {
+        var ext = new string(Path.GetExtension(name ?? "").TrimStart('.').Where(char.IsAsciiLetterOrDigit).Take(10).ToArray()).ToLowerInvariant();
+        var stem = Stem(name ?? "", "file");
+        return ext.Length == 0 ? stem : $"{stem}.{ext}";
     }
 
     /// <summary>The message with its images named: what the agent reads.</summary>
@@ -84,14 +108,16 @@ public static class Attachments
     }
 
     /// <summary>A safe file name: the given stem (letters, digits, '-', '_', '.'), with the extension of its real kind.</summary>
-    internal static string Clean(string name, string kind)
+    internal static string Clean(string name, string kind) => $"{Stem(name, "image")}.{kind}";
+
+    private static string Stem(string name, string fallback)
     {
         var stem = Path.GetFileNameWithoutExtension(name ?? "");
         var sb = new StringBuilder();
         foreach (var c in stem) sb.Append(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '-');
         var clean = sb.ToString().Trim('-', '.');
-        if (clean.Length == 0) clean = "image";
+        if (clean.Length == 0) clean = fallback;
         if (clean.Length > 60) clean = clean[..60];
-        return $"{clean}.{kind}";
+        return clean;
     }
 }

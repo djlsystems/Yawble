@@ -130,7 +130,7 @@ top level). Every step must be reachable from `start`; a loop body must end with
 | `file.move`, `file.copy` | `path`, `to`, `overwrite`, `into`, `next` | moves or copies a file, any kind (bytes as they are); `into` gets the final path (string) |
 | `file.list` | `path`, `pattern`, `recursive`, `into`, `next` | the files in a folder: `list<{ path, name, size, modifiedAt }>` sorted by path |
 | `log` | `text`, `next` | a line in the run's log |
-| `tell` | `member`, `team`, `text`, `wait`, `timeout`, `reply`, `into`, `next` | gives work to an agent member of a team (section Tell) |
+| `tell` | `member`, `team`, `text`, `attachments`, `wait`, `timeout`, `reply`, `into`, `next` | gives work to an agent member of a team (section Tell) |
 | `end` | `outputs` (optional) | ends the run, setting declared outputs |
 
 - File paths: relative ones are in the member's data folder; an absolute path must be in a folder the team granted
@@ -212,18 +212,29 @@ A workflow never runs an agent. A `tell` step gives work to an agent member of a
 - `team`: default the workflow member's own team. Another team is named here. Settings > Workflows **Workflows may tell
   other teams** (on by default) turned off fails such a step with that reason.
 - `text`: the instruction, a template. The deliverable says which workflow, member and run it came from.
+- `attachments` (optional): files the agent should open, as a list of paths: `["{trigger.added}"]`,
+  `["docs:/smoke/report.pdf", "{vars.photo}"]`. Each item is a path or an expression that gives a path, a list of paths
+  or `file.list`'s items. Each file must exist and be one the workflow member may read (its data folder, a granted
+  folder, `docs:/`), at most 20 files of 100 MB each; otherwise the step fails with the reason and tells nothing.
+  The files are copied (the originals stay) into the told team's Documents, `attachments\<time>-<name>`, and the
+  instruction ends with the copies' paths, so the agent can open them without access to the source folder. The log
+  says `attached <file> as <copy>`. HEIC/HEIF photos (`.heic`, `.heif`) are copied as they are, not converted to JPEG:
+  the log and the instruction say so, and an agent's image tools may not open them. `workflow_check` reports an
+  item that is not text, an empty path or a malformed `docs:` path; whether an absolute path is in a granted folder is
+  known only when the step runs.
 - `wait`: `false` (default) goes on at once. `true` parks the run (state `waiting`) until the deliverable is done, fails
   or is blocked, or `timeout` passes: `30m`, `4h`, `2d`; default `24h`, at most `7d`. A waiting run holds no run slot,
-  its run timeout stops, and it resumes after an app restart. It is still the member's run, so its triggers that fire
-  meanwhile are skipped: a poller that tells should not wait. Cancelling the run leaves the deliverable alone.
+  its run timeout stops, and it resumes after an app restart. It is still the member's run: an `every`, `cron` or
+  `once` trigger that fires meanwhile is skipped (a poller that tells should not wait), and a `folder` trigger's fire
+  is queued and runs once the wait ends. Cancelling the run leaves the deliverable alone.
 - `reply` (only with `wait`): a schema's name. The instruction asks the agent to end its answer with JSON of that
   schema; a reply that does not match fails the step.
 - `into`: a variable of type `TellResult { outcome, deliverable, reply, data }`. `outcome` is one of `sent` (`wait`
   false), `done`, `failed`, `blocked`, `timedOut` or `dryRun`; `reply` is the agent's closing summary; `data` is the
   reply's JSON (of the `reply` schema), or null.
 - A run tells at most 5 times (a member setting, at most 50); the next tell fails the run.
-- A dry run or a test run never sends a tell: the log says `would tell <member> of <team>: ...` and `into` gets
-  outcome `dryRun`. The Workflows place's Test run takes a made-up reply for each tell that waits.
+- A dry run or a test run never sends a tell: the log says `would tell <member> of <team>: ...`, then
+  `would attach <file>` for each attachment (nothing is copied), and `into` gets outcome `dryRun`. The Workflows place's Test run takes a made-up reply for each tell that waits.
 
 ## Values and expressions
 

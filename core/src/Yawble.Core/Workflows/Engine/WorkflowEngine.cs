@@ -363,7 +363,7 @@ public static class WorkflowEngine
                 WorkflowStepTypes.FileMove or WorkflowStepTypes.FileCopy => Pick("path", "to", "overwrite"),
                 WorkflowStepTypes.FileList => Pick("path", "pattern", "recursive"),
                 "log" => Pick("text"),
-                WorkflowTell.StepType => Pick("member", "team", "text", "wait", "timeout", "reply"),
+                WorkflowTell.StepType => Pick("member", "team", "text", "wait", "timeout", "reply", "attachments"),
                 WorkflowCode.StepType => new JsonObject { ["inputs"] = ev.EvaluateValue(step["inputs"]) ?? new JsonObject() },
                 "end" => step["outputs"] is { } o ? new JsonObject { ["outputs"] = ev.EvaluateValue(o) } : null,
                 _ => null,
@@ -584,6 +584,7 @@ public static class WorkflowEngine
             }
             var replyName = wait ? step.Text("reply") : null;
             var replySchema = replyName is null ? null : Find(replyName) ?? throw new WorkflowStepException($"reply: no schema named '{replyName}'");
+            var attachments = AttachmentsOf(input["attachments"]);
 
             if (_tells >= _req.MaxTells)
                 throw new WorkflowStepException($"a run may tell at most {_req.MaxTells} time{(_req.MaxTells == 1 ? "" : "s")} (the member's maxTells is {_req.MaxTells}); this would be tell {_tells + 1}");
@@ -592,6 +593,8 @@ public static class WorkflowEngine
             if (_req.DryRun || _req.DryTells)
             {
                 await LogAsync($"would tell {member} of {team ?? _req.Team ?? "its team"}: {text}");
+                foreach (var a in attachments)
+                    await LogAsync($"would attach {a}" + (WorkflowTell.IsHeif(a) ? $" ({WorkflowTell.HeifNote})" : ""));
                 string reply = "";
                 JsonNode? data = null;
                 if (wait && _req.TellReplies is { } replies && replies.TryGetPropertyValue(step.Id, out var madeUp))
@@ -601,10 +604,21 @@ public static class WorkflowEngine
 
             var teller = _req.Teller ?? throw new WorkflowStepException("this run has no team to tell");
             WorkflowTellSent sent;
-            try { sent = await teller.TellAsync(new WorkflowTellCall(step.Id, member, team, text, wait, replyName, (JsonObject?)replySchema?.Schema.DeepClone()), _ct); }
+            try
+            {
+                sent = await teller.TellAsync(new WorkflowTellCall(step.Id, member, team, text, wait, replyName, (JsonObject?)replySchema?.Schema.DeepClone(),
+                    attachments.Count == 0 ? null : attachments), _ct);
+            }
             catch (Exception e) when (e is not OperationCanceledException and not WorkflowActionException)
             {
                 throw new WorkflowActionException($"tell {member}: {e.Message}");
+            }
+            if (attachments.Count > 0)
+            {
+                var copies = sent.Attached ?? [];
+                for (var i = 0; i < attachments.Count; i++)
+                    await LogAsync($"attached {attachments[i]}" + (i < copies.Count ? $" as {copies[i]}" : "")
+                        + (WorkflowTell.IsHeif(attachments[i]) ? $" ({WorkflowTell.HeifNote})" : ""));
             }
             if (!wait) return Result(step, WorkflowTell.Result(WorkflowTell.Outcomes.Sent, sent.Deliverable, "", null));
 
@@ -620,6 +634,52 @@ public static class WorkflowEngine
                 Input = input.DeepClone(),
             };
             return new JsonObject { ["waiting"] = true, ["deliverable"] = sent.Deliverable, ["member"] = sent.Member, ["team"] = sent.Team };
+        }
+
+        /// <summary>
+        /// A tell's attachments: a path, a list of paths (a list in the list is taken item by item), or objects with a <c>path</c>
+        /// (file.list's items). Each must be a file the run may read (the data folder, a granted folder, docs:/) that exists, at most
+        /// <see cref="WorkflowTell.MaxAttachmentBytes"/>; at most <see cref="WorkflowTell.MaxAttachments"/> of them. Gives the real paths.
+        /// </summary>
+        private List<string> AttachmentsOf(JsonNode? node)
+        {
+            var paths = new List<string>();
+            void Add(object? v)
+            {
+                switch (v)
+                {
+                    case null: return;
+                    case JsonArray a:
+                        foreach (var i in a) Add(WorkflowValues.FromNode(i));
+                        return;
+                    case JsonObject o when o["path"] is JsonValue p && p.TryGetValue<string>(out var s):
+                        paths.Add(s);
+                        return;
+                    case string s:
+                        paths.Add(s);
+                        return;
+                    default:
+                        throw new WorkflowStepException($"an attachment is {WorkflowValues.Describe(v)}, not a file's path");
+                }
+            }
+            Add(WorkflowValues.FromNode(node));
+            if (paths.Count > WorkflowTell.MaxAttachments)
+                throw new WorkflowStepException($"tell attaches {paths.Count} files; the most is {WorkflowTell.MaxAttachments}");
+            var real = new List<string>();
+            foreach (var path in paths)
+            {
+                if (string.IsNullOrWhiteSpace(path)) throw new WorkflowStepException("an attachment's path is empty");
+                var (full, _, _) = _files.Locate(path);
+                var read = _files.ForRead(path);
+                if (!File.Exists(read))
+                    throw new WorkflowStepException(Directory.Exists(full)
+                        ? $"'{path}' is a folder; tell attaches files"
+                        : $"'{path}' does not exist, so tell cannot attach it");
+                if (new FileInfo(read).Length > WorkflowTell.MaxAttachmentBytes)
+                    throw new WorkflowStepException($"'{path}' is larger than {WorkflowTell.MaxAttachmentBytes / 1024 / 1024} MB, the most tell attaches");
+                real.Add(full);
+            }
+            return real;
         }
 
         /// <summary>A waiting tell's end: its outcome, the closing summary, and for done with a reply schema the reply's checked data.</summary>

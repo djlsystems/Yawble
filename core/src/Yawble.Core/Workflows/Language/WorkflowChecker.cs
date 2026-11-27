@@ -486,7 +486,59 @@ public static class WorkflowChecker
                 else _refs.Add(new(reply, "", step.Id));
             }
 
+            if (step.Has("attachments")) Attachments(step, ctx);
+
             Into(step, TellResultOf(step));
+        }
+
+        /// <summary>
+        /// A tell's attachments: a list of paths (text or expressions; an expression may give a list of paths, or file.list's items),
+        /// or one expression that gives a path or a list of them. A path written out in full must not be empty, and a docs: one must
+        /// be well formed (as a file step's). Whether a literal absolute path is in a granted folder is the member's, known at run time.
+        /// </summary>
+        private void Attachments(WorkflowStep step, ImmutableList<string> ctx)
+        {
+            var node = step["attachments"];
+            if (node is JsonArray list)
+            {
+                if (list.Count > WorkflowTell.MaxAttachments)
+                    Issue(step.Id, WorkflowCheckCodes.BadValue, $"tell attaches {list.Count} files; the most is {WorkflowTell.MaxAttachments}");
+                for (var i = 0; i < list.Count; i++) AttachmentPath(step, list[i], $"attachments[{i}]", ctx);
+                return;
+            }
+            if (node is JsonValue v && v.GetValueKind() == JsonValueKind.String)
+            {
+                AttachmentPath(step, node, "attachments", ctx);
+                return;
+            }
+            Issue(step.Id, WorkflowCheckCodes.InvalidDocument, "tell's 'attachments' is a list of file paths (text or expressions)");
+        }
+
+        private void AttachmentPath(WorkflowStep step, JsonNode? node, string label, ImmutableList<string> ctx)
+        {
+            if (node is not JsonValue v || v.GetValueKind() != JsonValueKind.String)
+            {
+                Issue(step.Id, WorkflowCheckCodes.InvalidDocument, $"tell's {label} is a file's path (text or an expression), not {node?.ToJsonString() ?? "null"}");
+                return;
+            }
+            var type = ValueType(node, ctx);
+            var ok = type.Kind switch
+            {
+                WorkflowTypeKind.String or WorkflowTypeKind.Any or WorkflowTypeKind.Null or WorkflowTypeKind.Object => true,
+                WorkflowTypeKind.List => type.Element!.Kind is WorkflowTypeKind.String or WorkflowTypeKind.Any or WorkflowTypeKind.Object,
+                _ => false,
+            };
+            if (!ok) { Issue(step.Id, WorkflowCheckCodes.TypeMismatch, $"tell's {label} is {type}, not a file's path or a list of paths"); return; }
+            WorkflowTemplate template;
+            try { template = WorkflowTemplate.Parse(v.GetValue<string>()); }
+            catch (WorkflowExpressionException) { return; } // ValueType has reported it
+            if (!template.HasExpressions)
+            {
+                var path = v.GetValue<string>();
+                if (path.Trim().Length == 0) Issue(step.Id, WorkflowCheckCodes.BadValue, $"tell's {label} is empty; name a file");
+                else if (Engine.WorkflowFiles.IsDocsPath(path) && Engine.WorkflowFiles.DocsPathProblem(path, needsFile: true) is { } problem)
+                    Issue(step.Id, WorkflowCheckCodes.BadDocsPath, $"tell's {label}: {problem}");
+            }
         }
 
         /// <summary>The tell's result type: TellResult with data typed by its reply schema, when that schema exists.</summary>
