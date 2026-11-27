@@ -156,6 +156,26 @@ public sealed class WorkflowFileLinkTests : IDisposable
     }
 
     [Fact]
+    public async Task ARecursiveList_NeitherEntersNorListsAJunction_NorListsHiddenOrSystemFiles()
+    {
+        var behind = Junction("data");
+        File.WriteAllBytes(Path.Combine(behind, "IMG_0001.jpg"), [1]);
+        Directory.CreateDirectory(Path.Combine(behind, "deeper"));
+        File.WriteAllBytes(Path.Combine(behind, "deeper", "IMG_0002.jpg"), [2]);
+        File.WriteAllBytes(Path.Combine(Data, "keep.jpg"), [3]);
+        var hidden = Path.Combine(Data, "hidden.jpg");
+        File.WriteAllBytes(hidden, [4]);
+        File.SetAttributes(hidden, FileAttributes.Hidden);
+        var journal = new RecordingJournal();
+
+        var r = await WorkflowEngine.RunAsync(Request("""[ { "id": "a", "type": "file.list", "path": ".", "recursive": true, "into": "files", "next": null } ]"""), journal, Ct);
+
+        Assert.True(r.Status == WorkflowRunStatus.Succeeded, r.Reason);
+        var listed = Assert.IsType<System.Text.Json.Nodes.JsonArray>(journal.Completed.Last(c => c.Record.StepId == "a").Record.Output);
+        Assert.Equal([Path.Combine(Data, "keep.jpg")], listed.Select(i => i!["path"]!.GetValue<string>()));
+    }
+
+    [Fact]
     public async Task AFreeNameThatIsAJunction_IsRefused_NotWrittenThrough()
     {
         File.WriteAllBytes(Path.Combine(Data, "a.txt"), [1, 2, 3]);

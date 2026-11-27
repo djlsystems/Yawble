@@ -43,6 +43,10 @@ internal static class PathLinks
         return (attributes & FileAttributes.ReparsePoint) != 0 || LinkTarget(path) is not null;
     }
 
+    /// <summary>Whether an entry a folder walk meets is a link or junction (from its attributes, no extra call).</summary>
+    public static bool IsLink(ref System.IO.Enumeration.FileSystemEntry entry) =>
+        (entry.Attributes & FileAttributes.ReparsePoint) != 0 || SeenAsLink.Value?.Invoke(entry.ToFullPath()) == true;
+
     private static string? LinkTarget(string path)
     {
         try { return new FileInfo(path).LinkTarget; }

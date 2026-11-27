@@ -184,14 +184,13 @@ internal sealed class WorkflowFiles
         if (!realDir && !dryDir)
             throw new WorkflowStepException(File.Exists(full) ? $"'{path}' is a file, not a folder" : $"the folder '{path}' does not exist");
 
-        var options = new EnumerationOptions { RecurseSubdirectories = recursive, IgnoreInaccessible = true };
         bool Matches(string name) => patterns.Any(p => System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(p, name, ignoreCase: true));
         var found = new Dictionary<string, FileInfo>(PathComparison == StringComparison.Ordinal ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase);
         if (realDir)
-            foreach (var f in new DirectoryInfo(full).EnumerateFiles("*", options))
+            foreach (var f in Files(full, recursive))
                 if (Matches(f.Name) && (_dry is null || !Inside(f.FullName, _dry, out _))) found[f.FullName] = f;
         if (dryDir)
-            foreach (var f in new DirectoryInfo(dryFolder!).EnumerateFiles("*", options))
+            foreach (var f in Files(dryFolder!, recursive))
             {
                 var inner = Path.GetRelativePath(dryFolder!, f.FullName);
                 // The dry run keeps granted folders' copies under granted-N in its root: they are not the data folder's files.
@@ -202,6 +201,23 @@ internal sealed class WorkflowFiles
             }
         return found.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => (p.Key, p.Value)).ToList();
     }
+
+    /// <summary>
+    /// The files in a folder (its subfolders too when recursive). Links and junctions are neither listed nor entered (one could lead
+    /// out of the folder, or loop); hidden and system files are not listed either.
+    /// </summary>
+    private static IEnumerable<FileInfo> Files(string folder, bool recursive) =>
+        new System.IO.Enumeration.FileSystemEnumerable<FileInfo>(folder, (ref System.IO.Enumeration.FileSystemEntry e) => (FileInfo)e.ToFileSystemInfo(),
+            new EnumerationOptions
+            {
+                RecurseSubdirectories = recursive,
+                IgnoreInaccessible = true,
+                AttributesToSkip = FileAttributes.ReparsePoint | FileAttributes.Hidden | FileAttributes.System,
+            })
+        {
+            ShouldIncludePredicate = (ref System.IO.Enumeration.FileSystemEntry e) => !e.IsDirectory && !Ops.PathLinks.IsLink(ref e),
+            ShouldRecursePredicate = (ref System.IO.Enumeration.FileSystemEntry e) => !Ops.PathLinks.IsLink(ref e),
+        };
 
     private void RequireWritable(string path, int root)
     {

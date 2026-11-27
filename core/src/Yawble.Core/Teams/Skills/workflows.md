@@ -153,7 +153,8 @@ top level). Every step must be reachable from `start`; a loop body must end with
   `true`, the file takes the first free name: `IMG_0001 (1).jpg`, `IMG_0001 (2).jpg`... A move to another drive copies,
   then deletes the source.
 - `file.list`: `pattern` is one or more names with `*` and `?`, split by `;` (`*.jpg;*.jpeg;*.heic;*.png`, any case;
-  default `*`); `recursive: true` takes the subfolders too. `size` is in bytes, `modifiedAt` a UTC datetime. A folder
+  default `*`); `recursive: true` takes the subfolders too. Links, junctions, hidden and system files are not listed,
+  and a recursive list does not go into a linked folder. `size` is in bytes, `modifiedAt` a UTC datetime. A folder
   that does not exist fails the step. Declare its variable as `list<any>` (or a schema with those fields).
 - A dry run changes no real file: writes, moves and copies go to the dry run's own copies, which later steps see, and
   the log says `would move <from> -> <to>` / `would copy <from> -> <to>` with the real paths.
