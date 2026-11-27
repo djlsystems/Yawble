@@ -14,7 +14,9 @@ namespace Yawble.Core.Workflows.Running;
 ///
 /// - What starts a member's run: a trigger aimed at it (<see cref="FireWorkflow"/>, from the bus's trigger sweep, with the
 ///   structured payload as input), or a tell to it (<see cref="RunForBusAsync"/>, input { text }).
-/// - One run at a time per member: a fire while a run is going is skipped and recorded as a skipped run.
+/// - One run at a time per member: a fire while a run is going (or waiting on a tell) is skipped and recorded as a skipped run,
+///   except a folder trigger's fire: it is queued (<see cref="WorkflowFolderQueue"/>, kept in the store), its file lists merged
+///   with the trigger's earlier queued fires, and ONE run starts with them when the member's run ends (any outcome).
 /// - No deliverable per fire: a trigger's run is a workflow_runs row and nothing on the bus; it does not wake the Manager.
 /// - The member's timeout (default 10 minutes), the step budget (10,000) and the loop cap go to the engine.
 /// - Every completed step is journaled (workflow_run_steps, its checkpoint on the run); after a restart a run left running
@@ -74,8 +76,15 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
     /// <summary>Whether the member has a run going now.</summary>
     public bool IsRunning(long memberId) => _running.ContainsKey(memberId);
 
-    /// <summary>Waits for every run started in the background (tests; the app's stop).</summary>
-    public Task WhenIdleAsync() => Task.WhenAll(_background.Values.ToArray());
+    /// <summary>Waits for every run started in the background, and the queued folder runs they start when they end (tests; the app's stop).</summary>
+    public async Task WhenIdleAsync()
+    {
+        while (_background.Values.ToArray() is { Length: > 0 } tasks)
+        {
+            if (tasks.All(t => t.IsCompleted)) await Task.Delay(1); // ended: dropped from the list in a moment
+            else await Task.WhenAll(tasks);
+        }
+    }
 
     public string MemberFolder(long memberId) => Path.Combine(_dataRoot, "members", memberId.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
@@ -83,10 +92,12 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
 
     /// <summary>
     /// A trigger fired at a workflow member (called inside the bus's gate: it never waits for the run). The run starts in
-    /// the background with <paramref name="payload"/> as input; while one is going the fire is skipped and noted.
+    /// the background with <paramref name="payload"/> as input; while one is going (or waiting) the fire is skipped and noted, or,
+    /// with <paramref name="queueWhileBusy"/> (a folder trigger's FolderChange), queued: "queued", run when the member's run ends.
     /// </summary>
-    public TriggerFire FireWorkflow(MemberRef member, string source, JsonObject payload)
+    public TriggerFire FireWorkflow(MemberRef member, string source, JsonObject payload, bool queueWhileBusy = false)
     {
+        if (queueWhileBusy && QueueIfBusy(member.Id, source, payload) is { } queued) return queued;
         var fire = Start(member.Id, source, payload);
         return fire.Started
             ? new TriggerFire("fired", null, null, fire.RunId)
@@ -97,6 +108,12 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
     public WorkflowFireOutcome Start(long memberId, string trigger, JsonNode? input)
     {
         if (!TryClaim(memberId, trigger, out var release, out var skipped)) return skipped!;
+        return StartClaimed(memberId, trigger, input, release);
+    }
+
+    /// <summary>Starts a run in the background on a claim already held (<paramref name="release"/> gives it back when the run ends).</summary>
+    private WorkflowFireOutcome StartClaimed(long memberId, string trigger, JsonNode? input, Action release)
+    {
         long runId;
         try { runId = BeginMemberRun(memberId, trigger, input); }
         catch (Exception e) when (e is not OutOfMemoryException)
@@ -241,6 +258,8 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
             Track(run.Id, task);
             resumed.Add(run.Id);
         }
+        // Folder fires queued before the restart: they run now for a member with no run going or waiting, else when its run ends.
+        StartAllQueued();
         return resumed;
     }
 
@@ -261,7 +280,11 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
     private async Task SweepOnceAsync()
     {
         if (Interlocked.Exchange(ref _sweeping, 1) == 1) return;
-        try { await ResolveWaitsAsync(_stopping.Token); }
+        try
+        {
+            await ResolveWaitsAsync(_stopping.Token);
+            StartAllQueued(); // a fire held while its team was paused runs once the team is resumed
+        }
         catch (OperationCanceledException) { /* stopping */ }
         catch (Exception e) when (e is not OutOfMemoryException) { _log?.Invoke($"the waiting runs could not be checked: {e.Message}"); }
         finally { Volatile.Write(ref _sweeping, 0); }
@@ -282,6 +305,7 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
             {
                 _store.CloseOpenSteps(run.Id, WorkflowRunStatus.Interrupted);
                 _store.Finish(run.Id, WorkflowRunStatus.Interrupted, null, null, "interrupted: the member is no longer a workflow member");
+                if (run.MemberId is { } gone) StartQueued(gone); // drops the member's queued fires
                 continue;
             }
             WorkflowRunCheckpoint? checkpoint = null;
@@ -291,6 +315,7 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
             {
                 _store.CloseOpenSteps(run.Id, WorkflowRunStatus.Failed);
                 _store.Finish(run.Id, WorkflowRunStatus.Failed, null, null, "the run's wait could not be read from its checkpoint");
+                StartQueued(memberId);
                 continue;
             }
             WorkflowWaitResult? result = null;
@@ -342,6 +367,7 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
             _store.Finish(runId, WorkflowRunStatus.Interrupted, null, null,
                 "cancelled while it waited" + (run.WaitDeliverableId is { } w2 ? $" on deliverable {w2}; the deliverable goes on" : ""));
         }
+        if (run.MemberId is { } memberId) StartQueued(memberId);
         return true;
     }
 
@@ -564,12 +590,9 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
     {
         lock (_claim)
         {
-            var waiting = _running.ContainsKey(memberId) ? null : _store.WaitingRunOf(memberId);
-            if (_running.ContainsKey(memberId) || (waiting is not null && waiting.Id != resuming))
+            if (Busy(memberId, resuming) is { } reason)
             {
                 release = () => { };
-                var reason = waiting is null ? "a run of this member was going (one run at a time)"
-                    : $"a run of this member (workflow run {waiting.Id}) was waiting" + (waiting.WaitDeliverableId is { } w ? $" on deliverable {w}" : "") + " (one run at a time)";
                 skipped = note ? Skip(memberId, trigger, reason) : new WorkflowFireOutcome(false, null, reason);
                 return false;
             }
@@ -579,10 +602,95 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
             {
                 _running.TryRemove(memberId, out _);
                 gate.TrySetResult();
+                StartQueued(memberId); // the run ended (or parked: then its queued fires wait on)
             };
             skipped = null;
             return true;
         }
+    }
+
+    /// <summary>Under the claim lock: why the member cannot start a run now (a run going, or one waiting other than <paramref name="resuming"/>); null when it can.</summary>
+    private string? Busy(long memberId, long? resuming = null)
+    {
+        if (_running.ContainsKey(memberId)) return "a run of this member was going (one run at a time)";
+        var waiting = _store.WaitingRunOf(memberId);
+        if (waiting is null || waiting.Id == resuming) return null;
+        return $"a run of this member (workflow run {waiting.Id}) was waiting" + (waiting.WaitDeliverableId is { } w ? $" on deliverable {w}" : "") + " (one run at a time)";
+    }
+
+    // ------------------------------------------------------------------ folder fires queued while a run is going
+
+    /// <summary>
+    /// A folder trigger's fire while the member has a run going or waiting: merged into the member's queue (stored, so a restart keeps
+    /// it) and "queued" returned; null when the member is free (the fire starts its run as any fire does).
+    /// </summary>
+    private TriggerFire? QueueIfBusy(long memberId, string source, JsonObject payload)
+    {
+        lock (_claim)
+        {
+            if (Busy(memberId) is not { } reason) return null;
+            var queue = WorkflowFolderQueue.Merge(WorkflowFolderQueue.FromJson(_store.FolderQueue(memberId)), source, payload);
+            _store.SetFolderQueue(memberId, WorkflowFolderQueue.ToJson(queue));
+            var files = queue.First(e => e.Source == source).Files.Count;
+            return new TriggerFire("queued", null, $"queued: {reason}; {files} file(s) run when it ends");
+        }
+    }
+
+    /// <summary>Starts the queued folder fires of every member that has some and no run going or waiting.</summary>
+    private void StartAllQueued()
+    {
+        foreach (var memberId in _store.MembersWithFolderQueues()) StartQueued(memberId);
+    }
+
+    /// <summary>
+    /// The member's run ended: its first queued folder fire whose trigger is still there starts ONE run with the merged changes (the
+    /// rest wait for that run to end). A fire whose trigger was deleted or disabled is dropped, as is the whole queue of a member that is
+    /// no longer a workflow member; a fire of a paused or archived team stays queued. Nothing starts while a run is going or waiting.
+    /// </summary>
+    private void StartQueued(long memberId)
+    {
+        if (_stopping.IsCancellationRequested) return;
+        WorkflowFolderQueue.Entry next;
+        Action release;
+        try
+        {
+            lock (_claim)
+            {
+                var stored = _store.FolderQueue(memberId);
+                if (stored is null) return;
+                var queue = WorkflowFolderQueue.FromJson(stored);
+                if (_store.Member(memberId) is null)
+                {
+                    _store.SetFolderQueue(memberId, null);
+                    _log?.Invoke($"workflow member {memberId}: {queue.Count} queued folder fire(s) dropped: it is no longer a workflow member");
+                    return;
+                }
+                var held = false;
+                while (queue.Count > 0)
+                {
+                    var state = queue[0].TriggerId is { } tid ? _store.FolderFire(memberId, tid) : WorkflowRunStore.QueuedFire.Gone;
+                    if (state == WorkflowRunStore.QueuedFire.Live) break;
+                    if (state == WorkflowRunStore.QueuedFire.Held) { held = true; break; }
+                    _log?.Invoke($"workflow member {memberId}: the queued fire of {queue[0].Source} dropped: the trigger was deleted or disabled");
+                    queue.RemoveAt(0);
+                }
+                if (held || queue.Count == 0 || Busy(memberId) is not null)
+                {
+                    _store.SetFolderQueue(memberId, WorkflowFolderQueue.ToJson(queue));
+                    return;
+                }
+                next = queue[0];
+                queue.RemoveAt(0);
+                _store.SetFolderQueue(memberId, WorkflowFolderQueue.ToJson(queue));
+                if (!TryClaim(memberId, next.Source, out release, out _, note: false)) return; // not busy under this same lock: it holds
+            }
+        }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            Warn(memberId, null, null, e, "could not start its queued folder fires");
+            return;
+        }
+        StartClaimed(memberId, next.Source, next.Payload(), release);
     }
 
     /// <summary>A fire while a run was going: noted in the run list as a skipped run.</summary>

@@ -55,6 +55,10 @@ and say in plain words when it would fire ("every 5 minutes, starting now", "wee
 - `schedule` is a trigger's schedule: `every` (an interval of at least 10 seconds), `cron` (5 or 6 fields, with a
   timezone), `once` (a time), `event` (an integration watch) or `folder` (a folder and file pattern). Pick a kind the
   workflow's `trigger.accepts` lists.
+- A member runs one run at a time. An `every`, `cron` or `once` fire while its run is going, or waiting on a tell, is
+  skipped (a skipped run in its list). A `folder` fire then is queued instead: the trigger's changes are merged (each
+  file once, with its latest kind) and ONE run starts with them when the member's run ends, however it ends. The queue
+  is kept over an app restart; a queued fire is dropped if its trigger is deleted or turned off.
 - Turning a trigger on, or changing the schedule of one that is on, needs the person's yes in the window. Turning one
   off (`enabled: false`) needs none.
 

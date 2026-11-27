@@ -10,8 +10,12 @@ public interface IWorkflowMemberHost
 {
     bool IsWorkflowMember(long memberId);
 
-    /// <summary>Called inside the gate; starts the run in the background and returns at once (fired, or skipped with the reason).</summary>
-    TriggerFire FireWorkflow(MemberRef member, string source, JsonObject payload);
+    /// <summary>
+    /// Called inside the gate; starts the run in the background and returns at once (fired, or skipped with the reason). With
+    /// <paramref name="queueWhileBusy"/> (a folder trigger's change) a fire while the member's run is going or waiting is "queued"
+    /// instead: it runs, merged with the trigger's other queued changes, when that run ends.
+    /// </summary>
+    TriggerFire FireWorkflow(MemberRef member, string source, JsonObject payload, bool queueWhileBusy = false);
 }
 
 /// <summary>A workflow's tell as the bus sent it: the deliverable it roots, the instruction's seq, and who got it.</summary>
@@ -38,13 +42,15 @@ public sealed partial class BusEngine
     private TriggerFire? FireWorkflowMember(TriggerRow row, MemberRef member, DateTimeOffset now, JsonObject? payload)
     {
         if (WorkflowMembers is not { } workflows || !workflows.IsWorkflowMember(member.Id)) return null;
+        // A folder change is queued while the member's run goes on; every/cron/once (and Run now) are skipped.
+        var queue = payload is not null && row.Schedule.Kind == Yawble.Core.Triggers.TriggerKinds.Folder;
         payload ??= new JsonObject
         {
             ["triggerId"] = row.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), // TriggerFired declares it a string
             ["kind"] = row.Schedule.Kind,
             ["firedAt"] = now.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"),
         };
-        var fire = workflows.FireWorkflow(member, TriggerSourcePrefix + row.Id, payload);
+        var fire = workflows.FireWorkflow(member, TriggerSourcePrefix + row.Id, payload, queue);
         // Routine, at debug, with the workflow run it started (or recorded as skipped).
         Logs.Diag.Debug("workflows", $"trigger {row.Id} ({row.Name}) {fire.Outcome} workflow member {member.Qualified}"
             + (fire.WorkflowRunId is { } id ? $" (workflow run {id})" : "") + (fire.Reason is { } r ? ": " + r : ""),
