@@ -190,7 +190,7 @@ public static class CompanionTools
             "deliverable_close" => $"Close deliverable #{Text(args, "deliverable")} of team {team} without declaring it complete" + (Text(args, "reason") is { } r ? $": {r}" : "") + ".",
             "backup_now" => "Make a backup of the app's data now.",
             "host_task_run" => $"Ask to run host task {Text(args, "task")} of team {team} on this computer: {Text(args, "reason")}. It then waits for your Run once / Always in Needs you like an agent's request, unless it has a standing approval.",
-            "git_merge_team" => $"Merge team {team}'s branch into the base branch of its {repo} repository.",
+            "git_merge_team" => $"Merge team {team}'s branch into the base branch of its {repo} repository. The team's branches on origin whose work is then all in the base branch are deleted there (they stay in the team repository).",
             "backup_restore" => $"Restore the backup {Text(args, "backup")}: it is staged and replaces the app's data when the app restarts.",
             "backlog_dispatch" => $"Make a new team {Text(args, "new_team")} with " + (Text(args, "manager_cli") is { } dispatchCli ? $"a {dispatchCli} Manager" : "the default Manager and members (Settings > Teams)") +
                                   (Text(args, "repo_url") is { } du ? $" (cloning {ConciergeReadTools.OriginForDisplay(du)})" : Text(args, "repo_path") is { } dp ? $" (on the folder {dp})" : "") +

@@ -455,7 +455,10 @@ public sealed partial class TeamRepos
         var how = outcome == "fast-forward" ? "fast-forwarded" : "merged with a merge commit";
         var where = hasOrigin ? $"{repo.BaseBranch} and origin's {repo.BaseBranch}" : repo.BaseBranch;
         _log?.Invoke($"team {team}: {teamBranch} {how} into {repo.BaseBranch} at {Short(merged)}");
-        return await new TeamGitResult(outcome, $"{teamBranch} {how} into {where}: now {Short(merged)}.", true, merged)
+        // The team's branches on origin have nothing left that the base lacks: they are deleted there.
+        var tidied = hasOrigin ? await DeleteMergedOnOriginLockedAsync(team, path, repo.BaseBranch, ct) : [];
+        var gone = tidied.Count == 0 ? "" : $" Deleted on origin, now merged: {string.Join(", ", tidied)}.";
+        return await new TeamGitResult(outcome, $"{teamBranch} {how} into {where}: now {Short(merged)}.{gone}", true, merged)
             .WithCommitsAsync(Previews, path, start, teamSha, ct);
     }
 

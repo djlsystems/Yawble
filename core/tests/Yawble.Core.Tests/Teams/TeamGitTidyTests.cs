@@ -305,7 +305,7 @@ public class TeamGitTidyTests
     }
 
     [Fact]
-    public async Task Publish_FastForwardsAnOriginMemberBranchBehindTheTeamsCopy_ButNeverForces()
+    public async Task Publish_DeletesAMemberBranchOnOriginWhoseWorkIsInTheBase_AndNeverForcesADivergedOne()
     {
         using var f = new TeamsFixture();
         var r = await RigAsync(f);
@@ -314,15 +314,16 @@ public class TeamGitTidyTests
         Assert.Contains("members/alpha/ada", (await f.Repos.PublishAsync(r.Ada, Ct)).Branches);
 
         // Her work is merged into trunk with one more commit, and trunk reaches origin; the team's copy of her branch is
-        // brought up to trunk (as a sync does). Every commit is on origin already, but origin's members/alpha/ada is behind.
+        // brought up to trunk (as a sync does). Every commit of hers is in origin's trunk: the branch says nothing there.
         AgentGit.Host(r.Picked, [.. Id, "merge", "-q", "--ff-only", adaWork]);
         var next = PersonCommit(r.Picked, "next.txt", "next");
         AgentGit.Host(r.Picked, "push", "-q", "origin", "trunk");
         AgentGit.Host(r.Picked, "update-ref", "refs/heads/members/alpha/ada", next, adaWork);
 
         var report = await f.Repos.PublishAsync(r.Ada, Ct);
-        Assert.Contains("members/alpha/ada", report.Branches);
-        Assert.Equal(next, Rev(r.Bare, "refs/heads/members/alpha/ada"));
+        Assert.DoesNotContain("members/alpha/ada", report.Branches);
+        Assert.DoesNotContain("refs/heads/members/alpha/ada", AgentGit.Host(r.Bare, "for-each-ref", "--format=%(refname)"));
+        Assert.Equal(next, Rev(r.Picked, "refs/heads/members/alpha/ada")); // the team repository keeps it
 
         // A team copy that does not contain origin's (diverged) is not pushed: that is Realign's, with the person's yes.
         var tree = AgentGit.Host(r.Picked, "rev-parse", "trunk^{tree}");

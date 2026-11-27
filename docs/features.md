@@ -751,6 +751,11 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
 - When the team repository has an origin, branches are pushed with your own git setup at each run's end. Pushes are
   never forced. The origin can be on any git host, or there can be none: a team repository with no origin keeps
   every branch on this computer.
+- A team's own branches (`team/<team>`, `members/<team>/<name>`) are deleted on origin once their work is all in
+  origin's base branch: right after **Merge**, and at a run's end when the merge happened somewhere else (a pull
+  request merged on the host). They stay in the team repository and the members' clones, are not pushed again while
+  they add nothing, and return to origin with the team's next new work. A branch with work the base lacks, another
+  team's branch and the base branch are never deleted this way. The log records each deleted branch's commit.
 - Everything above works with any git remote, or none: branches, fetch, sync, merge, push, delete and Tidy are plain
   git. What depends on the host is only the web links and pull requests below.
 - Each repository has a **provider**, detected from its origin: GitHub, GitLab (gitlab.com, or a host with "gitlab" in

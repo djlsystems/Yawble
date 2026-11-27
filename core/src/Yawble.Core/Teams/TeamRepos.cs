@@ -901,7 +901,9 @@ public sealed partial class TeamRepos
     /// Pushes every branch of the member's team repository that origin does not have yet: members' branches and the
     /// team branch, never the base branch or main/master. A member branch origin has behind the team's copy (its commits
     /// reached origin through another branch, a merge into main) is fast-forwarded too. Called after each run's fetch-back (and so after the
-    /// Manager's run in which it declared the deliverable complete). Never forced; a refused branch does not stop the
+    /// Manager's run in which it declared the deliverable complete). The team's own branches that add nothing to origin's
+    /// base branch any more (their work is merged) are not pushed, and are deleted on origin
+    /// (<see cref="DeleteMergedOnOriginLockedAsync"/>). Never forced; a refused branch does not stop the
     /// others; the first transport failure stops the push and names what did not go. Never throws for git: a failed
     /// push is reported, never the run's failure (a transport problem, not an agent fault).
     /// </summary>
@@ -956,8 +958,16 @@ public sealed partial class TeamRepos
                         && (await Git.TryRunAsync(repo.Path, ["merge-base", "--is-ancestor", "refs/heads/" + branch, "refs/remotes/origin/" + repo.BaseBranch], ct)).ExitCode == 0)
                         isAhead = false;
                 }
+                // The team's own branch whose work is all in origin's base (merged, or only the app's sync merges on top)
+                // says nothing on origin: it is not pushed, and its copy there is deleted below.
+                if (isAhead && IsTeamsOwnBranch(member.Team, branch)
+                    && await RevAsync(repo.Path, "refs/remotes/origin/" + repo.BaseBranch, ct) is { } originBase
+                    && await RevAsync(repo.Path, "refs/heads/" + branch, ct) is { } tip
+                    && await AddsNothingToAsync(repo.Path, tip, originBase, ct))
+                    isAhead = false;
                 if (isAhead) unpublished.Add(branch);
             }
+            await DeleteMergedOnOriginLockedAsync(member.Team, repo.Path, repo.BaseBranch, ct);
             if (unpublished.Count == 0) return TeamPublishReport.Nothing;
 
             var published = new List<string>();

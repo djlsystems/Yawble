@@ -460,6 +460,7 @@ onMounted(() => { void loadChoices(); void load(); });
         <button v-if="canMerge && !confirming" class="primary" data-test="git-merge" :disabled="!!busy" @click="startMerge">Merge to {{ status.baseBranch }}…</button>
         <span v-if="confirming" class="confirm" data-test="git-merge-confirm">
           Merge {{ status.teamBranch }} into {{ status.baseBranch }}<template v-if="status.origin"> and push {{ status.baseBranch }} to origin</template>?
+          <span v-if="status.origin" class="muted" data-test="git-merge-tidies">The team's merged branches are then deleted on origin; they stay on this computer.</span>
           <button class="primary" data-test="git-merge-yes" :disabled="!!busy || (!!preview && !preview.data && !preview.error) || (!!previewView && !previewView.canMerge)"
             @click="act('git.merge', 'merge')"><BusyLabel :busy="busy === 'merge'" text="Merging…">Merge</BusyLabel></button>
           <button data-test="git-merge-cancel" @click="cancelMerge">Cancel</button>
