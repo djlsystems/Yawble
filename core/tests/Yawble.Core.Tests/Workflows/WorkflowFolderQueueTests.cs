@@ -69,6 +69,54 @@ public class WorkflowFolderQueueTests
         Assert.Equal(("gone.jpg", "added"), q[0].Files[^1]); // added once more: a new file at the end
     }
 
+    private static string[] Paths(string prefix, int from, int count) => Enumerable.Range(from, count).Select(i => $"{prefix}{i}.jpg").ToArray();
+
+    [Fact]
+    public void Merge_PastTheCap_KeepsTheCap_CountsTheRest_AndWarnsOnce()
+    {
+        var warnings = new List<string>();
+        var cap = WorkflowFolderQueue.MaxFilesPerTrigger;
+        var q = WorkflowFolderQueue.Merge([], "trigger:1", WorkflowPayloads.FolderChange("C:/in", Paths("p", 0, cap + 5), [], []), warnings.Add);
+        Assert.Equal(cap, q[0].Files.Count);
+        Assert.Equal(5, q[0].Dropped);
+        var warning = Assert.Single(warnings);
+        Assert.Contains("trigger:1", warning);
+        Assert.Contains($"{cap} files: 5 more file(s) dropped", warning);
+
+        // Full: a change to a kept file still lands, a removal makes room for one more, further new files are only counted.
+        q = WorkflowFolderQueue.Merge(q, "trigger:1", WorkflowPayloads.FolderChange("C:/in", [], ["p1.jpg"], ["p2.jpg"]), warnings.Add);
+        Assert.Equal(cap - 1, q[0].Files.Count); // p1.jpg added, then removed: it left the fire
+        Assert.Equal(("p2.jpg", "added"), q[0].Files[1]);
+        q = WorkflowFolderQueue.Merge(q, "trigger:1", WorkflowPayloads.FolderChange("C:/in", Paths("late", 0, 3), [], []), warnings.Add);
+        Assert.Single(warnings);
+        Assert.Equal(cap, q[0].Files.Count); // late0.jpg took the free place
+        Assert.Equal(7, q[0].Dropped);
+        Assert.DoesNotContain(q[0].Files, f => f.Path == "p1.jpg");
+        Assert.Equal(("late0.jpg", "added"), q[0].Files[^1]);
+
+        q = WorkflowFolderQueue.FromJson(WorkflowFolderQueue.ToJson(q)); // as stored: the count is kept
+        Assert.Equal(7, q[0].Dropped);
+    }
+
+    [Fact]
+    public void Merge_OfManyPaths_StaysCorrect()
+    {
+        var q = WorkflowFolderQueue.Merge([], "trigger:1", WorkflowPayloads.FolderChange("C:/in", Paths("f", 0, 6000), [], Paths("old", 0, 2000)));
+        q = WorkflowFolderQueue.Merge(q, "trigger:2", WorkflowPayloads.FolderChange("C:/other", Paths("f", 0, 10), [], []));
+        // Later: every other new file finished writing (changed), the first thousand were removed again, the old ones were removed.
+        q = WorkflowFolderQueue.Merge(q, "trigger:1", WorkflowPayloads.FolderChange("C:/in", Paths("f", 6000, 1000),
+            [.. Paths("f", 0, 1000), .. Paths("old", 0, 2000)], Enumerable.Range(0, 2500).Select(i => $"f{1000 + i * 2}.jpg").ToArray()));
+
+        var files = q[0].Files;
+        Assert.Equal(5000 + 2000 + 1000, files.Count);
+        Assert.Equal(files.Count, files.Select(f => f.Path).Distinct().Count());
+        Assert.Equal(Paths("f", 1000, 5000).Concat(Paths("old", 0, 2000)).Concat(Paths("f", 6000, 1000)), files.Select(f => f.Path)); // first-seen order
+        Assert.All(files.Where(f => f.Path.StartsWith('f')), f => Assert.Equal("added", f.Kind));
+        Assert.All(files.Where(f => f.Path.StartsWith("old", StringComparison.Ordinal)), f => Assert.Equal("removed", f.Kind));
+        Assert.Equal(10, q[1].Files.Count);
+        Assert.Equal(0, q[0].Dropped);
+    }
+
     // ------------------------------------------------------------------ a run going (the fake engine)
 
     private sealed class World : IAsyncDisposable

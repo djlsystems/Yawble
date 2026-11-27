@@ -639,7 +639,8 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
         lock (_claim)
         {
             if (Busy(memberId) is not { } reason) return null;
-            var queue = WorkflowFolderQueue.Merge(WorkflowFolderQueue.FromJson(_store.FolderQueue(memberId)), source, payload);
+            var queue = WorkflowFolderQueue.Merge(WorkflowFolderQueue.FromJson(_store.FolderQueue(memberId)), source, payload,
+                warn: message => _log?.Invoke($"workflow member {memberId}: {message}"));
             _store.SetFolderQueue(memberId, WorkflowFolderQueue.ToJson(queue));
             var files = queue.First(e => e.Source == source).Files.Count;
             return new TriggerFire("queued", null, $"queued: {reason}; {files} file(s) run when it ends");
@@ -700,6 +701,9 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
                     return;
                 }
                 next = queue[0];
+                if (next.Dropped > 0)
+                    _log?.Invoke($"workflow member {memberId}: the queued fire of {next.Source} runs with {next.Files.Count} file(s); "
+                        + $"{next.Dropped} more were dropped over the limit of {WorkflowFolderQueue.MaxFilesPerTrigger}");
                 queue.RemoveAt(0);
                 _store.SetFolderQueue(memberId, WorkflowFolderQueue.ToJson(queue));
                 (release, free) = ClaimHeld(memberId); // not busy under this same lock
