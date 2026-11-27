@@ -273,7 +273,7 @@ describe('edits', () => {
     expect(FILE_OPERATIONS.map((o) => o.type).sort()).toEqual(fileTypes);
   });
 
-  it('Move, Copy and List files: their labels and blank steps (core card 680)', () => {
+  it('Move, Copy and List files: their labels and blank steps', () => {
     const t = (type: string) => STEP_TYPES.find((s) => s.type === type);
     expect(t('file.move')).toEqual({ type: 'file.move', kind: 'file', label: 'Move a file', template: { type: 'file.move', path: '', to: '', next: null } });
     expect(t('file.copy')).toEqual({ type: 'file.copy', kind: 'file', label: 'Copy a file', template: { type: 'file.copy', path: '', to: '', next: null } });

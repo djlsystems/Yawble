@@ -283,7 +283,7 @@ describe('catalog helpers', () => {
     expect(ioOutText(stepIO(alias, INBOX_SMS_ALERT.steps![0]!))).toBe('EmailList → res');
   });
 
-  it('Move, Copy and List files: their in and out (core card 680)', () => {
+  it('Move, Copy and List files: their in and out', () => {
     const doc: WorkflowDocument = { steps: [
       { id: 'mv', type: 'file.move', path: 'a', to: 'b', into: 'final', next: null },
       { id: 'cp', type: 'file.copy', path: 'a', to: 'b', next: null },
