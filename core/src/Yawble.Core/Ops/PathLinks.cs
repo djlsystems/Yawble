@@ -40,12 +40,26 @@ internal static class PathLinks
             // Something is there that cannot be read: treat it as a link only when it says it is one.
             return LinkTarget(path) is not null;
         }
-        return (attributes & FileAttributes.ReparsePoint) != 0 || LinkTarget(path) is not null;
+        // Only a reparse point can be a link, so the target is read only for those.
+        return (attributes & FileAttributes.ReparsePoint) != 0 && CountsAsLink(attributes, LinkTarget(path));
     }
 
-    /// <summary>Whether an entry a folder walk meets is a link or junction (from its attributes, no extra call).</summary>
-    public static bool IsLink(ref System.IO.Enumeration.FileSystemEntry entry) =>
-        (entry.Attributes & FileAttributes.ReparsePoint) != 0 || SeenAsLink.Value?.Invoke(entry.ToFullPath()) == true;
+    /// <summary>
+    /// Whether an entry a folder walk meets is a link or junction. Its attributes come free with the walk; only a reparse
+    /// point costs an extra call, to read its link target.
+    /// </summary>
+    public static bool IsLink(ref System.IO.Enumeration.FileSystemEntry entry)
+    {
+        if (SeenAsLink.Value?.Invoke(entry.ToFullPath()) == true) return true;
+        return (entry.Attributes & FileAttributes.ReparsePoint) != 0 && CountsAsLink(entry.Attributes, LinkTarget(entry.ToFullPath()));
+    }
+
+    /// <summary>
+    /// A link is a path with a link target: a symbolic link, a junction or a mount point, a dangling one too. Other reparse
+    /// points (OneDrive Files On-Demand files and folders, deduplicated files) have none: they are plain files and folders.
+    /// </summary>
+    internal static bool CountsAsLink(FileAttributes attributes, string? linkTarget) =>
+        (attributes & FileAttributes.ReparsePoint) != 0 && linkTarget is not null;
 
     private static string? LinkTarget(string path)
     {

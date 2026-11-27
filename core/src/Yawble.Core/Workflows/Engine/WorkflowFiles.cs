@@ -212,7 +212,8 @@ internal sealed class WorkflowFiles
             {
                 RecurseSubdirectories = recursive,
                 IgnoreInaccessible = true,
-                AttributesToSkip = FileAttributes.ReparsePoint | FileAttributes.Hidden | FileAttributes.System,
+                // Not ReparsePoint: OneDrive files and folders are reparse points but not links; IsLink below tells them apart.
+                AttributesToSkip = FileAttributes.Hidden | FileAttributes.System,
             })
         {
             ShouldIncludePredicate = (ref System.IO.Enumeration.FileSystemEntry e) => !e.IsDirectory && !Ops.PathLinks.IsLink(ref e),
