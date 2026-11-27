@@ -6,7 +6,8 @@ namespace Yawble.Core.Workflows.Running;
 /// <summary>
 /// A workflow member's folder fires that came while one of its runs was going or waiting on a tell: one entry per trigger
 /// (its source, trigger:&lt;id&gt;), in the order they first came, each with the merged file list. A file seen in more than
-/// one fire is listed once, with the kind of its latest fire (added, removed or changed). Kept as JSON in the store
+/// one fire is listed once: first seen added it stays added (added then removed: dropped), seen again as added after changed or
+/// removed it is changed, otherwise it has the kind of its latest fire (see <c>Then</c>). Kept as JSON in the store
 /// (<see cref="WorkflowRunStore.FolderQueue"/>), so it outlives a restart.
 /// </summary>
 public static class WorkflowFolderQueue
@@ -14,7 +15,7 @@ public static class WorkflowFolderQueue
     public const string Added = "added", Removed = "removed", Changed = "changed";
     private static readonly string[] Kinds = [Added, Removed, Changed];
 
-    /// <summary>One trigger's queued change: the folder (the latest fire's root) and each file with its latest kind, in first-seen order.</summary>
+    /// <summary>One trigger's queued change: the folder (the latest fire's root) and each file with its merged kind, in first-seen order.</summary>
     public sealed record Entry(string Source, string Root, IReadOnlyList<(string Path, string Kind)> Files)
     {
         /// <summary>The run's input: FolderChange { root, added, removed, changed }.</summary>
@@ -44,7 +45,8 @@ public static class WorkflowFolderQueue
                 if (node is not JsonValue v || !v.TryGetValue<string>(out var path)) continue;
                 var i = files.FindIndex(f => string.Equals(f.Path, path, StringComparison.Ordinal));
                 if (i < 0) files.Add((path, kind));
-                else files[i] = (path, kind);
+                else if (Then(files[i].Kind, kind) is { } merged) files[i] = (path, merged);
+                else files.RemoveAt(i);
             }
         }
         var root = payload["root"] is JsonValue r && r.TryGetValue<string>(out var s) ? s : at < 0 ? "" : list[at].Root;
@@ -53,6 +55,19 @@ public static class WorkflowFolderQueue
         else list[at] = entry;
         return list;
     }
+
+    /// <summary>
+    /// A queued file's kind once a later fire saw it as <paramref name="later"/>; null: the file leaves the fire. A file the queue
+    /// has as added stays added (a run never saw it: added then changed is added), and added then removed leaves the fire. A file
+    /// the queue has as changed or removed was known to a run, so added again is changed. Otherwise the later kind.
+    /// </summary>
+    private static string? Then(string queued, string later) => (queued, later) switch
+    {
+        (Added, Removed) => null,
+        (Added, _) => Added,
+        (_, Added) => Changed,
+        _ => later,
+    };
 
     /// <summary>
     /// An entry taken off the queue whose run could not start, put back at the head: what came for its trigger since is merged onto it
