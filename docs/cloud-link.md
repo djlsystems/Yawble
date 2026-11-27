@@ -50,7 +50,8 @@ with **Not now** only: it says to install it in the Yawble window on the compute
 
 A team's environment variables show their names only. Each value reads **set on the computer** and never leaves it,
 for a full viewer and a Visitor alike. A full viewer can add a variable, remove one, or type a new value over a hidden
-one; a variable saved untouched keeps its value.
+one; a variable saved untouched keeps its value. A value the computer itself cannot read (its data came from another
+computer) reads **enter this value again** instead; a full viewer can type it again.
 
 Calls from a viewer run as that viewer. Every remote call that changes something, and every refused call, is
 written to `cloud-link-audit.log` in the app's data folder, with the time, the viewer and the method.

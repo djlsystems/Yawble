@@ -182,7 +182,7 @@ public interface IMemberDirectory
 }
 
 /// <summary>The bus's members table (0002): cli is 'claude' or 'grok'.</summary>
-public sealed class SqliteMemberDirectory(string connectionString, Agents.Profiles.IAgentResolver? agents = null) : IMemberDirectory
+public sealed class SqliteMemberDirectory(string connectionString, Agents.Profiles.IAgentResolver? agents = null, Teams.TeamEnvVault? envVault = null) : IMemberDirectory
 {
     private readonly Agents.Profiles.IAgentResolver _agents = agents ?? Agents.Profiles.AgentProfileStore.ForReading(connectionString);
 
@@ -203,7 +203,7 @@ public sealed class SqliteMemberDirectory(string connectionString, Agents.Profil
         {
             // members.cli is a built-in's id or a custom agent's name: the custom one brings its argv changes and default model.
             var agent = Agents.Profiles.AgentResolvers.Resolve(_agents, r.GetString(3));
-            list.Add(new LaunchMember(r.GetInt64(0), r.GetString(1), r.GetString(2), agent.Cli, Teams.TeamEnv.Parse(r.IsDBNull(4) ? null : r.GetString(4)),
+            list.Add(new LaunchMember(r.GetInt64(0), r.GetString(1), r.GetString(2), agent.Cli, Teams.TeamEnvVault.Read(envVault, r.IsDBNull(4) ? null : r.GetString(4)).Values,
                 r.IsDBNull(5) ? null : r.GetString(5), agent.RecordedAgent, agent.Argv, agent.Custom ? agent.DefaultModel : null,
                 AllowLocalhost: !r.IsDBNull(6) && r.GetInt64(6) != 0));
         }

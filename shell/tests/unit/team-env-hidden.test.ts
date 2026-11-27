@@ -3,11 +3,12 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import type { TeamSummary, YawbleApi } from '../../src/shared/api';
 import TeamManageDialog from '../../src/renderer/src/components/TeamManageDialog.vue';
-import { ENV_HIDDEN, ENV_HIDDEN_HINT, envEntries, envRows } from '../../src/renderer/src/teamEnv';
+import { ENV_HIDDEN, ENV_HIDDEN_HINT, ENV_UNREADABLE, ENV_UNREADABLE_HINT, envEntries, envRows } from '../../src/renderer/src/teamEnv';
 
 // Team settings > Environment over the Cloud Link: the computer sends each name with the hidden marker in place of
 // its value. The view shows "set on the computer", and a save sends the marker back for a value it never saw, so
-// the computer keeps the real one. Fakes only.
+// the computer keeps the real one. A value the computer cannot read (saved on another computer) arrives with the
+// unreadable marker: the view asks for it again, and a save leaves it as it is until a new value is typed. Fakes only.
 
 const team = { id: 4, name: 'payments', members: 1, running: 0, queued: 0, repoPath: null } as unknown as TeamSummary;
 
@@ -79,6 +80,31 @@ describe('team environment values hidden from a Cloud Link viewer', () => {
       { name: 'REGISTRY_KEY', value: ENV_HIDDEN }, // the computer keeps the value it has
       { name: 'API_BASE', value: 'http://localhost:5000' },
     ]);
+  });
+
+  it('a value the computer cannot read is an empty box that asks for it again, with a note; saved untouched it stays as it is', async () => {
+    expect(envRows({ LOST: ENV_UNREADABLE })).toEqual([{ name: 'LOST', value: '', hidden: false, unreadable: true }]);
+    const { api, calls } = fakeApi({ LOST: ENV_UNREADABLE, ALSO_LOST: ENV_UNREADABLE, API_BASE: 'http://localhost:5000' });
+    const w = await openEnv(api);
+    expect(input(w, 'env-value-0').value).toBe('');
+    expect(input(w, 'env-value-0').placeholder).toBe(ENV_UNREADABLE_HINT);
+    expect(w.get('[data-test=env-rows]').html()).not.toContain(ENV_UNREADABLE);
+    expect(w.get('[data-test=env-unreadable]').text()).toContain('Enter them again');
+
+    await w.get('[data-test=env-value-0]').setValue('entered-again');
+    expect(w.find('[data-test=env-unreadable]').exists()).toBe(true); // one is still missing
+    await w.get('[data-test=env-save]').trigger('click');
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'teams.setEnv')!.params.entries).toEqual([
+      { name: 'LOST', value: 'entered-again' },
+      { name: 'ALSO_LOST', value: ENV_UNREADABLE }, // the computer leaves it as it is
+      { name: 'API_BASE', value: 'http://localhost:5000' },
+    ]);
+  });
+
+  it('with every value readable there is no note', async () => {
+    const w = await openEnv(fakeApi({ API_BASE: 'http://localhost:5000' }).api);
+    expect(w.find('[data-test=env-unreadable]').exists()).toBe(false);
   });
 
   it('in the window on the computer the values are shown and saved as they are', async () => {

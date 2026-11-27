@@ -127,7 +127,7 @@ public sealed partial class BusEngine
     /// <summary>The deleted teams whose folders are being removed now, by name. Under the gate.</summary>
     private readonly HashSet<string> _teamFoldersGoing = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Removes a deleted team's folder (tests set a fake that waits).</summary>
+    /// <summary>Removes a folder and everything in it: a deleted team's folder, a reset member's working copy (tests set a fake that waits).</summary>
     internal Action<string> RemoveFolder { get; set; } = DeleteTree;
 
     /// <summary>Under the gate: refuses a new team the name of one whose folder is still being removed.</summary>
@@ -148,27 +148,36 @@ public sealed partial class BusEngine
         Directory.Delete(folder, recursive: true);
     }
 
+    /// <summary>
+    /// The team's environment variables: every name with its value. A value this computer cannot read (its key is not
+    /// in this computer's credential store) comes as <see cref="TeamEnv.UnreadableValue"/>.
+    /// </summary>
     public Task<IReadOnlyDictionary<string, string>> TeamEnvAsync(string team, CancellationToken ct = default) =>
-        WithGate(() => TeamEnv.Parse(_store.TeamEnvJson(TeamId(team))), ct);
+        WithGate(() => TeamEnvVault.Read(_options.EnvVault, _store.TeamEnvJson(TeamId(team))).Shown, ct);
 
     /// <summary>Replaces the team's environment variables (whole). Refused, with every problem named, when any is invalid.</summary>
     /// <param name="hiddenValues">The caller saw the values hidden (a Cloud Link viewer): an entry that still holds
     /// <see cref="TeamEnv.HiddenValue"/> keeps its stored value (<see cref="TeamEnv.KeepHidden"/>).</param>
+    /// <remarks>The values are stored sealed (<see cref="TeamEnvVault"/>). An entry that holds
+    /// <see cref="TeamEnv.UnreadableValue"/> leaves the stored, unreadable value of that name as it is.</remarks>
     public Task<IReadOnlyDictionary<string, string>> SetTeamEnvAsync(string team, IReadOnlyList<KeyValuePair<string, string>> entries, CancellationToken ct = default,
         bool hiddenValues = false) =>
         WithGate(() =>
         {
             var id = TeamId(team);
+            var stored = _store.TeamEnvJson(id);
             if (hiddenValues)
             {
-                var (kept, missing) = TeamEnv.KeepHidden(entries, TeamEnv.Parse(_store.TeamEnvJson(id)));
+                var (kept, missing) = TeamEnv.KeepHidden(entries, TeamEnvVault.Read(_options.EnvVault, stored).Shown);
                 if (missing.Count != 0) throw new BusRefusal("bad_env", "nothing was saved: " + string.Join("; ", missing));
                 entries = kept;
             }
             var problems = TeamEnv.Problems(entries);
             if (problems.Count != 0) throw new BusRefusal("bad_env", "nothing was saved: " + string.Join("; ", problems));
-            _store.SetTeamEnv(id, TeamEnv.Serialize(entries));
-            return TeamEnv.Parse(_store.TeamEnvJson(id));
+            var (json, unsealed) = TeamEnvVault.Write(_options.EnvVault, entries, stored);
+            if (json is null) throw new BusRefusal("bad_env", "nothing was saved: " + string.Join("; ", unsealed));
+            _store.SetTeamEnv(id, json);
+            return TeamEnvVault.Read(_options.EnvVault, _store.TeamEnvJson(id)).Shown;
         }, ct);
 
     /// <summary>
@@ -229,6 +238,7 @@ public sealed partial class BusEngine
             var what = new List<string>();
             if (_active.Values.Any(a => a.Context.Member.Id == m.Id)) what.Add("is running");
             if (HasSession(m.Id)) what.Add("has a terminal session");
+            if (_membersResetting.Contains(m.Id)) what.Add("is being reset");
             var waiting = unstarted.Count(p => string.Equals(p.Subscriber, m.Qualified, StringComparison.OrdinalIgnoreCase));
             if (waiting > 0) what.Add($"has {waiting} instruction{(waiting == 1 ? "" : "s")} waiting");
             if (what.Count > 0) working.Add($"{m.Name} {string.Join(" and ", what)}");

@@ -5,6 +5,7 @@ import App from '../../src/renderer/src/App.vue';
 import type { CoreEvent, Conversation, ConversationSummary, YawbleApi } from '../../src/shared/api';
 import { renderMarkdown } from '../../src/renderer/src/markdown';
 import ChatMessage from '../../src/renderer/src/components/ChatMessage.vue';
+import { forgetDrafts } from '../../src/renderer/src/conciergeDrafts';
 
 // The chat-first window: the Concierge is home, chats are listed in the sidebar, a turn's reply streams in.
 function fakeCore() {
@@ -45,7 +46,7 @@ function fakeCore() {
 }
 
 describe('the Concierge', () => {
-  beforeEach(() => { try { localStorage.clear(); } catch { /* none */ } });
+  beforeEach(() => { forgetDrafts(); try { localStorage.clear(); } catch { /* none */ } });
 
   it('starts at a new chat, sends with the agent and the team in focus, streams the reply and lists the chat', async () => {
     const core = fakeCore();
@@ -84,6 +85,54 @@ describe('the Concierge', () => {
     for (let i = 0; i < 20 && w.findAll('[data-test=chat-answer]').at(-1)?.text() !== 'All quiet.'; i++) await flushPromises();
     expect(w.findAll('[data-test=chat-answer]').at(-1)?.text()).toBe('All quiet.');
     expect(w.find('[data-test=composer-send]').exists()).toBe(true);
+  });
+
+  it('keeps the unsent text while the person looks at another page, and empties the box on Clear or Escape twice', async () => {
+    const core = fakeCore();
+    const w = mount(App, { props: { api: core.api, pollMs: 60_000 } });
+    await flushPromises();
+    await flushPromises();
+    const box = () => w.get('[data-test=composer-text]');
+    const typed = () => (box().element as HTMLTextAreaElement).value;
+    expect(w.find('[data-test=composer-clear]').exists()).toBe(false);
+
+    await box().setValue('Ask payments to');
+    await w.get('[data-test=nav-teams]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=composer-text]').exists()).toBe(false);
+    await w.get('[data-test=nav-concierge]').trigger('click');
+    await flushPromises();
+    expect(typed()).toBe('Ask payments to');
+
+    // Clear empties the box, and the text does not come back.
+    await w.get('[data-test=composer-clear]').trigger('click');
+    expect(typed()).toBe('');
+    expect(w.find('[data-test=composer-clear]').exists()).toBe(false);
+    await w.get('[data-test=nav-teams]').trigger('click');
+    await w.get('[data-test=nav-concierge]').trigger('click');
+    await flushPromises();
+    expect(typed()).toBe('');
+
+    // One Escape leaves the text; a key in between starts over; two in a row empty the box.
+    await box().setValue('Never mind');
+    await box().trigger('keydown', { key: 'Escape' });
+    expect(typed()).toBe('Never mind');
+    await box().trigger('keydown', { key: 'a' });
+    await box().trigger('keydown', { key: 'Escape' });
+    expect(typed()).toBe('Never mind');
+    await box().trigger('keydown', { key: 'Escape' });
+    expect(typed()).toBe('');
+
+    // A sent message leaves nothing behind.
+    await box().setValue('What is payments doing?');
+    await box().trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+    await flushPromises();
+    expect(typed()).toBe('');
+    await w.get('[data-test=nav-teams]').trigger('click');
+    await w.get('[data-test=nav-concierge]').trigger('click');
+    await flushPromises();
+    expect(typed()).toBe('');
   });
 
   it('asks the Concierge about the team in view', async () => {

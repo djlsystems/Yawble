@@ -137,7 +137,7 @@ public sealed class LaunchWiring : IAsyncDisposable
         // Paths are canonicalised (symlinks resolved) before they are compared or handed to the sandbox.
         var agentDefaults = new Agents.AgentDefaultsStore(connectionString);
         var modelSettings = Agents.CliModelSettings.ForThisComputer();
-        var launcher = new SandboxLauncher(host, new SqliteMemberDirectory(connectionString),
+        var launcher = new SandboxLauncher(host, new SqliteMemberDirectory(connectionString, envVault: new Teams.TeamEnvVault(credentials.Store, log)),
             new PolicyStore(connectionString, canonicalize: HostPathCanonicalizer.Canonicalize),
             // Each CLI's own sign-in on this host; the app's credential store is not a source for runs.
             new HostSignInModes(), new GatewayRunFactory(gatewayHost), backend,
