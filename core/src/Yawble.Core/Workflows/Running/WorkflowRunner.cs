@@ -35,6 +35,7 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
     private readonly IWorkflowRunEngine _engine;
     private readonly string _dataRoot;
     private readonly Func<long, IReadOnlyList<string>> _grantedFolders;
+    private readonly Func<string, string?> _teamDocuments;
     private readonly Action<string>? _log;
     private readonly TimeProvider _clock;
     private readonly ConcurrentDictionary<long, Task> _running = new();
@@ -44,9 +45,12 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
 
     /// <param name="dataRoot">Where members' data folders (members/&lt;id&gt;), Test run folders (test/&lt;run&gt;) and dry-run folders (dry-run/&lt;run&gt;) are.</param>
     /// <param name="grantedFolders">A member's folders outside its data folder that its runs may write (the team's folder grants); none by default.</param>
+    /// <param name="teamDocuments">A team's Documents folder by team name, where its runs' docs:/ paths go; none by default (a docs:/ path fails its step).</param>
     public WorkflowRunner(WorkflowRunStore store, WorkflowLibrary library, IWorkflowActionsProvider actions, IWorkflowRunEngine engine, string dataRoot,
-        Func<long, IReadOnlyList<string>>? grantedFolders = null, Action<string>? log = null, TimeProvider? clock = null)
+        Func<long, IReadOnlyList<string>>? grantedFolders = null, Action<string>? log = null, TimeProvider? clock = null,
+        Func<string, string?>? teamDocuments = null)
     {
+        _teamDocuments = teamDocuments ?? (_ => null);
         _store = store;
         _library = library;
         _actions = actions;
@@ -180,6 +184,7 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
             Schemas = _library,
             DataFolder = folder,
             AllowedFolders = [],
+            TeamDocumentsFolder = TeamDocuments(team),
             DryRun = test.DryRun,
             DryRunFolder = test.DryRun ? DryRunFolder(runId) : null,
             DryTells = true, // a Test run never sends a tell
@@ -407,6 +412,7 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
             Schemas = _library,
             DataFolder = dataFolder,
             AllowedFolders = _grantedFolders(memberId).Select(path => new WorkflowFolderGrant(path, CanWrite: true)).ToList(),
+            TeamDocumentsFolder = TeamDocuments(member.Team),
             DryRun = false,
             DryRunFolder = null,
             Timeout = timeout,
@@ -597,6 +603,17 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
     }
 
     private WorkflowRunOutcome Outcome(long runId) => new(_store.Run(runId)!, _store.Steps(runId), _store.LogLines(runId));
+
+    /// <summary>The team's Documents folder for docs:/ paths; null (a docs:/ step fails) when there is none or it cannot be had.</summary>
+    private string? TeamDocuments(string team)
+    {
+        try { return _teamDocuments(team); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            _log?.Invoke($"no Documents folder for team {team}: {e.Message}");
+            return null;
+        }
+    }
 
     private string DryRunFolder(long runId) => Path.Combine(_dataRoot, "dry-run", runId.ToString(System.Globalization.CultureInfo.InvariantCulture));
 

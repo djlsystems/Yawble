@@ -93,6 +93,12 @@ public sealed record WorkflowRunRequest
 
     public IReadOnlyList<WorkflowFolderGrant> AllowedFolders { get; init; } = [];
 
+    /// <summary>
+    /// The run's team's Documents folder (what agents see as YAWBLE_TEAM_DOCS): <c>docs:/...</c> paths are under it, writable.
+    /// Null: a docs:/ path fails its step.
+    /// </summary>
+    public string? TeamDocumentsFolder { get; init; }
+
     public bool DryRun { get; init; }
 
     /// <summary>Where a dry run's file writes go; defaults to <c>dry-run</c> under the data folder.</summary>

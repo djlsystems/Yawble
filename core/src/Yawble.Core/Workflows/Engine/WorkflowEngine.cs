@@ -76,7 +76,7 @@ public static class WorkflowEngine
             _began = began;
             _doc = req.Document;
             _files = new WorkflowFiles(req.DataFolder, req.AllowedFolders,
-                req.DryRun ? req.DryRunFolder ?? Path.Combine(req.DataFolder, "dry-run") : null);
+                req.DryRun ? req.DryRunFolder ?? Path.Combine(req.DataFolder, "dry-run") : null, req.TeamDocumentsFolder);
         }
 
         private WorkflowSchema? Find(string name) => BuiltInSchemas.Find(name) ?? _req.Schemas?.Find(name);

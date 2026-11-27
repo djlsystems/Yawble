@@ -83,6 +83,8 @@ public static class WorkflowCheckCodes
     public const string UnknownArgument = "unknown-argument";
     /// <summary>A step's option is out of range or does not go with the others (a tell's timeout over 7 days, a reply without wait).</summary>
     public const string BadValue = "bad-value";
+    /// <summary>A file step's literal "docs:" path is malformed ("docs:" without "/", "..", an absolute path after docs:/, the folder itself for a file).</summary>
+    public const string BadDocsPath = "bad-docs-path";
 }
 
 /// <summary>
@@ -386,32 +388,32 @@ public static class WorkflowChecker
                     break;
                 }
                 case WorkflowStepTypes.FileWriteAllText or WorkflowStepTypes.FileAppendLine:
-                    Text(step, "path", ctx);
+                    FilePath(step, "path", ctx, needsFile: true);
                     Text(step, "text", ctx);
                     break;
                 case WorkflowStepTypes.FileReadAllText:
-                    Text(step, "path", ctx);
+                    FilePath(step, "path", ctx, needsFile: true);
                     Into(step, WorkflowType.String);
                     break;
                 case WorkflowStepTypes.FileReadLines:
-                    Text(step, "path", ctx);
+                    FilePath(step, "path", ctx, needsFile: true);
                     Into(step, WorkflowType.ListOf(WorkflowType.String));
                     break;
                 case WorkflowStepTypes.FileExists:
-                    Text(step, "path", ctx);
+                    FilePath(step, "path", ctx, needsFile: true);
                     Into(step, WorkflowType.Bool);
                     break;
                 case WorkflowStepTypes.FileDelete:
-                    Text(step, "path", ctx);
+                    FilePath(step, "path", ctx, needsFile: true);
                     break;
                 case WorkflowStepTypes.FileMove or WorkflowStepTypes.FileCopy:
-                    Text(step, "path", ctx);
-                    Text(step, "to", ctx);
+                    FilePath(step, "path", ctx, needsFile: true);
+                    FilePath(step, "to", ctx, needsFile: false);
                     Flag(step, "overwrite", ctx);
                     Into(step, WorkflowType.String);
                     break;
                 case WorkflowStepTypes.FileList:
-                    Text(step, "path", ctx);
+                    FilePath(step, "path", ctx, needsFile: false);
                     if (step.Has("pattern")) Text(step, "pattern", ctx);
                     Flag(step, "recursive", ctx);
                     Into(step, FileListType);
@@ -559,6 +561,28 @@ public static class WorkflowChecker
             var type = ValueType(step[property], ctx);
             if (type.Kind is WorkflowTypeKind.List or WorkflowTypeKind.Object)
                 Issue(step.Id, WorkflowCheckCodes.TypeMismatch, $"'{property}' is {type}, not text");
+        }
+
+        /// <summary>
+        /// A file step's path: text, and a "docs:" path written out in full (no {expression}) must be well formed (docs:/ and then a
+        /// path inside the team's Documents folder, no "..", not absolute; a step that needs a file cannot name the folder itself).
+        /// A template that starts with literal "docs:" text is checked as far as the prefix goes.
+        /// </summary>
+        private void FilePath(WorkflowStep step, string property, ImmutableList<string> ctx, bool needsFile)
+        {
+            Text(step, property, ctx);
+            if (step[property] is not JsonValue v || v.GetValueKind() != JsonValueKind.String) return;
+            WorkflowTemplate template;
+            try { template = WorkflowTemplate.Parse(v.GetValue<string>()); }
+            catch (WorkflowExpressionException) { return; } // Text has reported it
+            var literal = string.Concat(template.Parts.TakeWhile(p => p is string).Cast<string>());
+            if (!Engine.WorkflowFiles.IsDocsPath(literal)) return;
+            string? problem;
+            if (!template.HasExpressions) problem = Engine.WorkflowFiles.DocsPathProblem(literal, needsFile);
+            else if (!literal.StartsWith(Engine.WorkflowFiles.DocsPrefix, StringComparison.OrdinalIgnoreCase))
+                problem = Engine.WorkflowFiles.DocsPathProblem(literal, needsFile: false);
+            else problem = Engine.WorkflowFiles.DocsPathProblem(literal[..(literal.LastIndexOfAny(['/', '\\']) + 1)], needsFile: false);
+            if (problem is not null) Issue(step.Id, WorkflowCheckCodes.BadDocsPath, $"{step.Type}'s '{property}': {problem}");
         }
 
         /// <summary>An optional true/false option (file.move's overwrite, file.list's recursive): a bool, or an expression that can be one.</summary>

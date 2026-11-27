@@ -4,29 +4,63 @@ namespace Yawble.Core.Workflows.Engine;
 /// Where a file step's path points. A relative path is under the member's data folder; an absolute one must be inside
 /// the data folder or a folder the team granted (a write needs a writable grant). In a dry run a write goes to the
 /// dry-run folder instead, and a read sees what the dry run wrote before it falls back to the real file.
+/// A path that starts <c>docs:/</c> is under the team's Documents folder (writable), when the run has one.
 /// </summary>
 internal sealed class WorkflowFiles
 {
     private static readonly StringComparison PathComparison =
         OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
+    /// <summary>The prefix of a path in the team's Documents folder: <c>docs:/smoke/smokesessions.json</c>.</summary>
+    public const string DocsPrefix = "docs:/";
+
+    /// <summary>The root index of the team's Documents folder (-1 is the data folder, 0 and up the grants).</summary>
+    private const int DocsRoot = -2;
+
+    /// <summary>Where a dry run keeps its copies of the Documents folder's files, under the dry-run folder.</summary>
+    private const string DryDocsFolder = "team-docs";
+
     private readonly string _data;
     private readonly IReadOnlyList<WorkflowFolderGrant> _grants;
     private readonly string? _dry;
+    private readonly string? _docs;
 
-    public WorkflowFiles(string dataFolder, IReadOnlyList<WorkflowFolderGrant> grants, string? dryRunFolder)
+    public WorkflowFiles(string dataFolder, IReadOnlyList<WorkflowFolderGrant> grants, string? dryRunFolder, string? teamDocuments = null)
     {
         _data = Path.GetFullPath(dataFolder);
         _grants = grants.Select(g => g with { Path = Path.GetFullPath(g.Path) }).ToList();
         _dry = dryRunFolder is null ? null : Path.GetFullPath(dryRunFolder);
+        _docs = string.IsNullOrWhiteSpace(teamDocuments) ? null : Path.GetFullPath(teamDocuments);
     }
 
     public bool DryRun => _dry is not null;
 
-    /// <summary>The real file a path names (null root: the data folder; otherwise the grant's index).</summary>
+    /// <summary>Whether a path names the team's Documents folder (it starts "docs:", in any case), well formed or not.</summary>
+    public static bool IsDocsPath(string? path) => path is not null && path.StartsWith("docs:", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// What is wrong with a "docs:" path, or null when it is well formed: it must start "docs:/", the rest is a path inside the
+    /// folder (no "..", no drive, not absolute), and a step that needs a file cannot name the folder itself.
+    /// </summary>
+    public static string? DocsPathProblem(string path, bool needsFile)
+    {
+        if (!path.StartsWith(DocsPrefix, StringComparison.OrdinalIgnoreCase))
+            return $"'{path}' is not a Documents path: write docs:/ and then the path inside the team's Documents folder (e.g. docs:/smoke/smokesessions.json)";
+        var rest = path[DocsPrefix.Length..];
+        if (rest.StartsWith('/') || rest.StartsWith('\\') || rest.Contains(':') || Path.IsPathRooted(rest))
+            return $"'{path}': after docs:/ comes a path inside the team's Documents folder, not an absolute path";
+        if (rest.Split('/', '\\').Any(s => s == ".."))
+            return $"'{path}': a Documents path cannot go up with '..'";
+        if (needsFile && rest.Trim('/', '\\').Length == 0)
+            return $"'{path}' is the Documents folder itself, not a file (e.g. docs:/smoke/smokesessions.json)";
+        return null;
+    }
+
+    /// <summary>The real file a path names (root -1: the data folder; -2: the team's Documents folder; otherwise the grant's index).</summary>
     public (string Full, int Root, string Relative) Locate(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) throw new WorkflowStepException("the path is empty");
+        if (IsDocsPath(path)) return LocateDocs(path);
         string full;
         try { full = Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(_data, path)); }
         catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
@@ -34,9 +68,25 @@ internal sealed class WorkflowFiles
             throw new WorkflowStepException($"'{path}' is not a valid path: {e.Message}");
         }
         if (Inside(full, _data, out var rel)) return (full, -1, rel);
+        if (_docs is not null && Inside(full, _docs, out rel)) return (full, DocsRoot, rel);
         for (var i = 0; i < _grants.Count; i++)
             if (Inside(full, _grants[i].Path, out rel)) return (full, i, rel);
         throw new WorkflowStepException($"'{path}' is outside the member's data folder and the team's folder grants");
+    }
+
+    private (string Full, int Root, string Relative) LocateDocs(string path)
+    {
+        if (DocsPathProblem(path, needsFile: false) is { } problem) throw new WorkflowStepException(problem);
+        if (_docs is null)
+            throw new WorkflowStepException($"'{path}' is in the team's Documents folder, and this run has none (docs:/ paths work in a team's workflow members)");
+        string full;
+        try { full = Path.GetFullPath(Path.Combine(_docs, path[DocsPrefix.Length..])); }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new WorkflowStepException($"'{path}' is not a valid path: {e.Message}");
+        }
+        if (!Inside(full, _docs, out var rel)) throw new WorkflowStepException($"'{path}' leaves the team's Documents folder");
+        return (full, DocsRoot, rel);
     }
 
     /// <summary>The file to read: in a dry run, the copy the dry run wrote when there is one.</summary>
@@ -133,7 +183,8 @@ internal sealed class WorkflowFiles
             {
                 var inner = Path.GetRelativePath(dryFolder!, f.FullName);
                 // The dry run keeps granted folders' copies under granted-N in its root: they are not the data folder's files.
-                if (root < 0 && rel.Length == 0 && inner.StartsWith("granted-", StringComparison.Ordinal) && inner.Contains(Path.DirectorySeparatorChar)) continue;
+                if (root == -1 && rel.Length == 0 && inner.Contains(Path.DirectorySeparatorChar)
+                    && (inner.StartsWith("granted-", StringComparison.Ordinal) || inner.StartsWith(DryDocsFolder + Path.DirectorySeparatorChar, StringComparison.Ordinal))) continue;
                 if (f.Name.EndsWith(TombstoneSuffix, StringComparison.Ordinal)) found.Remove(Path.Combine(full, inner[..^TombstoneSuffix.Length]));
                 else if (Matches(f.Name)) found[Path.Combine(full, inner)] = f;
             }
@@ -202,7 +253,7 @@ internal sealed class WorkflowFiles
     private static bool Tombstone(string copy) => File.Exists(copy + TombstoneSuffix);
 
     private string DryPath(int root, string rel) =>
-        Path.Combine(_dry!, root < 0 ? "" : $"granted-{root + 1}", rel);
+        Path.Combine(_dry!, root == DocsRoot ? DryDocsFolder : root < 0 ? "" : $"granted-{root + 1}", rel);
 
     private static bool Inside(string full, string root, out string relative)
     {

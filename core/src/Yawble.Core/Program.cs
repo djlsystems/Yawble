@@ -179,7 +179,9 @@ Yawble.Core.Workflows.Running.WorkflowFolders.MoveOldFolder(options.DataDir!);
 workflowRunner = new Yawble.Core.Workflows.Running.WorkflowRunner(workflowRuns, workflowLibrary, workflowActions,
     Yawble.Core.Workflows.Running.SeamWorkflowEngine.Instance, Path.Combine(options.DataDir!, "workflows"),
     grantedFolders: memberId => policies.GetMember(memberId).Loosen.Filesystem?.Readwrite ?? [],
-    log: line => Console.Error.WriteLine($"workflows: {line}"))
+    log: line => Console.Error.WriteLine($"workflows: {line}"),
+    // docs:/ paths in a workflow's file steps are in its team's Documents folder (what agents see as YAWBLE_TEAM_DOCS).
+    teamDocuments: team => bus.Repos is { } docsRepos ? new Yawble.Core.Teams.TeamDocuments(docsRepos).Root(team) : null)
 {
     Decisions = new Yawble.Core.Workflows.Running.BusWorkflowDecisions(bus),
 };

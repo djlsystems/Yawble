@@ -135,6 +135,13 @@ top level). Every step must be reachable from `start`; a loop body must end with
 
 - File paths: relative ones are in the member's data folder; an absolute path must be in a folder the team granted
   (writing needs a writable grant).
+- `docs:/` paths are in the team's Documents folder (the one the person reads in Documents, and agents see as
+  `YAWBLE_TEAM_DOCS`): `docs:/smoke/smokesessions.json` is `smoke\smokesessions.json` there. The team's workflow
+  members can read and write it with every `file.*` step, at either end of a move or copy, and `file.list` can list
+  `docs:/` or a folder in it. After `docs:/` comes a path inside the folder: no `..`, no drive or absolute path; one that
+  leaves the folder fails its step. `workflow_check` reports a written-out path that breaks these rules (`docs:`
+  without `/`, `docs:/../x`, `docs:/C:/x`, `docs:/` alone where a file is needed) as `bad-docs-path`. A dry run writes
+  the dry run's own copy, and its log names the real file: `would write <Documents>\smoke\smokesessions.json (dry run: ...)`.
 - `file.move` and `file.copy` need a writable folder at both ends. A `to` that ends in `/` or names a folder that exists
   means the same name inside it (the folder is made when missing). When the target is there and `overwrite` is not
   `true`, the file takes the first free name: `IMG_0001 (1).jpg`, `IMG_0001 (2).jpg`... A move to another drive copies,
@@ -353,6 +360,20 @@ integrations (turned on for its team) and sets `recipients` and `fromNumber`; a 
 The list is not recursive, so the photos already in `SmokeSessions` are not listed again. A photo whose name is already
 there keeps both: the new one becomes `name (1).jpg`. The team grants the folder writable; a dry run lists the folder,
 logs each `would move` and moves nothing.
+
+## Example: keeps a list in the team's Documents
+
+Steps that, after the photos are listed, write their names to the team's Documents, where the person and the agents
+read them:
+
+```json
+    { "id": "names", "type": "code", "inputs": { "photos": "{vars.photos}" },
+      "code": "return JSON.stringify(inputs.photos.map(p => ({ name: p.name, size: p.size })), null, 2);",
+      "returns": "string", "into": "json", "next": "save" },
+    { "id": "save", "type": "file.writeAllText", "path": "docs:/smoke/smokesessions.json", "text": "{vars.json}", "next": "done" }
+```
+
+The file is `smoke\smokesessions.json` in Documents (the folder `smoke` is made when missing); no grant is needed.
 
 ## What to tell the person
 
