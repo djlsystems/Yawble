@@ -127,7 +127,7 @@ public sealed partial class BusEngine
     /// <summary>The deleted teams whose folders are being removed now, by name. Under the gate.</summary>
     private readonly HashSet<string> _teamFoldersGoing = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Removes a deleted team's folder (tests set a fake that waits).</summary>
+    /// <summary>Removes a folder and everything in it: a deleted team's folder, a reset member's working copy (tests set a fake that waits).</summary>
     internal Action<string> RemoveFolder { get; set; } = DeleteTree;
 
     /// <summary>Under the gate: refuses a new team the name of one whose folder is still being removed.</summary>
@@ -229,6 +229,7 @@ public sealed partial class BusEngine
             var what = new List<string>();
             if (_active.Values.Any(a => a.Context.Member.Id == m.Id)) what.Add("is running");
             if (HasSession(m.Id)) what.Add("has a terminal session");
+            if (_membersResetting.Contains(m.Id)) what.Add("is being reset");
             var waiting = unstarted.Count(p => string.Equals(p.Subscriber, m.Qualified, StringComparison.OrdinalIgnoreCase));
             if (waiting > 0) what.Add($"has {waiting} instruction{(waiting == 1 ? "" : "s")} waiting");
             if (what.Count > 0) working.Add($"{m.Name} {string.Join(" and ", what)}");

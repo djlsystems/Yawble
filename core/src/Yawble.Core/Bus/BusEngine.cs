@@ -692,7 +692,8 @@ public sealed partial class BusEngine : IAsyncDisposable
         EnqueueEligible();
         var limit = _options.MaxConcurrentAgents();
         // Every sandbox holds a slot: member runs, Manager runs and interactive sessions.
-        foreach (var entry in RunScheduler.Admit(SlotsInUse, limit, _store.Queue()))
+        // A member whose folders a reset is clearing keeps its place in the queue until they are cleared.
+        foreach (var entry in RunScheduler.Admit(SlotsInUse, limit, [.. _store.Queue().Where(q => !_membersResetting.Contains(q.MemberId))]))
         {
             if (entry.Kind == QueueKinds.Interactive) AdmitSession(entry);
             else Admit(entry);
@@ -717,6 +718,7 @@ public sealed partial class BusEngine : IAsyncDisposable
             if (Held(member, held)) continue; // a paused or archived team's work waits where it is
             if (_active.Values.Any(a => a.Context.Member.Id == member.Id)) continue;
             if (HasSession(member.Id)) continue; // its instructions wait while a session is open or queued
+            if (_membersResetting.Contains(member.Id)) continue; // and while a reset clears its folders
             if (_notStartedUntil.TryGetValue(member.Id, out var until))
             {
                 if (DateTime.UtcNow < until) continue; // a run that could not start waits a moment before it goes again
