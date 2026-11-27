@@ -129,6 +129,10 @@ native library.
 - **Policy.** A global policy plus a per-member override. An override only tightens: hosts are intersected, timeouts
   and caps take the minimum, denials are a union, grants must lie inside the grantable roots. Only a separate
   **loosen** block widens, and saving it needs a confirmation that matches the exact list of what it loosens.
+  Two per-team lists are applied to every member of the team as the loosen block is: the team's network allow list
+  (`team_network_allows`) and the team's folder list (`team_folders`, read-only or read-write folders outside the
+  members' own; [folder-asks.md](folder-asks.md)). Each entry is checked against every member before it is written,
+  and a member hired later has both lists from its first run. A denial still wins over a team folder.
 - **Floor rules** nobody can loosen: no model-vendor API or sign-in host, no `*.yawble.internal`, no IP literals, no
   wildcard other than one domain allow (below), no grant that equals, contains or lies inside an implicit denial or the
   app folder.

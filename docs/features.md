@@ -55,7 +55,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   role's job.
 - **Member settings** has General (CLI, model, credential, instructions) and Policy (see
   [Sandbox and policy](#sandbox-and-policy)).
-- Team **Settings** has the tabs General, Members, Repositories, Environment and Integrations:
+- Team **Settings** has the tabs General, Hiring, Pause and archive, Repositories, Environment, Network, Folders,
+  Integrations, Reset and Delete:
   - **Pause** starts no new runs; a running one finishes; queued work and triggers wait. **Resume** queues it again,
     oldest first.
   - **Archive** keeps a quiet team whole and paused. **Unarchive** brings it back paused.
@@ -332,6 +333,30 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   a removed host is gone from the team's next runs (a member's own loosen block keeps what it has). Adding and removing
   are in the audit log. A host in a member's own loosen block stays there until it is removed from that member's
   policy.
+- A team's **folder list** holds folders on this computer, outside the team's own folders, that every member of the
+  team may use: read-only (read the files) or read-write (change them too). Agents and workflow members both get
+  them, from their next run, and so do members hired later; no other team does.
+  - The team's settings show it on their **Folders** tab: each folder with read-only or read-write, who added it and
+    when. **Add a folder** takes a path (**Browse…** opens the folder picker in the desktop window; a remote view types
+    the path) and read-only or read-write, then says exactly what it gives and waits for **Give the team this
+    folder**. **Remove** asks first; a removed folder is gone from the team's next runs (a member that has it on its
+    own Policy tab keeps it). Adding the same folder with the other access changes its access.
+  - Every folder is checked for every member before it is added. Folders that hold secrets or keys, Yawble's own data,
+    another team's repositories or documents, another member's folder, system folders, a drive root and your user
+    profile folder are refused, with the reason shown; so is a folder your policy denies. Nothing is added then.
+  - A deny still wins: a folder under a path the global policy or a member's override denies is not given to that
+    member, and the team still runs.
+  - A member's card says **loosened** for a team folder, and the member's **Policy** tab lists it as coming from the
+    team. One member's own folders are on that Policy tab.
+  - Only you add or remove a folder, in the window or as a Cloud Link viewer with full access; a Visitor sees the
+    list. An agent, the Concierge and a paired program cannot. Adding and removing are in the audit log.
+- **Folder requests.** An agent that needs a folder outside its own asks for it (read-only or read-write, with its
+  reason); the item waits in **Needs you**. Folders that may never be granted are refused at once and you are not
+  asked. On the item you pick whom an approval covers: **Only <member>** (the default), **Everyone on <team>** (the
+  folder goes on the team's folder list) or **All teams** (it goes into the global policy, for every agent of every
+  team). A line says exactly what the approval gives. **Approve** grants what was asked; a read-write request also
+  offers **Approve read-only**; never more than was asked. **Deny** closes it and the agent is told. An approval
+  applies from the next run, and the team's Manager is told to retry.
 - **Allow localhost (macOS)** is a per-team setting on the team's **Network** tab, off by default. Its warning reads:
   "Agents on this team can open local ports and connect to any service listening on this Mac's localhost (your dev
   servers, local databases). Needed for classic `dotnet test` (VSTest) and some other test runners. While it is on, a
@@ -421,6 +446,10 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   selected and offers every goal and Unassigned. A filter that hides a ticked row unticks it.
 - A goal's time is the calendar time its deliverables cover together, each from its first message to its end (or now
   while it is open): two deliverables worked side by side for an hour count one hour.
+- The Concierge can ask for a folder for you: tell it which team (and member or workflow) needs which folder, and it
+  raises a folder request in **Needs you** ("The Concierge asks, for <member>, ..."). You approve it there for that
+  member, the whole team or all teams; the Concierge cannot approve it, add a team folder or remove one. It can tell
+  you which folders a team has and which requests are waiting.
 - The Concierge can list goals, create and rename them, and assign deliverables to them when you ask (it may propose
   goal names from what the teams work on). It deletes a goal only after your yes. Paired companion apps have the same
   tools: listing at the read level, saving and assigning at the act level, deleting at the destructive level (you
@@ -430,8 +459,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 
 - **Kanban board**: four lanes, **To Do**, **In Progress**, **Needs You** and **Done**. Cards come from the teams' work and
   move with its status. You can move a card, comment, or ask the Manager about it. **Needs You** also lists the
-  Connections to reconnect, the network requests and the tool requests waiting for you (see Sandbox and policy), with
-  their buttons. The card a member is working on says **Heavy work** while that member holds the heavy-work lease, and
+  Connections to reconnect, the network requests, the tool requests and the folder requests waiting for you (see
+  Sandbox and policy), with their buttons. The card a member is working on says **Heavy work** while that member holds the heavy-work lease, and
   **Waiting for heavy work** (with its place in the queue) while it waits; the tooltip says what for.
 - **Discuss with the Concierge** sits on a member's question, a network request, a tool request, an open Kanban card,
   the team page's branch sync notice, the Git notice and the not-ready-to-run-agents notice:
