@@ -153,6 +153,8 @@ member's loosen block's folders (`PolicyMerger.Merge`, `teamFolders`), for every
   entry of the global policy or of an override still narrows it;
 - a workflow member's file steps get the list too: a read-write folder to read and write, a read-only one to read.
   The same holds for the folders of the workflow member's own loosen block.
+- a Test run of a workflow for the team gets the list too. It has no member, so it gets no member's own folders. A
+  dry Test run reads the real folder and writes its changes to the run's dry-run folder instead.
 
 Adding a folder (`PolicyStore.AddTeamFolder`) checks it for **every** current member before one write: the path is
 absolute; the refusals of `request_folder` above apply (never another team's folders, secrets, Yawble's own data, a

@@ -290,4 +290,25 @@ public sealed class TeamFolderTests : IDisposable
         _store.SaveGlobal(global with { Filesystem = global.Filesystem with { Denied = [.. global.Filesystem.Denied, @"Z:\reference"] } });
         Assert.DoesNotContain(_store.WorkflowFolders(_dev1, paths), f => f.Path == @"Z:\reference");
     }
+
+    [Fact]
+    public void ATestRunsFolders_AreTheTeamsFolderList_AndNoMembersOwn()
+    {
+        var paths = new PolicyPaths(TargetOs.Windows, @"C:\Users\alice");
+        Assert.Empty(_store.TeamWorkflowFolders(_alpha, paths));
+
+        var own = new PolicyPatch(Filesystem: new FilesystemPatch(Readwrite: [@"Z:\own-write"]));
+        _store.SaveLoosen(_dev1, own, Layout(_dev1), _store.PreviewLoosen(_dev1, own, Layout(_dev1)));
+        Add(Sessions, "readwrite");
+        Add(@"Z:\reference", "read");
+
+        var folders = _store.TeamWorkflowFolders(_alpha, paths);
+        Assert.Equal(2, folders.Count);
+        Assert.Contains((Sessions, true), folders);
+        Assert.Contains((@"Z:\reference", false), folders);
+
+        var global = _store.GetGlobal();
+        _store.SaveGlobal(global with { Filesystem = global.Filesystem with { Denied = [.. global.Filesystem.Denied, @"Z:\reference"] } });
+        Assert.Equal([(Sessions, true)], _store.TeamWorkflowFolders(_alpha, paths));
+    }
 }

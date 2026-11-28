@@ -416,6 +416,20 @@ public class WorkflowRunnerTests
     // ------------------------------------------------------------------ Test run
 
     [Fact]
+    public async Task ATestRunGetsItsTeamsFolderList()
+    {
+        await using var w = await WorldAsync(start: false);
+        var asked = new List<long>();
+        w.Runner = new WorkflowRunner(w.Store, w.Library, w.Actions, w.Engine, Path.Combine(w.Db.Dir, "workflows"),
+            grantedFolders: _ => [new Yawble.Core.Workflows.Engine.WorkflowFolderGrant(@"Z:\a-members-own", CanWrite: true)],
+            teamFolders: id => { asked.Add(id); return [new Yawble.Core.Workflows.Engine.WorkflowFolderGrant(@"Z:\photos", CanWrite: true)]; });
+        var o = await w.Runner.TestRunAsync(new WorkflowTestRun(w.WorkflowId, null, null, null, null, w.TeamId), Ct);
+        Assert.True(o.Succeeded);
+        Assert.Equal([w.TeamId], asked);
+        Assert.Equal([new Yawble.Core.Workflows.Engine.WorkflowFolderGrant(@"Z:\photos", true)], w.Engine.Requests.Single().AllowedFolders);
+    }
+
+    [Fact]
     public async Task ATestRunIsADryRunByDefault_RecordedAsATest_WithNoSavedVariables()
     {
         await using var w = await WorldAsync(start: false);

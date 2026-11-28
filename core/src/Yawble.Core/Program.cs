@@ -192,6 +192,9 @@ workflowRunner = new Yawble.Core.Workflows.Running.WorkflowRunner(workflowRuns, 
     grantedFolders: memberId => [.. policies.WorkflowFolders(memberId, new Yawble.Core.Policy.PolicyPaths(Yawble.Core.Policy.TargetOsExtensions.Host,
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)))
         .Select(g => new Yawble.Core.Workflows.Engine.WorkflowFolderGrant(g.Path, g.CanWrite))],
+    teamFolders: teamId => [.. policies.TeamWorkflowFolders(teamId, new Yawble.Core.Policy.PolicyPaths(Yawble.Core.Policy.TargetOsExtensions.Host,
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)))
+        .Select(g => new Yawble.Core.Workflows.Engine.WorkflowFolderGrant(g.Path, g.CanWrite))],
     log: line => Console.Error.WriteLine($"workflows: {line}"),
     // docs:/ paths in a workflow's file steps are in its team's Documents folder (what agents see as YAWBLE_TEAM_DOCS).
     teamDocuments: team => bus.Repos is { } docsRepos ? new Yawble.Core.Teams.TeamDocuments(docsRepos).Root(team) : null)

@@ -37,6 +37,7 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
     private readonly IWorkflowRunEngine _engine;
     private readonly string _dataRoot;
     private readonly Func<long, IReadOnlyList<WorkflowFolderGrant>> _grantedFolders;
+    private readonly Func<long, IReadOnlyList<WorkflowFolderGrant>> _teamFolders;
     private readonly Func<string, string?> _teamDocuments;
     private readonly Action<string>? _log;
     private readonly TimeProvider _clock;
@@ -47,10 +48,11 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
 
     /// <param name="dataRoot">Where members' data folders (members/&lt;id&gt;), Test run folders (test/&lt;run&gt;) and dry-run folders (dry-run/&lt;run&gt;) are.</param>
     /// <param name="grantedFolders">A member's folders outside its data folder that its runs may read, and write where the grant says so (its own grants and its team's folder list); none by default.</param>
+    /// <param name="teamFolders">A team's folder list by team id, which a Test run for that team may read, and write where the grant says so; none by default.</param>
     /// <param name="teamDocuments">A team's Documents folder by team name, where its runs' docs:/ paths go; none by default (a docs:/ path fails its step).</param>
     public WorkflowRunner(WorkflowRunStore store, WorkflowLibrary library, IWorkflowActionsProvider actions, IWorkflowRunEngine engine, string dataRoot,
         Func<long, IReadOnlyList<WorkflowFolderGrant>>? grantedFolders = null, Action<string>? log = null, TimeProvider? clock = null,
-        Func<string, string?>? teamDocuments = null)
+        Func<string, string?>? teamDocuments = null, Func<long, IReadOnlyList<WorkflowFolderGrant>>? teamFolders = null)
     {
         _teamDocuments = teamDocuments ?? (_ => null);
         _store = store;
@@ -59,6 +61,7 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
         _engine = engine;
         _dataRoot = dataRoot;
         _grantedFolders = grantedFolders ?? (_ => []);
+        _teamFolders = teamFolders ?? (_ => []);
         _log = log;
         _clock = clock ?? TimeProvider.System;
     }
@@ -201,7 +204,7 @@ public sealed class WorkflowRunner : IWorkflowMemberHost, Launch.IWorkflowMember
             Catalog = Yawble.Core.Workflows.Actions.WorkflowActionKinds.CatalogFor(actions, _actions), // the team's: a dry run suppresses changing actions only with it
             Schemas = _library,
             DataFolder = folder,
-            AllowedFolders = [],
+            AllowedFolders = [.. _teamFolders(test.TeamId)], // a Test run has no member: it gets the team's folder list
             TeamDocumentsFolder = TeamDocuments(team),
             DryRun = test.DryRun,
             DryRunFolder = test.DryRun ? DryRunFolder(runId) : null,

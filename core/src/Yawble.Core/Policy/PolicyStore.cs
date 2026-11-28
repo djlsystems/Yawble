@@ -546,10 +546,22 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
     public IReadOnlyList<(string Path, bool CanWrite)> WorkflowFolders(long memberId, PolicyPaths paths)
     {
         var loosen = GetMember(memberId).Loosen.Filesystem;
-        var denied = GetGlobal().Filesystem.Denied.Select(paths.Resolve).OfType<string>().ToList();
         var all = (loosen?.Readwrite ?? []).Select(p => (Path: p, CanWrite: true))
             .Concat((loosen?.Readonly ?? []).Select(p => (Path: p, CanWrite: false)))
             .Concat(TeamFoldersOfMember(memberId).Select(f => (f.Path, CanWrite: f.Write)));
+        return Usable(all, paths);
+    }
+
+    /// <summary>
+    /// The folders a Test run of a workflow for a team may use: the team's folder list, with the same rules as
+    /// <see cref="WorkflowFolders"/>. A Test run has no member, so no member's own folders are in it.
+    /// </summary>
+    public IReadOnlyList<(string Path, bool CanWrite)> TeamWorkflowFolders(long teamId, PolicyPaths paths) =>
+        Usable(TeamFolders(teamId).Select(f => (f.Grant.Path, CanWrite: f.Grant.Write)), paths);
+
+    private IReadOnlyList<(string Path, bool CanWrite)> Usable(IEnumerable<(string Path, bool CanWrite)> all, PolicyPaths paths)
+    {
+        var denied = GetGlobal().Filesystem.Denied.Select(paths.Resolve).OfType<string>().ToList();
         var list = new List<(string Path, bool CanWrite)>();
         foreach (var (raw, canWrite) in all)
         {
