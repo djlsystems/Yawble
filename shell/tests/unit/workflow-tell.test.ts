@@ -490,4 +490,12 @@ describe('the test run of a workflow that tells', () => {
     await flushPromises();
     expect(plain.find('[data-test=test-tell-replies]').exists()).toBe(false);
   });
+
+  it('a float setting takes a fraction and an int setting whole numbers', async () => {
+    const withSettings = { ...doc, settings: [{ name: 'threshold', type: 'float', default: 0.6 }, { name: 'perRun', type: 'int', default: 5 }] } as WorkflowDoc;
+    const w = mount(WorkflowTestRun, { props: { api: testApi().api, workflow: { id: 5, key: 'refund-triage' }, doc: withSettings, teams } });
+    await flushPromises();
+    const steps = w.findAll('input[type=number]').map((i) => i.attributes('step'));
+    expect(steps).toEqual(['any', '1']);
+  });
 });

@@ -130,7 +130,7 @@ async function run() {
         <span>{{ st.label || st.name }} <code class="muted">{{ st.type }}</code></span>
         <textarea v-if="st.type.startsWith('list<')" v-model="values[st.name]" rows="3" placeholder="one per line" />
         <select v-else-if="st.type === 'bool'" v-model="values[st.name]"><option value="true">true</option><option value="false">false</option></select>
-        <input v-else v-model="values[st.name]" :type="st.type === 'int' || st.type === 'float' ? 'number' : 'text'" :placeholder="'default' in st ? String(st.default) : ''" />
+        <input v-else v-model="values[st.name]" :type="st.type === 'int' || st.type === 'float' ? 'number' : 'text'" :step="st.type === 'float' ? 'any' : st.type === 'int' ? '1' : undefined" :placeholder="'default' in st ? String(st.default) : ''" />
       </label>
     </fieldset>
 
